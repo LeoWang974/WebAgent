@@ -1,25 +1,20 @@
-import { ArtifactPanel } from "../artifacts";
-import { ChatHeader, MessageList } from "../chat";
-import { ChatComposer } from "../composer";
+import type { ReactNode } from "react";
 import { Sidebar } from "./sidebar";
 import { Topbar } from "./topbar";
+import { WorkspaceHydrator } from "./workspace-hydrator";
 
-export function MainLayout() {
+interface MainLayoutProps {
+  children: ReactNode;
+}
+
+export function MainLayout({ children }: MainLayoutProps) {
   return (
     <div className="flex h-screen overflow-hidden bg-[#f7f7f5] text-foreground">
+      <WorkspaceHydrator />
       <Sidebar />
       <main className="flex min-w-0 flex-1 flex-col bg-background">
         <Topbar />
-        <div className="flex min-h-0 flex-1">
-          <section className="flex min-w-0 flex-1 flex-col">
-            <ChatHeader />
-            <div className="min-h-0 flex-1 overflow-hidden">
-              <MessageList />
-            </div>
-            <ChatComposer />
-          </section>
-          <ArtifactPanel />
-        </div>
+        <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
       </main>
     </div>
   );

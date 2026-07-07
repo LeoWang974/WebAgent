@@ -1,11 +1,12 @@
 "use client";
 
 import { SkillCard } from "../skills/skill-card";
-import { useChatStore } from "@/stores";
+import { useChatStore, useUiStore } from "@/stores";
 
 export function SkillShortcuts() {
   const skills = useChatStore((state) => state.skills);
   const createSession = useChatStore((state) => state.createSession);
+  const closeArtifactDrawer = useUiStore((state) => state.closeArtifactDrawer);
 
   return (
     <section className="space-y-2">
@@ -18,7 +19,10 @@ export function SkillShortcuts() {
             description={skill.version}
             key={skill.key}
             name={skill.name}
-            onClick={() => createSession(skill.key)}
+            onClick={() => {
+              closeArtifactDrawer();
+              createSession(skill.key);
+            }}
           />
         ))}
       </div>

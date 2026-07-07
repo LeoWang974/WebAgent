@@ -1,7 +1,10 @@
-"use client";
-
+import { ChatWorkspace } from "../chat";
 import { MainLayout } from "./main-layout";
 
 export function AppShell() {
-  return <MainLayout />;
+  return (
+    <MainLayout>
+      <ChatWorkspace />
+    </MainLayout>
+  );
 }

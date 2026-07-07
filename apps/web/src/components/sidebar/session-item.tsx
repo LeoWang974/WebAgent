@@ -2,6 +2,7 @@ interface SessionItemProps {
   active?: boolean;
   onClick?: () => void;
   status?: string;
+  switching?: boolean;
   title: string;
 }
 
@@ -9,6 +10,7 @@ export function SessionItem({
   active = false,
   onClick,
   status = "active",
+  switching = false,
   title,
 }: SessionItemProps) {
   return (
@@ -23,10 +25,14 @@ export function SessionItem({
       <span className="mt-0.5 flex items-center gap-1.5 text-[11px] capitalize text-muted-foreground">
         <span
           className={`size-1.5 rounded-full ${
-            status === "running" ? "bg-amber-500" : "bg-emerald-500"
+            switching
+              ? "bg-sky-500"
+              : status === "running"
+                ? "bg-amber-500"
+                : "bg-emerald-500"
           }`}
         />
-        {status}
+        {switching ? "Opening" : status}
       </span>
     </button>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, KeyboardEvent, useState } from "react";
 import { FileUploadButton } from "./file-upload-button";
 import { ModelSelector } from "./model-selector";
 import { SkillSelector } from "./skill-selector";
@@ -15,8 +15,19 @@ export function ChatComposer() {
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!content.trim()) {
+      return;
+    }
+
     sendMessage(content, skillKey);
     setContent("");
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      event.currentTarget.form?.requestSubmit();
+    }
   }
 
   return (
@@ -28,6 +39,7 @@ export function ChatComposer() {
         <textarea
           className="min-h-20 w-full resize-none bg-transparent px-3 py-2 text-sm leading-6 outline-none placeholder:text-muted-foreground"
           onChange={(event) => setContent(event.target.value)}
+          onKeyDown={handleKeyDown}
           placeholder="Ask WebAgent to analyze data, research, build slides, or generate images..."
           value={content}
         />
@@ -41,7 +53,11 @@ export function ChatComposer() {
             <SkillSelector value={skillKey} onChange={setSkillKey} />
             <ModelSelector />
           </div>
-          <button className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-[#242424] text-white hover:bg-[#111]">
+          <button
+            className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-[#242424] text-white hover:bg-[#111] disabled:cursor-not-allowed disabled:opacity-40"
+            disabled={!content.trim()}
+            type="submit"
+          >
             <ArrowUp className="size-4" />
           </button>
         </div>

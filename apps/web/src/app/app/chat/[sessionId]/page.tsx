@@ -1,6 +1,5 @@
-import { AppShell } from "@/components/layout";
+import { ChatWorkspace } from "@/components/chat";
 
 export default function ChatSessionPage() {
-  return <AppShell />;
+  return <ChatWorkspace />;
 }
-

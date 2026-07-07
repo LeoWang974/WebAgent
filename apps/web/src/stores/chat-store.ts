@@ -1,100 +1,159 @@
 "use client";
 
 import { create } from "zustand";
+import { webAgentApi } from "@/services";
 import type { Artifact, Message, Session, Skill, SkillKey } from "@/types";
-import {
-  mockArtifacts,
-  mockMessages,
-  mockSessions,
-  mockSkills,
-} from "@/services/mock-data";
 
 interface ChatState {
-  sessions: Session[];
-  messages: Message[];
-  skills: Skill[];
   artifacts: Artifact[];
   currentSessionId: string;
+  error?: string;
+  hydrated: boolean;
+  loading: boolean;
+  messages: Message[];
   selectedArtifactId?: string;
-  selectSession: (sessionId: string) => void;
+  sessions: Session[];
+  skills: Skill[];
+  switchingSessionId?: string;
+  createSession: (skillKey?: SkillKey) => Promise<void>;
+  hydrate: () => Promise<void>;
   selectArtifact: (artifactId: string) => void;
-  createSession: (skillKey?: SkillKey) => void;
-  sendMessage: (content: string, skillKey?: SkillKey) => void;
+  selectSession: (sessionId: string) => void;
+  sendMessage: (content: string, skillKey?: SkillKey) => Promise<void>;
 }
 
-function createId(prefix: string) {
-  return `${prefix}_${Date.now()}`;
+function setSwitchingState(
+  set: (partial: Partial<ChatState>) => void,
+  get: () => ChatState,
+  sessionId: string,
+) {
+  set({ switchingSessionId: sessionId });
+
+  window.setTimeout(() => {
+    if (get().switchingSessionId === sessionId) {
+      set({ switchingSessionId: undefined });
+    }
+  }, 260);
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
-  sessions: mockSessions,
-  messages: mockMessages,
-  skills: mockSkills,
-  artifacts: mockArtifacts,
-  currentSessionId: mockSessions[0]?.id ?? "",
-  selectedArtifactId: mockArtifacts[0]?.id,
+  artifacts: [],
+  currentSessionId: "",
+  error: undefined,
+  hydrated: false,
+  loading: false,
+  messages: [],
+  selectedArtifactId: undefined,
+  sessions: [],
+  skills: [],
+  switchingSessionId: undefined,
+  createSession: async (skillKey) => {
+    set({ error: undefined });
+
+    try {
+      const session = await webAgentApi.createSession({ skillKey });
+
+      set((state) => ({
+        currentSessionId: session.id,
+        selectedArtifactId: undefined,
+        sessions: [session, ...state.sessions],
+      }));
+      setSwitchingState(set, get, session.id);
+    } catch (error) {
+      set({
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to create session.",
+      });
+    }
+  },
+  hydrate: async () => {
+    if (get().hydrated || get().loading) {
+      return;
+    }
+
+    set({ error: undefined, loading: true });
+
+    try {
+      const [sessions, messages, skills, artifacts] = await Promise.all([
+        webAgentApi.listSessions(),
+        webAgentApi.listMessages(),
+        webAgentApi.listSkills(),
+        webAgentApi.listArtifacts(),
+      ]);
+      const currentSessionId = sessions[0]?.id ?? "";
+      const selectedArtifactId =
+        artifacts.find((artifact) => artifact.sessionId === currentSessionId)
+          ?.id ?? artifacts[0]?.id;
+
+      set({
+        artifacts,
+        currentSessionId,
+        hydrated: true,
+        loading: false,
+        messages,
+        selectedArtifactId,
+        sessions,
+        skills,
+      });
+    } catch (error) {
+      set({
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to load workspace data.",
+        hydrated: true,
+        loading: false,
+      });
+    }
+  },
+  selectArtifact: (artifactId) => set({ selectedArtifactId: artifactId }),
   selectSession: (sessionId) => {
     const artifact = get().artifacts.find(
       (item) => item.sessionId === sessionId,
     );
+
     set({
       currentSessionId: sessionId,
       selectedArtifactId: artifact?.id,
     });
+    setSwitchingState(set, get, sessionId);
   },
-  selectArtifact: (artifactId) => set({ selectedArtifactId: artifactId }),
-  createSession: (skillKey) => {
-    const now = new Date().toISOString();
-    const session: Session = {
-      id: createId("session"),
-      title: skillKey ? "新的 Skill 会话" : "新的对话",
-      type: skillKey ?? "chat",
-      pinned: false,
-      status: "active",
-      updatedAt: now,
-    };
-
-    set((state) => ({
-      sessions: [session, ...state.sessions],
-      currentSessionId: session.id,
-      selectedArtifactId: undefined,
-    }));
-  },
-  sendMessage: (content, skillKey) => {
+  sendMessage: async (content, skillKey) => {
     const trimmed = content.trim();
 
     if (!trimmed) {
       return;
     }
 
-    const state = get();
-    const sessionId = state.currentSessionId;
-    const now = new Date().toISOString();
-    const userMessage: Message = {
-      id: createId("message_user"),
-      sessionId,
-      role: "user",
-      content: trimmed,
-      createdAt: now,
-    };
-    const assistantMessage: Message = {
-      id: createId("message_assistant"),
-      sessionId,
-      role: "assistant",
-      content: skillKey
-        ? `已进入 ${state.skills.find((skill) => skill.key === skillKey)?.name ?? "Skill"} 模式。后续会接入真实 Agent 执行。`
-        : "这是 mock 回复。后续会接入 FastAPI、SSE 和 Agent Runtime。",
-      createdAt: now,
-    };
+    const sessionId = get().currentSessionId;
 
-    set((current) => ({
-      messages: [...current.messages, userMessage, assistantMessage],
-      sessions: current.sessions.map((session) =>
-        session.id === sessionId
-          ? { ...session, status: "active", updatedAt: now }
-          : session,
-      ),
-    }));
+    if (!sessionId) {
+      return;
+    }
+
+    set({ error: undefined });
+
+    try {
+      const result = await webAgentApi.sendMessage({
+        content: trimmed,
+        sessionId,
+        skillKey,
+      });
+
+      set((state) => ({
+        messages: [...state.messages, ...result.messages],
+        sessions: state.sessions.map((session) =>
+          session.id === result.session.id ? result.session : session,
+        ),
+      }));
+    } catch (error) {
+      set({
+        error:
+          error instanceof Error ? error.message : "Failed to send message.",
+      });
+    }
   },
 }));
 

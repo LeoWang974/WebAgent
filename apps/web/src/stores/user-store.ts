@@ -1,14 +1,35 @@
 "use client";
 
 import { create } from "zustand";
+import { webAgentApi } from "@/services";
 import type { User } from "@/types";
-import { mockUser } from "@/services/mock-data";
 
 interface UserState {
-  user: User;
+  error?: string;
+  hydrated: boolean;
+  user?: User;
+  hydrate: () => Promise<void>;
 }
 
-export const useUserStore = create<UserState>(() => ({
-  user: mockUser,
+export const useUserStore = create<UserState>((set, get) => ({
+  error: undefined,
+  hydrated: false,
+  user: undefined,
+  hydrate: async () => {
+    if (get().hydrated) {
+      return;
+    }
+
+    try {
+      const user = await webAgentApi.getCurrentUser();
+      set({ hydrated: true, user });
+    } catch (error) {
+      set({
+        error:
+          error instanceof Error ? error.message : "Failed to load user data.",
+        hydrated: true,
+      });
+    }
+  },
 }));
 

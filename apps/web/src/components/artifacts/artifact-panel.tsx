@@ -1,10 +1,6 @@
 "use client";
 
-import { ArtifactEmptyState } from "./artifact-empty-state";
-import { DataPreviewPlaceholder } from "./data-preview-placeholder";
-import { ImagePreviewPlaceholder } from "./image-preview-placeholder";
-import { MarkdownPreviewPlaceholder } from "./markdown-preview-placeholder";
-import { PptPreviewPlaceholder } from "./ppt-preview-placeholder";
+import { ArtifactPreviewContent } from "./artifact-preview-content";
 import { useChatStore } from "@/stores";
 import { Download, Maximize2, MoreHorizontal } from "lucide-react";
 
@@ -18,11 +14,11 @@ export function ArtifactPanel() {
       <div className="flex h-14 items-center justify-between border-b border-[#deded8] px-4">
         <div className="min-w-0">
           <div className="text-sm font-semibold">Artifact</div>
-        {artifact ? (
-          <div className="mt-0.5 truncate text-xs text-muted-foreground">
-            {artifact.title}
-          </div>
-        ) : null}
+          {artifact ? (
+            <div className="mt-0.5 truncate text-xs text-muted-foreground">
+              {artifact.title}
+            </div>
+          ) : null}
         </div>
         <div className="flex items-center gap-1">
           <button
@@ -46,17 +42,7 @@ export function ArtifactPanel() {
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
-        {!artifact ? <ArtifactEmptyState /> : null}
-        {artifact?.type === "markdown_report" ? (
-          <MarkdownPreviewPlaceholder />
-        ) : null}
-        {artifact?.type === "ppt_deck" ? <PptPreviewPlaceholder /> : null}
-        {artifact?.type === "image_result" ? (
-          <ImagePreviewPlaceholder />
-        ) : null}
-        {artifact?.type === "data_table" || artifact?.type === "chart" ? (
-          <DataPreviewPlaceholder />
-        ) : null}
+        <ArtifactPreviewContent artifact={artifact} />
       </div>
     </aside>
   );
