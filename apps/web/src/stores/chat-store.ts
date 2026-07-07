@@ -1,10 +1,20 @@
 "use client";
 
 import { create } from "zustand";
-import { webAgentApi } from "@/services";
-import type { Artifact, Message, Session, Skill, SkillKey } from "@/types";
+import { subscribeToMockAgentRun, webAgentApi } from "@/services";
+import type {
+  AgentRun,
+  AgentRunEvent,
+  Artifact,
+  Message,
+  Session,
+  Skill,
+  SkillKey,
+} from "@/types";
 
 interface ChatState {
+  activeAgentRunId?: string;
+  agentRuns: AgentRun[];
   artifacts: Artifact[];
   currentSessionId: string;
   error?: string;
@@ -15,11 +25,16 @@ interface ChatState {
   sessions: Session[];
   skills: Skill[];
   switchingSessionId?: string;
+  applyAgentRunEvent: (event: AgentRunEvent) => void;
   createSession: (skillKey?: SkillKey) => Promise<void>;
   hydrate: () => Promise<void>;
   selectArtifact: (artifactId: string) => void;
   selectSession: (sessionId: string) => void;
   sendMessage: (content: string, skillKey?: SkillKey) => Promise<void>;
+}
+
+function createId(prefix: string) {
+  return `${prefix}_${Date.now()}`;
 }
 
 function setSwitchingState(
@@ -37,6 +52,8 @@ function setSwitchingState(
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
+  activeAgentRunId: undefined,
+  agentRuns: [],
   artifacts: [],
   currentSessionId: "",
   error: undefined,
@@ -47,6 +64,32 @@ export const useChatStore = create<ChatState>((set, get) => ({
   sessions: [],
   skills: [],
   switchingSessionId: undefined,
+  applyAgentRunEvent: (event) => {
+    set((state) => ({
+      activeAgentRunId:
+        event.status === "completed" ? undefined : state.activeAgentRunId,
+      agentRuns: state.agentRuns.map((run) => {
+        if (run.id !== event.runId) {
+          return run;
+        }
+
+        const previousSteps = run.steps.map((step) =>
+          step.status === "running"
+            ? { ...step, status: "completed" as const }
+            : step,
+        );
+
+        return {
+          ...run,
+          completedAt: event.completedAt,
+          error: event.error,
+          progress: event.progress,
+          status: event.status,
+          steps: [...previousSteps, event.step],
+        };
+      }),
+    }));
+  },
   createSession: async (skillKey) => {
     set({ error: undefined });
 
@@ -133,27 +176,88 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return;
     }
 
-    set({ error: undefined });
+    const now = new Date().toISOString();
+    const runId = createId("run");
+    const optimisticUserMessage: Message = {
+      id: createId("message_user"),
+      sessionId,
+      role: "user",
+      content: trimmed,
+      createdAt: now,
+    };
+    const run: AgentRun = {
+      id: runId,
+      progress: 0,
+      sessionId,
+      startedAt: now,
+      status: "queued",
+      steps: [],
+      title: skillKey ? "Running selected skill" : "Running agent",
+    };
+
+    set((state) => ({
+      activeAgentRunId: runId,
+      agentRuns: [run, ...state.agentRuns],
+      error: undefined,
+      messages: [...state.messages, optimisticUserMessage],
+      sessions: state.sessions.map((session) =>
+        session.id === sessionId
+          ? { ...session, status: "running", updatedAt: now }
+          : session,
+      ),
+    }));
+
+    let unsubscribe = () => {};
 
     try {
+      await new Promise<void>((resolve) => {
+        unsubscribe = subscribeToMockAgentRun({
+          onEvent: (event) => {
+            get().applyAgentRunEvent(event);
+
+            if (event.status === "completed") {
+              resolve();
+            }
+          },
+          runId,
+        });
+      });
+
       const result = await webAgentApi.sendMessage({
         content: trimmed,
         sessionId,
         skillKey,
       });
+      const assistantMessages = result.messages.filter(
+        (message) => message.role === "assistant",
+      );
 
       set((state) => ({
-        messages: [...state.messages, ...result.messages],
+        messages: [...state.messages, ...assistantMessages],
         sessions: state.sessions.map((session) =>
           session.id === result.session.id ? result.session : session,
         ),
       }));
     } catch (error) {
+      unsubscribe();
       set({
+        activeAgentRunId: undefined,
+        agentRuns: get().agentRuns.map((runItem) =>
+          runItem.id === runId
+            ? {
+                ...runItem,
+                completedAt: new Date().toISOString(),
+                error:
+                  error instanceof Error
+                    ? error.message
+                    : "Failed to send message.",
+                status: "failed",
+              }
+            : runItem,
+        ),
         error:
           error instanceof Error ? error.message : "Failed to send message.",
       });
     }
   },
 }));
-

@@ -3,6 +3,7 @@ import { ArtifactEmptyState } from "./artifact-empty-state";
 import { DataPreviewPlaceholder } from "./data-preview-placeholder";
 import { ImagePreviewPlaceholder } from "./image-preview-placeholder";
 import { MarkdownPreviewPlaceholder } from "./markdown-preview-placeholder";
+import { MarkdownViewer } from "./markdown-viewer";
 import { PptPreviewPlaceholder } from "./ppt-preview-placeholder";
 
 interface ArtifactPreviewContentProps {
@@ -15,6 +16,10 @@ export function ArtifactPreviewContent({ artifact }: ArtifactPreviewContentProps
   }
 
   if (artifact.type === "markdown_report") {
+    if (artifact.content) {
+      return <MarkdownViewer content={artifact.content} title={artifact.title} />;
+    }
+
     return <MarkdownPreviewPlaceholder />;
   }
 
@@ -32,4 +37,3 @@ export function ArtifactPreviewContent({ artifact }: ArtifactPreviewContentProps
 
   return <ArtifactEmptyState />;
 }
-
