@@ -5,7 +5,7 @@ import { FileUploadButton } from "./file-upload-button";
 import { ModelSelector } from "./model-selector";
 import { SkillSelector } from "./skill-selector";
 import type { SkillKey } from "@/types";
-import { useChatStore } from "@/stores";
+import { useChatStore, useUiStore } from "@/stores";
 import { ArrowUp, Sparkles } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 
@@ -15,6 +15,7 @@ export function ChatComposer() {
   const [skillKey, setSkillKey] = useState<SkillKey | undefined>();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const sendMessage = useChatStore((state) => state.sendMessage);
+  const sendShortcut = useUiStore((state) => state.sendShortcut);
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -38,7 +39,13 @@ export function ChatComposer() {
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key === "Enter" && !event.shiftKey) {
+    const modifierPressed = event.metaKey || event.ctrlKey;
+    const shouldSubmit =
+      sendShortcut === "enter"
+        ? event.key === "Enter" && !event.shiftKey
+        : event.key === "Enter" && modifierPressed;
+
+    if (shouldSubmit) {
       event.preventDefault();
       event.currentTarget.form?.requestSubmit();
     }
