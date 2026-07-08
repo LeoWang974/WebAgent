@@ -12,6 +12,17 @@
   --border: 214 32% 91%;
 }
 
+:root[data-theme="dark"] {
+  --background: 220 14% 10%;
+  --foreground: 210 20% 96%;
+  --primary: 210 20% 96%;
+  --primary-foreground: 220 14% 10%;
+  --muted: 220 12% 18%;
+  --muted-foreground: 215 12% 70%;
+  --border: 220 12% 24%;
+  color-scheme: dark;
+}
+
 * {
   border-color: hsl(var(--border));
 }

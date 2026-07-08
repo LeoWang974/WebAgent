@@ -1,6 +1,7 @@
 import { MobileSidebarDrawer } from "./mobile-sidebar-drawer";
 import type { ReactNode } from "react";
 import { Sidebar } from "./sidebar";
+import { ThemeEffect } from "./theme-effect";
 import { Topbar } from "./topbar";
 import { WorkspaceHydrator } from "./workspace-hydrator";
 
@@ -12,6 +13,7 @@ export function MainLayout({ children }: MainLayoutProps) {
   return (
     <div className="flex h-screen overflow-hidden bg-[#f7f7f5] text-foreground">
       <WorkspaceHydrator />
+      <ThemeEffect />
       <div className="hidden md:block">
         <Sidebar />
       </div>

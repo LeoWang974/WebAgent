@@ -20,6 +20,8 @@ export const mockSkills: Skill[] = [
     description: "Upload datasets and generate tables, charts, and reports.",
     version: "1.0.0",
     enabled: true,
+    isDefault: true,
+    lastUpdatedAt: "2026-07-07T09:00:00.000Z",
   },
   {
     key: "deep_research",
@@ -27,6 +29,7 @@ export const mockSkills: Skill[] = [
     description: "Turn a topic into a sourced research report.",
     version: "1.0.0",
     enabled: true,
+    lastUpdatedAt: "2026-07-07T09:00:00.000Z",
   },
   {
     key: "ppt_generation",
@@ -34,6 +37,7 @@ export const mockSkills: Skill[] = [
     description: "Generate slide decks from topics or documents.",
     version: "1.0.0",
     enabled: true,
+    lastUpdatedAt: "2026-07-07T09:00:00.000Z",
   },
   {
     key: "u1_image",
@@ -41,6 +45,7 @@ export const mockSkills: Skill[] = [
     description: "Generate image results from prompts.",
     version: "1.0.0",
     enabled: true,
+    lastUpdatedAt: "2026-07-07T09:00:00.000Z",
   },
 ];
 
@@ -294,10 +299,20 @@ export const mockArtifacts: Artifact[] = [
 
 export const mockModels: ModelConfig[] = [
   {
+    baseUrl: "https://api.sensenova.cn/v1",
     id: "model_1",
+    isAvailable: true,
     provider: "sensenova",
     name: "sensenova-default",
     isDefault: true,
   },
+  {
+    baseUrl: "https://api.openai-compatible.example/v1",
+    id: "model_2",
+    isAvailable: true,
+    provider: "openai_compatible",
+    name: "external-compatible",
+    isDefault: false,
+    maskedApiKey: "sk-****-demo",
+  },
 ];
-

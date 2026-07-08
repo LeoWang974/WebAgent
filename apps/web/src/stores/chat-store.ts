@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import { subscribeToMockAgentRun, webAgentApi } from "@/services";
+import { settingsApi, subscribeToMockAgentRun, webAgentApi } from "@/services";
 import type {
   AgentRun,
   AgentRunEvent,
@@ -30,15 +30,25 @@ interface ChatState {
   sessions: Session[];
   skills: Skill[];
   switchingSessionId?: string;
+  testingModelId?: string;
+  updatingSkillKey?: SkillKey;
   applyAgentRunEvent: (event: AgentRunEvent) => void;
+  addModel: (input: Omit<ModelConfig, "id" | "isDefault" | "isAvailable">) => Promise<void>;
   createSession: (skillKey?: SkillKey) => Promise<Session | undefined>;
+  deleteModel: (modelId: string) => Promise<void>;
   hydrate: () => Promise<void>;
   retryHydrate: () => Promise<void>;
   selectArtifact: (artifactId: string) => void;
+  setDefaultModel: (modelId: string) => Promise<void>;
   selectModel: (modelId: string) => void;
   selectSession: (sessionId: string) => void;
   sendMessage: (content: string, skillKey?: SkillKey) => Promise<void>;
+  setDefaultSkill: (skillKey: SkillKey) => Promise<void>;
+  testModelConnection: (modelId: string) => Promise<void>;
   toggleSessionPinned: (sessionId: string) => void;
+  toggleSkillEnabled: (skillKey: SkillKey) => Promise<void>;
+  updateModel: (modelId: string, input: Partial<ModelConfig>) => Promise<void>;
+  updateSkillVersion: (skillKey: SkillKey, direction: "update" | "rollback") => Promise<void>;
 }
 
 function createId(prefix: string) {
@@ -74,6 +84,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   sessions: [],
   skills: [],
   switchingSessionId: undefined,
+  testingModelId: undefined,
+  updatingSkillKey: undefined,
   applyAgentRunEvent: (event) => {
     const terminalStatuses = ["completed", "failed", "cancelled"];
 
@@ -103,6 +115,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
         };
       }),
     }));
+  },
+  addModel: async (input) => {
+    set({ error: undefined });
+    try {
+      const model = await settingsApi.addModel(input);
+
+      set((state) => ({
+        models: [...state.models, model],
+        selectedModelId: state.selectedModelId ?? model.id,
+      }));
+    } catch (error) {
+      set({
+        error: error instanceof Error ? error.message : "Failed to add model.",
+      });
+    }
   },
   createSession: async (skillKey) => {
     set({ error: undefined });
@@ -189,6 +216,31 @@ export const useChatStore = create<ChatState>((set, get) => ({
       };
     });
   },
+  deleteModel: async (modelId) => {
+    const model = get().models.find((item) => item.id === modelId);
+
+    if (model?.isDefault) {
+      return;
+    }
+
+    try {
+      await settingsApi.deleteModel(modelId);
+      set((state) => {
+        const models = state.models.filter((item) => item.id !== modelId);
+        const selectedModelId =
+          state.selectedModelId === modelId
+            ? models.find((item) => item.isDefault)?.id ?? models[0]?.id
+            : state.selectedModelId;
+
+        return { models, selectedModelId };
+      });
+    } catch (error) {
+      set({
+        error:
+          error instanceof Error ? error.message : "Failed to delete model.",
+      });
+    }
+  },
   hydrate: async () => {
     if (get().hydrated || get().loading) {
       return;
@@ -239,6 +291,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
     await get().hydrate();
   },
   selectArtifact: (artifactId) => set({ selectedArtifactId: artifactId }),
+  setDefaultModel: async (modelId) => {
+    try {
+      const models = await settingsApi.setDefaultModel(modelId);
+      set({ models, selectedModelId: modelId });
+    } catch (error) {
+      set({
+        error:
+          error instanceof Error ? error.message : "Failed to set model.",
+      });
+    }
+  },
   selectModel: (modelId) => set({ selectedModelId: modelId }),
   selectSession: (sessionId) => {
     const artifact = get().artifacts.find(
@@ -251,6 +314,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
     setSwitchingState(set, get, sessionId);
   },
+  setDefaultSkill: async (skillKey) => {
+    try {
+      const skills = await settingsApi.setDefaultSkill(skillKey);
+      set({ skills });
+    } catch (error) {
+      set({
+        error:
+          error instanceof Error ? error.message : "Failed to set skill.",
+      });
+    }
+  },
   toggleSessionPinned: (sessionId) => {
     set((state) => ({
       sessions: state.sessions.map((session) =>
@@ -262,6 +336,32 @@ export const useChatStore = create<ChatState>((set, get) => ({
           : session,
       ),
     }));
+  },
+  toggleSkillEnabled: async (skillKey) => {
+    try {
+      const skills = await settingsApi.toggleSkillEnabled(skillKey);
+      set({ skills });
+    } catch (error) {
+      set({
+        error:
+          error instanceof Error ? error.message : "Failed to update skill.",
+      });
+    }
+  },
+  updateModel: async (modelId, input) => {
+    try {
+      const updatedModel = await settingsApi.updateModel(modelId, input);
+      set((state) => ({
+        models: state.models.map((model) =>
+          model.id === modelId ? updatedModel : model,
+        ),
+      }));
+    } catch (error) {
+      set({
+        error:
+          error instanceof Error ? error.message : "Failed to update model.",
+      });
+    }
   },
   sendMessage: async (content, skillKey) => {
     const trimmed = content.trim();
@@ -360,6 +460,37 @@ export const useChatStore = create<ChatState>((set, get) => ({
         ),
         error:
           error instanceof Error ? error.message : "Failed to send message.",
+      });
+    }
+  },
+  testModelConnection: async (modelId) => {
+    set({ testingModelId: modelId });
+    try {
+      const updatedModel = await settingsApi.testModelConnection(modelId);
+      set((state) => ({
+        models: state.models.map((model) =>
+          model.id === modelId ? updatedModel : model,
+        ),
+        testingModelId: undefined,
+      }));
+    } catch (error) {
+      set({
+        error:
+          error instanceof Error ? error.message : "Failed to test model.",
+        testingModelId: undefined,
+      });
+    }
+  },
+  updateSkillVersion: async (skillKey, direction) => {
+    set({ updatingSkillKey: skillKey });
+    try {
+      const skills = await settingsApi.updateSkillVersion(skillKey, direction);
+      set({ skills, updatingSkillKey: undefined });
+    } catch (error) {
+      set({
+        error:
+          error instanceof Error ? error.message : "Failed to update skill.",
+        updatingSkillKey: undefined,
       });
     }
   },

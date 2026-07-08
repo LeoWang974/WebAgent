@@ -1,13 +1,7 @@
 "use client";
 
-import { type TranslationKey, useI18n } from "@/lib/i18n";
-
-const skills: Array<{ nameKey: TranslationKey; version: string }> = [
-  { nameKey: "dataAnalysis", version: "1.0.0" },
-  { nameKey: "deepResearch", version: "1.0.0" },
-  { nameKey: "createPpt", version: "1.0.0" },
-  { nameKey: "imageGeneration", version: "1.0.0" },
-];
+import { SkillSettings } from "@/components/settings";
+import { useI18n } from "@/lib/i18n";
 
 export default function AdminPage() {
   const { t } = useI18n();
@@ -25,41 +19,8 @@ export default function AdminPage() {
           </p>
         </header>
 
-        <section className="overflow-hidden rounded-xl border bg-white shadow-sm">
-          <div className="grid grid-cols-[1fr_120px_140px_180px] border-b bg-[#f7f7f5] px-4 py-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            <span>{t("skill")}</span>
-            <span>{t("version")}</span>
-            <span>{t("status")}</span>
-            <span>{t("actions")}</span>
-          </div>
-          {skills.map((skill) => (
-            <div
-              className="grid grid-cols-[1fr_120px_140px_180px] items-center border-b px-4 py-3 text-sm last:border-b-0"
-              key={skill.nameKey}
-            >
-              <span className="font-medium">{t(skill.nameKey)}</span>
-              <span className="text-muted-foreground">{skill.version}</span>
-              <span>
-                <span className="rounded-full border bg-white px-2 py-1 text-xs text-muted-foreground">
-                  {t("published")}
-                </span>
-              </span>
-              <span className="flex gap-2">
-                <button
-                  className="rounded-md border px-2 py-1 text-xs hover:bg-muted"
-                  type="button"
-                >
-                  {t("newVersion")}
-                </button>
-                <button
-                  className="rounded-md border px-2 py-1 text-xs hover:bg-muted"
-                  type="button"
-                >
-                  {t("rollback")}
-                </button>
-              </span>
-            </div>
-          ))}
+        <section className="rounded-lg border bg-white p-5 shadow-sm">
+          <SkillSettings />
         </section>
       </div>
     </main>

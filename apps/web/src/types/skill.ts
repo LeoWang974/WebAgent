@@ -10,5 +10,6 @@ export interface Skill {
   description: string;
   version: string;
   enabled: boolean;
+  isDefault?: boolean;
+  lastUpdatedAt?: string;
 }
-

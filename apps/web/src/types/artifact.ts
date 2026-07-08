@@ -16,3 +16,14 @@ export interface Artifact {
   title: string;
   status: ArtifactStatus;
 }
+
+export interface FileAsset {
+  contentType: string;
+  createdAt: string;
+  filename: string;
+  id: string;
+  metadata?: Record<string, unknown>;
+  sessionId?: string;
+  size: number;
+  url?: string;
+}

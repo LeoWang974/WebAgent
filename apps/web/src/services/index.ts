@@ -5,4 +5,5 @@ export * from "./artifact-api";
 export * from "./message-api";
 export * from "./mock-api";
 export * from "./session-api";
+export * from "./settings-adapters";
 export * from "./skill-api";
