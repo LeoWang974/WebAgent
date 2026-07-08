@@ -3,32 +3,38 @@
 import { useChatStore } from "@/stores";
 import type { SkillKey } from "@/types";
 import { BarChart3, Image, Presentation, Search } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useI18n } from "@/lib/i18n";
 
 export function EmptyConversation() {
   const { t } = useI18n();
+  const router = useRouter();
   const createSession = useChatStore((state) => state.createSession);
   const prompts = [
     {
       description: t("analyzeDataDescription"),
+      example: "\u5206\u6790\u4e0a\u4f20\u8868\u683c\u4e2d\u7684\u9500\u552e\u8d8b\u52bf\uff0c\u627e\u51fa\u589e\u957f\u6700\u5feb\u7684\u533a\u57df\u3002",
       icon: BarChart3,
       skillKey: "data_analysis" as SkillKey,
       title: t("analyzeDataTitle"),
     },
     {
       description: t("deepResearchDescription"),
+      example: "\u8c03\u7814 AI Agent \u5e02\u573a\u673a\u4f1a\uff0c\u8f93\u51fa\u5e26\u7ed3\u6784\u7684 Markdown \u62a5\u544a\u3002",
       icon: Search,
       skillKey: "deep_research" as SkillKey,
       title: t("deepResearch"),
     },
     {
       description: t("createPptDescription"),
+      example: "\u56f4\u7ed5 WebAgent \u4ea7\u54c1\u53d1\u5e03\u751f\u6210 6 \u9875 PPT \u5927\u7eb2\u3002",
       icon: Presentation,
       skillKey: "ppt_generation" as SkillKey,
       title: t("createPpt"),
     },
     {
       description: t("generateImageDescription"),
+      example: "\u751f\u6210\u4e00\u7ec4\u73b0\u4ee3 AI \u5de5\u4f5c\u53f0\u5ba3\u4f20\u56fe\u6982\u5ff5\u3002",
       icon: Image,
       skillKey: "u1_image" as SkillKey,
       title: t("generateImageTitle"),
@@ -49,9 +55,12 @@ export function EmptyConversation() {
 
           return (
             <button
-              className="rounded-xl border bg-white p-4 text-left shadow-sm hover:bg-[#fafafa]"
+              className="rounded-lg border bg-white p-4 text-left shadow-sm hover:bg-[#fafafa]"
               key={prompt.skillKey}
-              onClick={() => createSession(prompt.skillKey)}
+              onClick={async () => {
+                const session = await createSession(prompt.skillKey);
+                router.push(session ? `/app/chat/${session.id}` : "/app");
+              }}
               type="button"
             >
               <div className="mb-3 flex size-9 items-center justify-center rounded-lg border bg-[#f7f7f5]">
@@ -61,6 +70,12 @@ export function EmptyConversation() {
               <p className="mt-1 text-xs leading-5 text-muted-foreground">
                 {prompt.description}
               </p>
+              <div className="mt-3 rounded-md border bg-[#f7f7f5] p-2 text-xs leading-5 text-muted-foreground">
+                {prompt.example}
+              </div>
+              <div className="mt-3 text-xs font-medium text-foreground">
+                {t("tryExample")}
+              </div>
             </button>
           );
         })}

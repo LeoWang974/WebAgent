@@ -2,17 +2,22 @@
 
 import type { MouseEvent } from "react";
 import { useI18n } from "@/lib/i18n";
-import { Check, Trash2, X } from "lucide-react";
+import { getStatusDotClass, getStatusLabelKey } from "@/lib/status";
+import { Check, Pin, PinOff, Trash2, X } from "lucide-react";
 import { useState } from "react";
+import type { SessionStatus } from "@/types";
 
 interface SessionItemProps {
   active?: boolean;
   href?: string;
   onClick?: () => void;
   onDelete?: () => void;
-  status?: string;
+  onTogglePinned?: () => void;
+  pinned?: boolean;
+  status?: SessionStatus;
   switching?: boolean;
   title: string;
+  updatedLabel?: string;
 }
 
 export function SessionItem({
@@ -20,9 +25,12 @@ export function SessionItem({
   href,
   onClick,
   onDelete,
+  onTogglePinned,
+  pinned = false,
   status = "active",
   switching = false,
   title,
+  updatedLabel,
 }: SessionItemProps) {
   const { t } = useI18n();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -31,22 +39,21 @@ export function SessionItem({
   }`;
   const content = (
     <span className="min-w-0 flex-1">
-      <span className="block truncate text-[13px] leading-5">{title}</span>
+      <span className="flex min-w-0 items-center justify-between gap-2">
+        <span className="truncate text-[13px] leading-5">{title}</span>
+        {updatedLabel ? (
+          <span className="shrink-0 text-[10px] text-muted-foreground">
+            {updatedLabel}
+          </span>
+        ) : null}
+      </span>
       <span className="mt-0.5 flex items-center gap-1.5 text-[11px] capitalize text-muted-foreground">
         <span
           className={`size-1.5 rounded-full ${
-            switching
-              ? "bg-sky-500"
-              : status === "running"
-                ? "bg-amber-500"
-                : "bg-emerald-500"
+            switching ? "bg-sky-500" : getStatusDotClass(status)
           }`}
         />
-        {switching
-          ? t("opening")
-          : status === "completed"
-            ? t("completed")
-            : status}
+        {switching ? t("opening") : t(getStatusLabelKey(status))}
       </span>
     </span>
   );
@@ -67,21 +74,38 @@ export function SessionItem({
         {content}
       </button>
       {!confirmingDelete ? (
-        <button
-          aria-label={t("deleteConversation")}
-          className={`mr-1 mt-1 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 hover:bg-white hover:text-foreground group-hover:opacity-100 ${
-            active ? "opacity-100" : ""
-          }`}
-          onClick={(event: MouseEvent<HTMLButtonElement>) => {
-            event.preventDefault();
-            event.stopPropagation();
-            setConfirmingDelete(true);
-          }}
-          title={t("deleteConversation")}
-          type="button"
-        >
-          <Trash2 className="size-3.5" />
-        </button>
+        <div className="mr-1 mt-1 flex shrink-0 items-center gap-1">
+          <button
+            aria-label={pinned ? t("unpinConversation") : t("pinConversation")}
+            className={`flex size-6 items-center justify-center rounded-md text-muted-foreground opacity-0 hover:bg-white hover:text-foreground group-hover:opacity-100 ${
+              active || pinned ? "opacity-100" : ""
+            }`}
+            onClick={(event: MouseEvent<HTMLButtonElement>) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onTogglePinned?.();
+            }}
+            title={pinned ? t("unpinConversation") : t("pinConversation")}
+            type="button"
+          >
+            {pinned ? <PinOff className="size-3.5" /> : <Pin className="size-3.5" />}
+          </button>
+          <button
+            aria-label={t("deleteConversation")}
+            className={`flex size-6 items-center justify-center rounded-md text-muted-foreground opacity-0 hover:bg-white hover:text-foreground group-hover:opacity-100 ${
+              active ? "opacity-100" : ""
+            }`}
+            onClick={(event: MouseEvent<HTMLButtonElement>) => {
+              event.preventDefault();
+              event.stopPropagation();
+              setConfirmingDelete(true);
+            }}
+            title={t("deleteConversation")}
+            type="button"
+          >
+            <Trash2 className="size-3.5" />
+          </button>
+        </div>
       ) : (
         <div className="mr-1 mt-1 flex shrink-0 items-center gap-1">
           <button

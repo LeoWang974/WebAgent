@@ -14,6 +14,7 @@ export function SessionSearch() {
       <Search className="size-3.5 text-muted-foreground" />
       <input
         className="min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground"
+        data-session-search-input
         onChange={(event) => setQuery(event.target.value)}
         placeholder={t("search")}
         type="search"

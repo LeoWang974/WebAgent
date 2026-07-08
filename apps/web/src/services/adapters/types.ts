@@ -15,6 +15,7 @@ export interface CreateSessionInput {
 
 export interface SendMessageInput {
   content: string;
+  modelId?: string;
   sessionId: string;
   skillKey?: SkillKey;
 }
@@ -34,4 +35,3 @@ export interface WebAgentApiAdapter {
   listSkills(): Promise<Skill[]>;
   sendMessage(input: SendMessageInput): Promise<SendMessageResult>;
 }
-

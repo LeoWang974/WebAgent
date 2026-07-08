@@ -1,3 +1,8 @@
+"use client";
+
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+
 interface MessageItemProps {
   role: "user" | "assistant" | "system" | "tool";
   content: string;
@@ -29,7 +34,13 @@ export function MessageItem({ role, content }: MessageItemProps) {
         >
           {role}
         </div>
-        <p>{content}</p>
+        {isUser ? (
+          <p className="whitespace-pre-wrap">{content}</p>
+        ) : (
+          <div className="message-markdown">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+          </div>
+        )}
       </div>
       {isUser ? (
         <div className="mt-1 flex size-7 shrink-0 items-center justify-center rounded-full border bg-white text-[11px] font-medium">
@@ -39,4 +50,3 @@ export function MessageItem({ role, content }: MessageItemProps) {
     </article>
   );
 }
-

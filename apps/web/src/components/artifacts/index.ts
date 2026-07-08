@@ -2,6 +2,7 @@ export * from "./artifact-drawer";
 export * from "./artifact-panel";
 export * from "./artifact-preview-content";
 export * from "./artifact-empty-state";
+export * from "./artifact-fullscreen";
 export * from "./data-table-viewer";
 export * from "./markdown-preview-placeholder";
 export * from "./markdown-viewer";

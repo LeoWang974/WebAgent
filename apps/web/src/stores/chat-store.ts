@@ -7,6 +7,7 @@ import type {
   AgentRunEvent,
   Artifact,
   Message,
+  ModelConfig,
   Session,
   Skill,
   SkillKey,
@@ -17,21 +18,27 @@ interface ChatState {
   agentRuns: AgentRun[];
   artifacts: Artifact[];
   currentSessionId: string;
+  deleteArtifact: (artifactId: string) => void;
   deleteSession: (sessionId: string) => void;
   error?: string;
   hydrated: boolean;
   loading: boolean;
   messages: Message[];
+  models: ModelConfig[];
   selectedArtifactId?: string;
+  selectedModelId?: string;
   sessions: Session[];
   skills: Skill[];
   switchingSessionId?: string;
   applyAgentRunEvent: (event: AgentRunEvent) => void;
   createSession: (skillKey?: SkillKey) => Promise<Session | undefined>;
   hydrate: () => Promise<void>;
+  retryHydrate: () => Promise<void>;
   selectArtifact: (artifactId: string) => void;
+  selectModel: (modelId: string) => void;
   selectSession: (sessionId: string) => void;
   sendMessage: (content: string, skillKey?: SkillKey) => Promise<void>;
+  toggleSessionPinned: (sessionId: string) => void;
 }
 
 function createId(prefix: string) {
@@ -61,14 +68,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
   hydrated: false,
   loading: false,
   messages: [],
+  models: [],
   selectedArtifactId: undefined,
+  selectedModelId: undefined,
   sessions: [],
   skills: [],
   switchingSessionId: undefined,
   applyAgentRunEvent: (event) => {
+    const terminalStatuses = ["completed", "failed", "cancelled"];
+
     set((state) => ({
       activeAgentRunId:
-        event.status === "completed" ? undefined : state.activeAgentRunId,
+        terminalStatuses.includes(event.status)
+          ? undefined
+          : state.activeAgentRunId,
       agentRuns: state.agentRuns.map((run) => {
         if (run.id !== event.runId) {
           return run;
@@ -113,6 +126,28 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
       return undefined;
     }
+  },
+  deleteArtifact: (artifactId) => {
+    set((state) => {
+      const artifacts = state.artifacts.filter(
+        (artifact) => artifact.id !== artifactId,
+      );
+      const selectedArtifactId =
+        state.selectedArtifactId === artifactId
+          ? artifacts.find(
+              (artifact) => artifact.sessionId === state.currentSessionId,
+            )?.id ?? artifacts[0]?.id
+          : state.selectedArtifactId;
+
+      return {
+        artifacts,
+        messages: state.messages.map((message) => ({
+          ...message,
+          artifactIds: message.artifactIds?.filter((id) => id !== artifactId),
+        })),
+        selectedArtifactId,
+      };
+    });
   },
   deleteSession: (sessionId) => {
     set((state) => {
@@ -162,16 +197,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ error: undefined, loading: true });
 
     try {
-      const [sessions, messages, skills, artifacts] = await Promise.all([
+      const [sessions, messages, skills, artifacts, models] = await Promise.all([
         webAgentApi.listSessions(),
         webAgentApi.listMessages(),
         webAgentApi.listSkills(),
         webAgentApi.listArtifacts(),
+        webAgentApi.listModels(),
       ]);
       const currentSessionId = sessions[0]?.id ?? "";
       const selectedArtifactId =
         artifacts.find((artifact) => artifact.sessionId === currentSessionId)
           ?.id ?? artifacts[0]?.id;
+      const selectedModelId =
+        models.find((model) => model.isDefault)?.id ?? models[0]?.id;
 
       set({
         artifacts,
@@ -179,7 +217,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         hydrated: true,
         loading: false,
         messages,
+        models,
         selectedArtifactId,
+        selectedModelId,
         sessions,
         skills,
       });
@@ -194,7 +234,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
     }
   },
+  retryHydrate: async () => {
+    set({ hydrated: false, loading: false });
+    await get().hydrate();
+  },
   selectArtifact: (artifactId) => set({ selectedArtifactId: artifactId }),
+  selectModel: (modelId) => set({ selectedModelId: modelId }),
   selectSession: (sessionId) => {
     const artifact = get().artifacts.find(
       (item) => item.sessionId === sessionId,
@@ -206,6 +251,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
     setSwitchingState(set, get, sessionId);
   },
+  toggleSessionPinned: (sessionId) => {
+    set((state) => ({
+      sessions: state.sessions.map((session) =>
+        session.id === sessionId
+          ? {
+              ...session,
+              pinned: !session.pinned,
+            }
+          : session,
+      ),
+    }));
+  },
   sendMessage: async (content, skillKey) => {
     const trimmed = content.trim();
 
@@ -214,6 +271,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
 
     const sessionId = get().currentSessionId;
+    const modelId = get().selectedModelId;
 
     if (!sessionId) {
       return;
@@ -265,9 +323,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
           runId,
         });
       });
+      unsubscribe();
 
       const result = await webAgentApi.sendMessage({
         content: trimmed,
+        modelId,
         sessionId,
         skillKey,
       });

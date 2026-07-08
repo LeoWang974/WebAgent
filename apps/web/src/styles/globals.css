@@ -141,3 +141,67 @@ select {
   text-decoration: underline;
   text-underline-offset: 3px;
 }
+
+.message-markdown {
+  font-size: 0.875rem;
+  line-height: 1.7;
+}
+
+.message-markdown > * + * {
+  margin-top: 0.75rem;
+}
+
+.message-markdown p,
+.message-markdown li {
+  color: hsl(var(--muted-foreground));
+}
+
+.message-markdown ul,
+.message-markdown ol {
+  padding-left: 1.1rem;
+}
+
+.message-markdown ul {
+  list-style: disc;
+}
+
+.message-markdown ol {
+  list-style: decimal;
+}
+
+.message-markdown code {
+  background: #f1f1ed;
+  border-radius: 0.375rem;
+  color: hsl(var(--foreground));
+  font-size: 0.8125rem;
+  padding: 0.125rem 0.3125rem;
+}
+
+.message-markdown pre {
+  background: #242424;
+  border-radius: 0.5rem;
+  color: white;
+  overflow-x: auto;
+  padding: 0.75rem;
+}
+
+.message-markdown pre code {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+}
+
+.message-markdown table {
+  border-collapse: collapse;
+  display: block;
+  font-size: 0.8125rem;
+  overflow-x: auto;
+  width: 100%;
+}
+
+.message-markdown th,
+.message-markdown td {
+  border: 1px solid hsl(var(--border));
+  padding: 0.375rem 0.5rem;
+  text-align: left;
+}

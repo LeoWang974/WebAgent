@@ -1,6 +1,7 @@
 "use client";
 
 import { ArtifactPreviewContent } from "./artifact-preview-content";
+import { downloadArtifact } from "@/lib/artifact-actions";
 import { useChatStore, useUiStore } from "@/stores";
 import { Download, Maximize2, X } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
@@ -11,6 +12,7 @@ export function ArtifactDrawer() {
   const selectedArtifactId = useChatStore((state) => state.selectedArtifactId);
   const open = useUiStore((state) => state.artifactDrawerOpen);
   const close = useUiStore((state) => state.closeArtifactDrawer);
+  const openFullscreen = useUiStore((state) => state.openArtifactFullscreen);
   const artifact = artifacts.find((item) => item.id === selectedArtifactId);
 
   if (!open) {
@@ -20,7 +22,7 @@ export function ArtifactDrawer() {
   return (
     <div className="fixed inset-0 z-50 xl:hidden">
       <button
-        aria-label="Close artifact preview"
+        aria-label={t("closeArtifactPreview")}
         className="absolute inset-0 bg-black/30"
         onClick={close}
         type="button"
@@ -38,12 +40,22 @@ export function ArtifactDrawer() {
           <div className="flex items-center gap-1">
             <button
               className="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-[#e9e9e2] hover:text-foreground"
+              disabled={!artifact}
+              onClick={() => {
+                if (artifact) {
+                  downloadArtifact(artifact);
+                }
+              }}
+              title={t("download")}
               type="button"
             >
               <Download className="size-4" />
             </button>
             <button
               className="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-[#e9e9e2] hover:text-foreground"
+              disabled={!artifact}
+              onClick={openFullscreen}
+              title={t("preview")}
               type="button"
             >
               <Maximize2 className="size-4" />

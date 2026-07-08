@@ -1,16 +1,20 @@
 "use client";
 
 import { useChatStore } from "@/stores";
-import { Bot, Circle } from "lucide-react";
+import { Bot } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
+import { getStatusDotClass, getStatusLabelKey } from "@/lib/status";
 
 export function ChatHeader() {
   const { t } = useI18n();
   const sessions = useChatStore((state) => state.sessions);
+  const agentRuns = useChatStore((state) => state.agentRuns);
   const currentSessionId = useChatStore((state) => state.currentSessionId);
   const currentSession = sessions.find(
     (session) => session.id === currentSessionId,
   );
+  const currentRun = agentRuns.find((run) => run.sessionId === currentSessionId);
+  const status = currentRun?.status ?? currentSession?.status ?? "ready";
 
   return (
     <div className="flex h-14 items-center justify-between border-b border-[#ededeb] px-5">
@@ -28,8 +32,8 @@ export function ChatHeader() {
         </div>
       </div>
       <div className="flex items-center gap-1.5 rounded-full border bg-white px-2 py-1 text-[11px] text-muted-foreground">
-        <Circle className="size-2 fill-emerald-500 text-emerald-500" />
-        {t("ready")}
+        <span className={`size-2 rounded-full ${getStatusDotClass(status)}`} />
+        {t(getStatusLabelKey(status))}
       </div>
     </div>
   );
