@@ -1,6 +1,7 @@
 "use client";
 
 import type { SkillKey } from "@/types";
+import { useI18n } from "@/lib/i18n";
 
 interface SkillSelectorProps {
   onChange?: (value: SkillKey | undefined) => void;
@@ -8,6 +9,8 @@ interface SkillSelectorProps {
 }
 
 export function SkillSelector({ onChange, value }: SkillSelectorProps) {
+  const { t } = useI18n();
+
   return (
     <select
       className="h-8 rounded-md border bg-background px-2 text-xs text-muted-foreground outline-none hover:text-foreground"
@@ -18,11 +21,11 @@ export function SkillSelector({ onChange, value }: SkillSelectorProps) {
       }
       value={value ?? ""}
     >
-      <option value="">Auto skill</option>
-      <option value="data_analysis">数据分析</option>
-      <option value="deep_research">深度调研</option>
-      <option value="ppt_generation">PPT 生成</option>
-      <option value="u1_image">u1 生图</option>
+      <option value="">{t("autoSkill")}</option>
+      <option value="data_analysis">{t("dataAnalysis")}</option>
+      <option value="deep_research">{t("deepResearch")}</option>
+      <option value="ppt_generation">{t("createPpt")}</option>
+      <option value="u1_image">{t("imageGeneration")}</option>
     </select>
   );
 }

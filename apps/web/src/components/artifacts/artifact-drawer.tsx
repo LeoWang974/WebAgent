@@ -3,8 +3,10 @@
 import { ArtifactPreviewContent } from "./artifact-preview-content";
 import { useChatStore, useUiStore } from "@/stores";
 import { Download, Maximize2, X } from "lucide-react";
+import { useI18n } from "@/lib/i18n";
 
 export function ArtifactDrawer() {
+  const { t } = useI18n();
   const artifacts = useChatStore((state) => state.artifacts);
   const selectedArtifactId = useChatStore((state) => state.selectedArtifactId);
   const open = useUiStore((state) => state.artifactDrawerOpen);
@@ -26,7 +28,7 @@ export function ArtifactDrawer() {
       <aside className="absolute inset-x-0 bottom-0 flex max-h-[86vh] min-h-[60vh] flex-col rounded-t-2xl border bg-[#f7f7f5] shadow-2xl">
         <div className="flex h-14 items-center justify-between border-b px-4">
           <div className="min-w-0">
-            <div className="text-sm font-semibold">Artifact</div>
+            <div className="text-sm font-semibold">{t("artifact")}</div>
             {artifact ? (
               <div className="mt-0.5 truncate text-xs text-muted-foreground">
                 {artifact.title}
@@ -62,4 +64,3 @@ export function ArtifactDrawer() {
     </div>
   );
 }
-

@@ -2,8 +2,10 @@
 
 import { useChatStore } from "@/stores";
 import { Bot, Circle } from "lucide-react";
+import { useI18n } from "@/lib/i18n";
 
 export function ChatHeader() {
+  const { t } = useI18n();
   const sessions = useChatStore((state) => state.sessions);
   const currentSessionId = useChatStore((state) => state.currentSessionId);
   const currentSession = sessions.find(
@@ -18,7 +20,7 @@ export function ChatHeader() {
         </div>
         <div className="min-w-0">
           <h1 className="truncate text-sm font-semibold">
-            {currentSession?.title ?? "New conversation"}
+            {currentSession?.title ?? t("defaultConversation")}
           </h1>
           <p className="text-xs text-muted-foreground">
             sensenova / {currentSession?.type ?? "chat"}
@@ -27,9 +29,8 @@ export function ChatHeader() {
       </div>
       <div className="flex items-center gap-1.5 rounded-full border bg-white px-2 py-1 text-[11px] text-muted-foreground">
         <Circle className="size-2 fill-emerald-500 text-emerald-500" />
-        Ready
+        {t("ready")}
       </div>
     </div>
   );
 }
-

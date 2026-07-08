@@ -2,6 +2,7 @@
 
 import type { AgentRun } from "@/types";
 import { useChatStore } from "@/stores";
+import { type TranslationKey, useI18n } from "@/lib/i18n";
 import {
   Check,
   CircleDashed,
@@ -10,35 +11,36 @@ import {
   TriangleAlert,
 } from "lucide-react";
 
-function getStatusLabel(run: AgentRun) {
+function getStatusLabelKey(run: AgentRun): TranslationKey {
   if (run.status === "tool_calling") {
-    return "Calling tools";
+    return "callingTools";
   }
 
   if (run.status === "queued") {
-    return "Queued";
+    return "queued";
   }
 
   if (run.status === "running") {
-    return "Running";
+    return "running";
   }
 
   if (run.status === "rendering") {
-    return "Rendering";
+    return "rendering";
   }
 
   if (run.status === "completed") {
-    return "Completed";
+    return "completed";
   }
 
   if (run.status === "failed") {
-    return "Failed";
+    return "failed";
   }
 
-  return "Cancelled";
+  return "cancelled";
 }
 
 export function AgentStatus() {
+  const { t } = useI18n();
   const currentSessionId = useChatStore((state) => state.currentSessionId);
   const agentRuns = useChatStore((state) => state.agentRuns);
   const run = agentRuns.find((item) => item.sessionId === currentSessionId);
@@ -66,7 +68,7 @@ export function AgentStatus() {
             <div className="min-w-0">
               <div className="truncate text-sm font-semibold">{run.title}</div>
               <div className="text-xs text-muted-foreground">
-                {getStatusLabel(run)} / {run.progress}%
+                {t(getStatusLabelKey(run))} / {run.progress}%
               </div>
             </div>
           </div>
@@ -76,7 +78,7 @@ export function AgentStatus() {
             type="button"
           >
             <Square className="size-3" />
-            Stop
+            {t("stop")}
           </button>
         </div>
 
@@ -115,4 +117,3 @@ export function AgentStatus() {
     </div>
   );
 }
-

@@ -17,6 +17,7 @@ interface ChatState {
   agentRuns: AgentRun[];
   artifacts: Artifact[];
   currentSessionId: string;
+  deleteSession: (sessionId: string) => void;
   error?: string;
   hydrated: boolean;
   loading: boolean;
@@ -26,7 +27,7 @@ interface ChatState {
   skills: Skill[];
   switchingSessionId?: string;
   applyAgentRunEvent: (event: AgentRunEvent) => void;
-  createSession: (skillKey?: SkillKey) => Promise<void>;
+  createSession: (skillKey?: SkillKey) => Promise<Session | undefined>;
   hydrate: () => Promise<void>;
   selectArtifact: (artifactId: string) => void;
   selectSession: (sessionId: string) => void;
@@ -102,6 +103,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         sessions: [session, ...state.sessions],
       }));
       setSwitchingState(set, get, session.id);
+      return session;
     } catch (error) {
       set({
         error:
@@ -109,7 +111,48 @@ export const useChatStore = create<ChatState>((set, get) => ({
             ? error.message
             : "Failed to create session.",
       });
+      return undefined;
     }
+  },
+  deleteSession: (sessionId) => {
+    set((state) => {
+      const sessions = state.sessions.filter(
+        (session) => session.id !== sessionId,
+      );
+      const currentSessionId =
+        state.currentSessionId === sessionId
+          ? sessions[0]?.id ?? ""
+          : state.currentSessionId;
+      const selectedArtifactId =
+        state.currentSessionId === sessionId
+          ? state.artifacts.find(
+              (artifact) => artifact.sessionId === currentSessionId,
+            )?.id
+          : state.selectedArtifactId;
+
+      return {
+        activeAgentRunId:
+          state.agentRuns.find(
+            (run) => run.id === state.activeAgentRunId,
+          )?.sessionId === sessionId
+            ? undefined
+            : state.activeAgentRunId,
+        agentRuns: state.agentRuns.filter((run) => run.sessionId !== sessionId),
+        artifacts: state.artifacts.filter(
+          (artifact) => artifact.sessionId !== sessionId,
+        ),
+        currentSessionId,
+        messages: state.messages.filter(
+          (message) => message.sessionId !== sessionId,
+        ),
+        selectedArtifactId,
+        sessions,
+        switchingSessionId:
+          state.switchingSessionId === sessionId
+            ? undefined
+            : state.switchingSessionId,
+      };
+    });
   },
   hydrate: async () => {
     if (get().hydrated || get().loading) {

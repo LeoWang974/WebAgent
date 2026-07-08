@@ -5,19 +5,57 @@ import { AssistantMessage } from "./assistant-message";
 import { EmptyConversation } from "./empty-conversation";
 import { UserMessage } from "./user-message";
 import { useChatStore, useUiStore } from "@/stores";
+import { ArrowDown } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { useI18n } from "@/lib/i18n";
 
 export function MessageList() {
+  const { t } = useI18n();
   const currentSessionId = useChatStore((state) => state.currentSessionId);
   const allMessages = useChatStore((state) => state.messages);
   const artifacts = useChatStore((state) => state.artifacts);
+  const agentRuns = useChatStore((state) => state.agentRuns);
   const selectArtifact = useChatStore((state) => state.selectArtifact);
   const openArtifactDrawer = useUiStore((state) => state.openArtifactDrawer);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const [nearBottom, setNearBottom] = useState(true);
   const messages = allMessages.filter(
     (message) => message.sessionId === currentSessionId,
   );
+  const currentRun = agentRuns.find((run) => run.sessionId === currentSessionId);
+
+  function scrollToBottom(behavior: ScrollBehavior = "smooth") {
+    bottomRef.current?.scrollIntoView({ behavior, block: "end" });
+  }
+
+  useEffect(() => {
+    scrollToBottom("auto");
+    setNearBottom(true);
+  }, [currentSessionId]);
+
+  useEffect(() => {
+    if (nearBottom) {
+      scrollToBottom();
+    }
+  }, [messages.length, currentRun?.progress, currentRun?.status, nearBottom]);
 
   return (
-    <div className="h-full overflow-y-auto">
+    <div
+      className="relative h-full overflow-y-auto"
+      onScroll={() => {
+        const element = scrollRef.current;
+
+        if (!element) {
+          return;
+        }
+
+        const distanceToBottom =
+          element.scrollHeight - element.scrollTop - element.clientHeight;
+        setNearBottom(distanceToBottom < 96);
+      }}
+      ref={scrollRef}
+    >
       <div className="mx-auto flex max-w-3xl flex-col gap-5 px-5 py-6">
         {messages.length === 0 ? (
           <EmptyConversation />
@@ -49,7 +87,21 @@ export function MessageList() {
             </div>
           );
         })}
+        <div ref={bottomRef} />
       </div>
+      {!nearBottom ? (
+        <button
+          className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full border bg-white px-3 py-1.5 text-xs text-muted-foreground shadow-sm hover:text-foreground"
+          onClick={() => {
+            scrollToBottom();
+            setNearBottom(true);
+          }}
+          type="button"
+        >
+          <ArrowDown className="size-3.5" />
+          {t("latestMessages")}
+        </button>
+      ) : null}
     </div>
   );
 }

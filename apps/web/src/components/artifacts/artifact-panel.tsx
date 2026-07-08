@@ -3,8 +3,10 @@
 import { ArtifactPreviewContent } from "./artifact-preview-content";
 import { useChatStore } from "@/stores";
 import { Download, Maximize2, MoreHorizontal } from "lucide-react";
+import { useI18n } from "@/lib/i18n";
 
 export function ArtifactPanel() {
+  const { t } = useI18n();
   const artifacts = useChatStore((state) => state.artifacts);
   const selectedArtifactId = useChatStore((state) => state.selectedArtifactId);
   const artifact = artifacts.find((item) => item.id === selectedArtifactId);
@@ -13,7 +15,7 @@ export function ArtifactPanel() {
     <aside className="hidden w-[420px] shrink-0 border-l border-[#deded8] bg-[#f7f7f5] xl:flex xl:flex-col">
       <div className="flex h-14 items-center justify-between border-b border-[#deded8] px-4">
         <div className="min-w-0">
-          <div className="text-sm font-semibold">Artifact</div>
+          <div className="text-sm font-semibold">{t("artifact")}</div>
           {artifact ? (
             <div className="mt-0.5 truncate text-xs text-muted-foreground">
               {artifact.title}

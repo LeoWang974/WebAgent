@@ -2,8 +2,12 @@
 
 import { SkillCard } from "../skills/skill-card";
 import { useChatStore, useUiStore } from "@/stores";
+import { useRouter } from "next/navigation";
+import { useI18n } from "@/lib/i18n";
 
 export function SkillShortcuts() {
+  const { t } = useI18n();
+  const router = useRouter();
   const skills = useChatStore((state) => state.skills);
   const createSession = useChatStore((state) => state.createSession);
   const closeArtifactDrawer = useUiStore((state) => state.closeArtifactDrawer);
@@ -11,7 +15,7 @@ export function SkillShortcuts() {
   return (
     <section className="space-y-2">
       <h2 className="px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-        Skills
+        {t("skills")}
       </h2>
       <div className="space-y-1">
         {skills.map((skill) => (
@@ -19,9 +23,10 @@ export function SkillShortcuts() {
             description={skill.version}
             key={skill.key}
             name={skill.name}
-            onClick={() => {
+            onClick={async () => {
               closeArtifactDrawer();
-              createSession(skill.key);
+              const session = await createSession(skill.key);
+              router.push(session ? `/app/chat/${session.id}` : "/app");
             }}
           />
         ))}

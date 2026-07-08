@@ -1,7 +1,12 @@
+"use client";
+
 import { ProfileSettings } from "@/components/settings";
+import { useI18n } from "@/lib/i18n";
 import Link from "next/link";
 
 export default function ProfileSettingsPage() {
+  const { t } = useI18n();
+
   return (
     <main className="h-full overflow-y-auto bg-[#fbfbfa]">
       <div className="mx-auto max-w-4xl space-y-6 px-6 py-6">
@@ -10,12 +15,11 @@ export default function ProfileSettingsPage() {
             className="text-sm text-muted-foreground hover:text-foreground"
             href="/app/settings"
           >
-            Back to settings
+            {t("backToSettings")}
           </Link>
-          <h1 className="text-2xl font-semibold">Profile</h1>
+          <h1 className="text-2xl font-semibold">{t("profile")}</h1>
           <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-            Manage the basic user preferences that will later be stored through
-            the backend user API.
+            {t("profileDescription")}
           </p>
         </header>
 
@@ -26,4 +30,3 @@ export default function ProfileSettingsPage() {
     </main>
   );
 }
-

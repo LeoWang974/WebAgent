@@ -2,8 +2,10 @@
 
 import { useUiStore } from "@/stores";
 import { Search } from "lucide-react";
+import { useI18n } from "@/lib/i18n";
 
 export function SessionSearch() {
+  const { t } = useI18n();
   const query = useUiStore((state) => state.sessionSearchQuery);
   const setQuery = useUiStore((state) => state.setSessionSearchQuery);
 
@@ -13,7 +15,7 @@ export function SessionSearch() {
       <input
         className="min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground"
         onChange={(event) => setQuery(event.target.value)}
-        placeholder="Search"
+        placeholder={t("search")}
         type="search"
         value={query}
       />
