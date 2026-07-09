@@ -17,6 +17,7 @@ import type {
   LoginInput,
   SendMessageInput,
   SendMessageResult,
+  SendMessageStreamHandler,
   UpdateSessionInput,
   UploadFileInput,
   WebAgentApiAdapter,
@@ -137,11 +138,75 @@ export const fastApiAdapter: WebAgentApiAdapter = {
       {
         body: JSON.stringify({
           content: input.content,
+          model_id: input.modelId,
           skill_key: input.skillKey,
         }),
         method: "POST",
+        signal: input.signal,
       },
     );
+  },
+  async sendMessageStream(
+    input: SendMessageInput,
+    onEvent: SendMessageStreamHandler,
+  ) {
+    const response = await fetch(
+      `${API_BASE_URL}/api/sessions/${input.sessionId}/messages/stream`,
+      {
+        body: JSON.stringify({
+          content: input.content,
+          model_id: input.modelId,
+          skill_key: input.skillKey,
+        }),
+        headers: {
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+        signal: input.signal,
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(`API request failed: ${response.status}`);
+    }
+
+    if (!response.body) {
+      throw new Error("Streaming response is not available.");
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+
+      if (done) {
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+      const events = buffer.split("\n\n");
+      buffer = events.pop() ?? "";
+
+      for (const rawEvent of events) {
+        const lines = rawEvent.split("\n");
+        const type = lines
+          .find((line) => line.startsWith("event:"))
+          ?.slice("event:".length)
+          .trim();
+        const data = lines
+          .find((line) => line.startsWith("data:"))
+          ?.slice("data:".length)
+          .trim();
+
+        if (!type || !data) {
+          continue;
+        }
+
+        onEvent({ ...JSON.parse(data), type });
+      }
+    }
   },
   subscribeAgentRun(runId, onEvent) {
     const source = new EventSource(

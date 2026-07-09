@@ -119,6 +119,7 @@ export const translations = {
     search: "\u641c\u7d22",
     save: "\u4fdd\u5b58",
     saved: "\u5df2\u4fdd\u5b58",
+    send: "\u53d1\u9001",
     saveConversationHistory: "\u4fdd\u5b58\u5bf9\u8bdd\u5386\u53f2",
     saveConversationHistoryDescription:
       "\u5f00\u542f\u540e\uff0c\u7528\u6237\u53ef\u4ee5\u5728\u4fa7\u8fb9\u680f\u627e\u56de\u8fc7\u5f80\u4f1a\u8bdd\u548c\u4ea7\u7269\u3002",
@@ -287,6 +288,7 @@ export const translations = {
     search: "Search",
     save: "Save",
     saved: "Saved",
+    send: "Send",
     saveConversationHistory: "Save conversation history",
     saveConversationHistoryDescription:
       "When enabled, users can return to previous conversations and artifacts from the sidebar.",

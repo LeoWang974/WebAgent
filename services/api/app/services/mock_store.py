@@ -81,9 +81,25 @@ models: list[ModelConfig] = [
         id="model_sensenova_default",
         name="SenseNova default model",
         provider="sensenova",
+        is_default=False,
+        is_available=True,
+    ),
+    ModelConfig(
+        id="model_openclaw",
+        name="OpenClaw Agent",
+        provider="openai_compatible",
+        base_url="http://localhost:8643",
+        is_default=False,
+        is_available=True,
+    ),
+    ModelConfig(
+        id="model_hermes",
+        name="Hermes Agent",
+        provider="openai_compatible",
+        base_url="http://localhost:8642",
         is_default=True,
         is_available=True,
-    )
+    ),
 ]
 
 skills: list[Skill] = [

@@ -1,0 +1,40 @@
+{
+  "genre": "用户约束驱动的研究报告",
+  "domain": "食品科技与消费趋势 — 未来餐桌",
+  "source": "user_constraints",
+  "format_status": "implicit_constraints_only",
+  "discovery_sources": [],
+  "sections": [],
+  "mandatory_elements": [
+    "五个细分领域：植物基食品（plant-based foods）、预制菜（prepared meals）、功能食品（functional foods）、代餐（meal replacements）、健康饮食（healthy eating）",
+    "全球视野，中国市场为主",
+    "正文大标题",
+    "具有细节的目录",
+    "带交叉引用的文字内容且引用要多",
+    "子报告全内容汇总到最终报告",
+    "时间窗口：近3年（2024-2026），侧重当前市场数据",
+    "均等覆盖五个领域，每领域深度相近",
+    "目标读者：行业研究者，术语和技术深度适配专业读者"
+  ],
+  "conventions": {
+    "tone": "objective, evidence-based",
+    "domain_specific_metrics": [
+      "市场规模（亿元人民币/美元）",
+      "年复合增长率（CAGR）",
+      "市场集中度（CR5/CR10）",
+      "人均消费（元/人/年或美元/人/年）",
+      "融资额与估值（亿元人民币/美元）",
+      "政策法规状态（现行/征求意见稿/制定中）",
+      "科学证据等级（RCT/观察性研究/专家共识）"
+    ],
+    "anti_patterns": [
+      "不要引入用户未要求的通用报告结构来替代用户约束",
+      "不要用证据多寡删除用户点名对象或问题",
+      "不要把覆盖约束伪装成用户指定章节",
+      "不要以单一城市/人群数据代表全国",
+      "不要将品牌方营销声称等同于科学证据"
+    ]
+  },
+  "fallback_used": true,
+  "fallback_reason": "用户指定的是研究覆盖约束（五个子领域、全球视野+中国市场为主、交叉引用、多引用、子报告汇总）而非具体章节结构；报告最终章节由report-planner根据研究结果组织，未做外部格式发现"
+}

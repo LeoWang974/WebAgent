@@ -20,6 +20,12 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     sensenova_api_key: str | None = None
     sensenova_base_url: str | None = None
+    agent_runtime_default: str = "hermes"
+    openclaw_base_url: str = "http://localhost:8643"
+    hermes_base_url: str = "http://localhost:8642"
+    hermes_cli_path: str = "/home/zhuchangbiaozhu_xyl/.local/bin/hermes"
+    hermes_home: str = "/home/zhuchangbiaozhu_xyl/.hermes"
+    hermes_wsl_distribution: str = "Ubuntu"
 
     @cached_property
     def cors_origins(self) -> list[str]:
@@ -27,4 +33,3 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-

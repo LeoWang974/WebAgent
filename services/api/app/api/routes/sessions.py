@@ -1,9 +1,16 @@
+import json
+
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 
 from app import schemas
 from app.services import mock_store
 
 router = APIRouter()
+
+
+def sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
 @router.get("", response_model=list[schemas.Session])
@@ -81,11 +88,39 @@ async def send_session_message(
         content=input_data.content,
         created_at=created_at,
     )
+
+    assistant_content = "Agent runtime did not return a response."
+
+    try:
+        from agent_runtime.schemas import AgentRunCreate as AdapterAgentRunCreate
+        from app.api.routes.agent_runs import _get_adapter
+
+        adapter = _get_adapter(input_data.model_id)
+
+        if adapter is not None:
+            runtime_run = await adapter.create_run(
+                AdapterAgentRunCreate(
+                    content=input_data.content,
+                    session_id=session_id,
+                    skill_key=input_data.skill_key,
+                    model_id=input_data.model_id,
+                )
+            )
+            assistant_content = (
+                getattr(runtime_run, "output", None)
+                or runtime_run.error
+                or assistant_content
+            )
+        else:
+            assistant_content = "No agent runtime adapter is available."
+    except Exception as error:
+        assistant_content = f"Agent runtime error: {error}"
+
     assistant_message = schemas.Message(
         id=mock_store.new_id("message_assistant"),
         session_id=session_id,
         role="assistant",
-        content="Backend mock reply received. Real Agent Run and model gateway come next.",
+        content=assistant_content,
         created_at=created_at,
     )
     mock_store.messages.extend([user_message, assistant_message])
@@ -97,6 +132,139 @@ async def send_session_message(
         messages=[user_message, assistant_message],
         session=updated_session,
     )
+
+
+@router.post("/{session_id}/messages/stream")
+async def stream_session_message(
+    session_id: str,
+    input_data: schemas.MessageCreate,
+) -> StreamingResponse:
+    session = next((item for item in mock_store.sessions if item.id == session_id), None)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    async def event_stream():
+        created_at = mock_store.now_iso()
+        user_message = schemas.Message(
+            id=mock_store.new_id("message_user"),
+            session_id=session_id,
+            role="user",
+            content=input_data.content,
+            created_at=created_at,
+        )
+        mock_store.messages.append(user_message)
+        yield sse("user_message", user_message.model_dump(by_alias=True))
+
+        assistant_messages: list[schemas.Message] = []
+
+        try:
+            from agent_runtime.schemas import AgentRunCreate as AdapterAgentRunCreate
+            from app.api.routes.agent_runs import _get_adapter
+
+            adapter = _get_adapter(input_data.model_id)
+
+            if adapter is None:
+                raise RuntimeError("No agent runtime adapter is available.")
+
+            adapter_input = AdapterAgentRunCreate(
+                content=input_data.content,
+                session_id=session_id,
+                skill_key=input_data.skill_key,
+                model_id=input_data.model_id,
+            )
+
+            if hasattr(adapter, "stream_response"):
+                async for chunk in adapter.stream_response(adapter_input):
+                    content = chunk.strip()
+                    if not content:
+                        continue
+
+                    assistant_message = schemas.Message(
+                        id=mock_store.new_id("message_assistant"),
+                        session_id=session_id,
+                        role="assistant",
+                        content=content,
+                        created_at=mock_store.now_iso(),
+                    )
+                    assistant_messages.append(assistant_message)
+                    mock_store.messages.append(assistant_message)
+                    yield sse(
+                        "assistant_delta",
+                        {
+                            "content": content,
+                            "messageId": assistant_message.id,
+                            "sessionId": session_id,
+                        },
+                    )
+            else:
+                runtime_run = await adapter.create_run(adapter_input)
+                content = (
+                    getattr(runtime_run, "output", None)
+                    or runtime_run.error
+                    or "Agent runtime did not return a response."
+                )
+                assistant_message = schemas.Message(
+                    id=mock_store.new_id("message_assistant"),
+                    session_id=session_id,
+                    role="assistant",
+                    content=content,
+                    created_at=mock_store.now_iso(),
+                )
+                assistant_messages.append(assistant_message)
+                mock_store.messages.append(assistant_message)
+                yield sse(
+                    "assistant_delta",
+                    {
+                        "content": content,
+                        "messageId": assistant_message.id,
+                        "sessionId": session_id,
+                    },
+                )
+
+            if assistant_messages:
+                assistant_message = assistant_messages[-1]
+            else:
+                assistant_message = schemas.Message(
+                    id=mock_store.new_id("message_assistant"),
+                    session_id=session_id,
+                    role="assistant",
+                    content="Hermes completed without emitting a visible status update.",
+                    created_at=mock_store.now_iso(),
+                )
+                mock_store.messages.append(assistant_message)
+
+            updated_session = session.model_copy(
+                update={"updated_at": mock_store.now_iso(), "status": "active"}
+            )
+            mock_store.sessions[:] = [
+                updated_session if item.id == session_id else item
+                for item in mock_store.sessions
+            ]
+            yield sse(
+                "assistant_done",
+                {
+                    "message": assistant_message.model_dump(by_alias=True),
+                    "session": updated_session.model_dump(by_alias=True),
+                },
+            )
+        except Exception as error:
+            error_message = schemas.Message(
+                id=mock_store.new_id("message_assistant"),
+                session_id=session_id,
+                role="assistant",
+                content=f"Agent runtime error: {error}",
+                created_at=mock_store.now_iso(),
+            )
+            mock_store.messages.append(error_message)
+            yield sse(
+                "assistant_done",
+                {
+                    "message": error_message.model_dump(by_alias=True),
+                    "session": session.model_dump(by_alias=True),
+                },
+            )
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @router.get("/{session_id}/artifacts", response_model=list[schemas.Artifact])

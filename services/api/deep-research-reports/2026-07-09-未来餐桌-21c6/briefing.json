@@ -1,0 +1,584 @@
+{
+  "recommended_mode": "heavy",
+  "mode_rationale": "五子领域交叉引用、多视角对抗、需补研循环",
+
+  "user_confirmations_needed": {
+    "blocking": [],
+    "high_value": [
+      {
+        "id": "q1",
+        "question": "报告时间窗口：聚焦近3年（2024-2026）还是含5-10年远期预测？",
+        "uncertainty_type": "time_range",
+        "why_it_matters": "决定搜索窗口与趋势判断粒度",
+        "impact_on_plan": "远期需更多预测类来源和情景分析",
+        "options": [
+          { "id": "q1a", "label": "近3年为主（2024-2026）", "planning_implication": "搜索窗口3年，侧重当前市场数据" },
+          { "id": "q1b", "label": "含5-10年远期预测", "planning_implication": "需追加长期预测报告和情景分析" }
+        ],
+        "default_if_unanswered": {
+          "option_id": "q1a",
+          "rationale": "趋势研究通常以近3年为主",
+          "confidence": "medium"
+        }
+      },
+      {
+        "id": "q2",
+        "question": "五个子领域权重：均等覆盖还是按重要性倾斜？",
+        "uncertainty_type": "scope",
+        "why_it_matters": "决定各维度深度与资源分配",
+        "impact_on_plan": "倾斜需增加侧重维度子问题",
+        "options": [
+          { "id": "q2a", "label": "均等覆盖五个领域", "planning_implication": "每维度key_questions数量相近" },
+          { "id": "q2b", "label": "预制菜和植物基为主，其余为辅", "planning_implication": "d1/d2深挖，d3-d5略浅" }
+        ],
+        "default_if_unanswered": {
+          "option_id": "q2a",
+          "rationale": "用户列出五个领域无优先级暗示",
+          "confidence": "medium"
+        }
+      }
+    ],
+    "optional": [
+      {
+        "id": "q3",
+        "question": "报告读者：面向投资人/企业家/政策制定者/普通消费者？",
+        "uncertainty_type": "audience",
+        "why_it_matters": "影响术语深度和商业/政策侧重",
+        "options": [
+          { "id": "q3a", "label": "投资人/企业家" },
+          { "id": "q3b", "label": "政策制定者" },
+          { "id": "q3c", "label": "行业研究者" },
+          { "id": "q3d", "label": "普通消费者" }
+        ],
+        "default_if_unanswered": {
+          "option_id": "q3c",
+          "rationale": "深度研究报告默认面向行业研究者"
+        }
+      }
+    ]
+  },
+
+  "task_interpretation": {
+    "user_goal": "深度研究未来餐桌五大细分领域发展趋势",
+    "requested_output_inferred": "Markdown报告，含大标题、详细目录、交叉引用、多引用、子报告汇总",
+    "research_type_inferred": "trending",
+    "audience_inferred": "行业研究者/投资人",
+    "time_focus": "forward",
+    "explicit_constraints": [
+      "全球视野，中国市场为主",
+      "五个细分领域：植物基食品、预制菜、功能食品、代餐、健康饮食",
+      "带交叉引用且引用要多",
+      "子报告全内容汇总到最终报告"
+    ],
+    "implicit_scope_hints": [
+      "食品科技与消费趋势交叉领域",
+      "可能涉及产业链、政策、资本、消费者行为",
+      "五领域之间存在交叉重叠（如代餐与功能食品）"
+    ]
+  },
+
+  "context_entities": [
+    {
+      "name": "植物基食品",
+      "type": "concept",
+      "explicit_or_inferred": "explicit",
+      "why_it_matters": "用户指定五大领域之一",
+      "confidence": "high"
+    },
+    {
+      "name": "预制菜",
+      "type": "concept",
+      "explicit_or_inferred": "explicit",
+      "why_it_matters": "用户指定五大领域之一",
+      "confidence": "high"
+    },
+    {
+      "name": "功能食品",
+      "type": "concept",
+      "explicit_or_inferred": "explicit",
+      "why_it_matters": "用户指定五大领域之一",
+      "confidence": "high"
+    },
+    {
+      "name": "代餐",
+      "type": "concept",
+      "explicit_or_inferred": "explicit",
+      "why_it_matters": "用户指定五大领域之一",
+      "confidence": "high"
+    },
+    {
+      "name": "健康饮食",
+      "type": "concept",
+      "explicit_or_inferred": "explicit",
+      "why_it_matters": "用户指定五大领域之一",
+      "confidence": "high"
+    },
+    {
+      "name": "Beyond Meat",
+      "type": "company",
+      "explicit_or_inferred": "inferred",
+      "why_it_matters": "植物基食品全球标杆企业",
+      "confidence": "high"
+    },
+    {
+      "name": "中国预制菜产业园",
+      "type": "policy",
+      "explicit_or_inferred": "inferred",
+      "why_it_matters": "中国预制菜产业政策载体",
+      "confidence": "medium"
+    },
+    {
+      "name": "安井食品",
+      "type": "company",
+      "explicit_or_inferred": "inferred",
+      "why_it_matters": "中国预制菜龙头上市公司",
+      "confidence": "high"
+    },
+    {
+      "name": "Soylent / Huel",
+      "type": "product",
+      "explicit_or_inferred": "inferred",
+      "why_it_matters": "代餐赛道全球标杆产品",
+      "confidence": "high"
+    },
+    {
+      "name": "星期零（Starfield）",
+      "type": "company",
+      "explicit_or_inferred": "inferred",
+      "why_it_matters": "中国植物基食品初创代表",
+      "confidence": "medium"
+    },
+    {
+      "name": "《食品安全法》及预制菜国标",
+      "type": "policy",
+      "explicit_or_inferred": "inferred",
+      "why_it_matters": "预制菜行业关键监管框架",
+      "confidence": "medium"
+    },
+    {
+      "name": "肠道菌群/益生菌",
+      "type": "concept",
+      "explicit_or_inferred": "inferred",
+      "why_it_matters": "功能食品核心技术方向",
+      "confidence": "high"
+    },
+    {
+      "name": "清洁标签（Clean Label）",
+      "type": "concept",
+      "explicit_or_inferred": "inferred",
+      "why_it_matters": "健康饮食核心消费趋势",
+      "confidence": "medium"
+    }
+  ],
+
+  "terminology": [
+    {
+      "term": "预制菜",
+      "aliases": ["prepared meals", "pre-cooked meals", "ready-to-cook", "ready-to-eat", "半成品菜", "即烹食品", "即热食品", "净菜"],
+      "note": "中英文对应范围不一致，需区分即烹/即热/即食/净菜四类"
+    },
+    {
+      "term": "植物基食品",
+      "aliases": ["plant-based foods", "植物肉", "植物蛋白", "替代蛋白", "alternative protein", "人造肉"],
+      "note": "人造肉含贬义，替代蛋白范围更广含发酵蛋白"
+    },
+    {
+      "term": "功能食品",
+      "aliases": ["functional foods", "保健食品", "nutraceuticals", "特殊医学用途配方食品", "FSMP", "FOSHU"],
+      "note": "中日美监管口径差异大，保健食品≠功能食品"
+    },
+    {
+      "term": "代餐",
+      "aliases": ["meal replacement", "meal substitute", "代餐粉", "代餐奶昔", "代餐棒", "全营养代餐", "部分代餐"],
+      "note": "全营养/部分代餐监管标准不同，中国有GB 24154"
+    },
+    {
+      "term": "健康饮食",
+      "aliases": ["healthy eating", "healthy diet", "平衡膳食", "clean eating", "轻食", "地中海饮食", "DASH饮食"],
+      "note": "概念边界模糊，与功能食品、植物基有交叉"
+    }
+  ],
+
+  "subdomain_partitions": {
+    "partition_basis": "by_topic",
+    "subdomains": [
+      { "name": "植物基食品", "scope_hint": "替代蛋白、植物肉/奶、技术路线、市场格局" },
+      { "name": "预制菜", "scope_hint": "即烹/即热/即食产业链、政策、渠道" },
+      { "name": "功能食品", "scope_hint": "益生菌/营养素/FSMP/法规与消费" },
+      { "name": "代餐", "scope_hint": "全营养/部分代餐、场景、标准与竞争" },
+      { "name": "健康饮食", "scope_hint": "清洁标签/低糖/有机/膳食指南趋势" },
+      { "name": "交叉领域", "scope_hint": "五领域交汇处（如植物基代餐）" },
+      { "name": "宏观驱动", "scope_hint": "人口/经济/政策/技术共同驱动因子" }
+    ]
+  },
+
+  "knowledge_topology": {
+    "consensus": [
+      {
+        "fact": "中国预制菜市场处于高速增长期，2024年市场规模超5000亿人民币",
+        "source_hint": "艾媒咨询、NCBD、中商产业研究院多份报告趋同"
+      },
+      {
+        "fact": "全球植物基食品增速放缓，从高速增长进入理性调整期",
+        "source_hint": "GFI报告、Beyond Meat财报、欧睿数据"
+      },
+      {
+        "fact": "功能食品与健康饮食边界日益模糊，消费者追求食品即药品",
+        "source_hint": "Mintel趋势报告、中国营养学会"
+      }
+    ],
+    "disputes": [
+      {
+        "issue": "预制菜是否应进校园食堂（食品安全与营养争议）",
+        "positions_exist": ["安全便捷，应推广", "添加剂多、营养差，应限制"],
+        "representative_sources": ["教育部文件", "央视3·15报道", "家长群体舆论"]
+      },
+      {
+        "issue": "植物基食品是否真比传统肉类更环保/健康",
+        "positions_exist": ["生命周期评估支持更环保", "超加工属性抵消健康优势"],
+        "representative_sources": ["Science期刊LCA研究", "WHO超加工食品分类"]
+      },
+      {
+        "issue": "代餐是否可长期替代正常饮食",
+        "positions_exist": ["全营养配方可长期使用", "缺乏植物化学物和膳食纤维多样性"],
+        "representative_sources": ["EFSA评估报告", "临床营养学期刊"]
+      }
+    ],
+    "blanks": [
+      {
+        "blank": "中国预制菜行业真实B端vsC端营收占比及增速差异的精确数据",
+        "blank_nature": "proprietary"
+      },
+      {
+        "blank": "植物基食品在中国下沉市场的消费者接受度与复购率",
+        "blank_nature": "info_scarce"
+      },
+      {
+        "blank": "功能食品功效声称的循证医学证据强度（RCT vs 观察性研究）",
+        "blank_nature": "info_scarce"
+      }
+    ]
+  },
+
+  "information_landscape": {
+    "primary_source_categories": [
+      "上市公司年报/招股书（安井、Beyond Meat、汤臣倍健等）",
+      "中国市场监管总局/卫健委/农业农村部政策文件",
+      "行业协会白皮书（中国食品工业协会、GFI）"
+    ],
+    "secondary_source_categories": [
+      "第三方市场研究（艾媒、欧睿、Mintel、Grand View Research）",
+      "学术期刊（Food Chemistry、Nutrients、Journal of Food Science）",
+      "财经媒体深度报道（36氪、Foodaily、FBIF）"
+    ],
+    "data_source_categories": [
+      "国家统计局居民消费数据",
+      "天猫/京东/抖音电商品类销售数据",
+      "企查查/天眼查企业注册与融资数据"
+    ],
+    "expert_or_industry_sources": [
+      "中国工程院食品领域院士观点",
+      "FBIF食品饮料创新论坛演讲",
+      "中国营养学会专家共识"
+    ],
+    "weak_or_risky_sources": [
+      "品牌方自营公众号/官网（营销话术风险）",
+      "未经验证的行业自媒体预测",
+      "付费墙后的市场报告摘要（可能断章取义）"
+    ],
+    "high_value_urls": [
+      {
+        "url": "https://gfi.org/research/",
+        "category": "analyst",
+        "why": "植物基全球权威数据源"
+      },
+      {
+        "url": "https://www.foodaily.com/",
+        "category": "news",
+        "why": "中国食品创新权威媒体"
+      },
+      {
+        "url": "https://www.nutrition.org.cn/",
+        "category": "official",
+        "why": "中国营养学会官方指南"
+      },
+      {
+        "url": "https://www.cninfo.com.cn/",
+        "category": "official",
+        "why": "A股上市公司披露原文"
+      },
+      {
+        "url": "https://www.statista.com/topics/food/",
+        "category": "data",
+        "why": "全球食品市场统计数据库"
+      }
+    ],
+    "search_terms": [
+      { "term": "植物基食品 市场规模 2025 中国", "language": "zh", "use_case": "植物基市场数据" },
+      { "term": "预制菜 行业报告 2025 产业链", "language": "zh", "use_case": "预制菜全景" },
+      { "term": "functional foods market China 2025 CAGR", "language": "en", "use_case": "功能食品国际数据" },
+      { "term": "meal replacement China regulation GB 24154", "language": "en", "use_case": "代餐监管标准" },
+      { "term": "healthy eating trends China clean label 2025", "language": "en", "use_case": "健康饮食趋势" },
+      { "term": "未来餐桌 新消费 食品科技 趋势", "language": "zh", "use_case": "宏观主题" }
+    ],
+    "time_sensitivity": {
+      "rate": "fast_changing",
+      "recommended_window": "2023-2026",
+      "reason": "食品消费趋势和政策变化快，需近3年"
+    },
+    "access_barriers": [
+      {
+        "barrier": "paywall",
+        "affected_sources": "欧睿、Mintel、Grand View Research完整报告",
+        "workaround_hint": "使用免费摘要+新闻稿交叉验证"
+      },
+      {
+        "barrier": "language",
+        "affected_sources": "日本FOSHU制度文件、韩国功能食品法规",
+        "workaround_hint": "优先使用英文二手解读"
+      },
+      {
+        "barrier": "geo",
+        "affected_sources": "中国部分政府网站境外访问限流",
+        "workaround_hint": "使用cninfo.com.cn等替代源"
+      }
+    ]
+  },
+
+  "critical_unknowns": [
+    {
+      "unknown": "五个领域在中国市场的精确规模、增速、集中度数据",
+      "why_it_matters": "决定各领域投资价值判断",
+      "evidence_needed": "2024-2025年第三方市场报告数据",
+      "can_be_resolved_by_research": true,
+      "importance": "high"
+    },
+    {
+      "unknown": "植物基食品在中国是否已过泡沫期，真实复购率如何",
+      "why_it_matters": "决定该领域是继续下注还是收缩",
+      "evidence_needed": "电商数据、品牌财报、消费者调研",
+      "can_be_resolved_by_research": true,
+      "importance": "high"
+    },
+    {
+      "unknown": "中国预制菜国标最新进展及对行业格局的影响",
+      "why_it_matters": "政策决定行业天花板和竞争格局",
+      "evidence_needed": "市场监管总局/卫健委最新文件",
+      "can_be_resolved_by_research": true,
+      "importance": "high"
+    },
+    {
+      "unknown": "代餐与功能食品在中国消费者认知中的实际区分度",
+      "why_it_matters": "影响市场定位和监管归类",
+      "evidence_needed": "消费者调研数据和品牌定位分析",
+      "can_be_resolved_by_research": true,
+      "importance": "medium"
+    },
+    {
+      "unknown": "AI驱动个性化营养在五大领域的落地进展",
+      "why_it_matters": "技术颠覆可能重塑所有领域",
+      "evidence_needed": "初创公司产品、专利、学术论文",
+      "can_be_resolved_by_research": true,
+      "importance": "medium"
+    }
+  ],
+
+  "candidate_lenses": [
+    {
+      "lens": "产业链视角（上游原料→中游加工→下游渠道→消费场景）",
+      "useful_for": "发现各领域共同基础设施和瓶颈",
+      "may_miss": "消费者心理和文化驱动因素",
+      "binding_strength": "suggestive"
+    },
+    {
+      "lens": "代际差异视角（Z世代/千禧/银发族消费行为差异）",
+      "useful_for": "定位各领域核心客群与增长动力",
+      "may_miss": "B端餐饮工业化需求",
+      "binding_strength": "suggestive"
+    },
+    {
+      "lens": "政策监管视角（食品安全标准、声称管理、补贴方向）",
+      "useful_for": "预判准入门槛和合规成本变化",
+      "may_miss": "市场自发的创新动力",
+      "binding_strength": "suggestive"
+    },
+    {
+      "lens": "资本周期视角（融资热度、估值、退出路径）",
+      "useful_for": "判断各领域所处Gartner曲线位置",
+      "may_miss": "慢变量如饮食习惯变迁",
+      "binding_strength": "suggestive"
+    },
+    {
+      "lens": "交叉融合视角（五领域交汇处的创新机会）",
+      "useful_for": "发现植物基代餐/功能预制菜等新物种",
+      "may_miss": "各领域独立发展的深度",
+      "binding_strength": "suggestive"
+    }
+  ],
+
+  "coverage_boundary": {
+    "adjacent_fields_not_explored": [
+      "餐饮SaaS和食品供应链数字化",
+      "食品包装技术与可持续包装",
+      "农业科技（垂直农业、细胞培养肉）",
+      "食品冷链物流与最后一公里配送"
+    ],
+    "opposing_perspectives_not_searched": [
+      "传统畜牧业对植物基食品的批评",
+      "营养学界对代餐长期安全性的质疑",
+      "消费者权益组织对预制菜添加剂的担忧"
+    ],
+    "second_order_effects_not_explored": [
+      "五领域发展对农业种植结构的改变",
+      "预制菜普及对餐饮业就业的影响",
+      "代餐流行对传统主食消费的冲击"
+    ],
+    "alternative_paths_not_explored": [
+      "按地域（一线城市vs下沉市场）而非按品类划分",
+      "按消费场景（家庭/办公/户外/医疗）交叉分析",
+      "按技术路线（发酵蛋白vs植物蛋白vs细胞培养）"
+    ],
+
+    "scan_scope": {
+      "zoom_level": "domain",
+      "scanned_angles": [
+        "用户query明示的五个子领域定义与边界",
+        "各领域已知头部企业与产品形态",
+        "术语歧义和交叉重叠的初步识别"
+      ],
+      "unscanned_angles": [
+        "各领域2024-2026最新市场数据",
+        "消费者调研和复购率实证数据",
+        "各领域具体融资事件和估值",
+        "各国监管政策最新文本",
+        "社交媒体和电商评论情感分析",
+        "各领域技术专利和研发管线"
+      ]
+    },
+
+    "lists_known_partial": {
+      "entities": {
+        "more_likely_in": [
+          "中国各领域头部企业（如味知香、汤臣倍健）",
+          "国际对标企业（Impossible Foods、Oatly）",
+          "新兴DTC品牌和初创公司"
+        ]
+      },
+      "subdomains": {
+        "alternative_partitions_exist": [
+          "by_value_chain",
+          "by_consumer_segment",
+          "by_technology_readiness"
+        ]
+      },
+      "terminology": {
+        "jargon_pockets_not_covered": [
+          "各领域行业黑话和缩写（如FSMP、FOSHU、HMR）",
+          "电商平台品类标签体系",
+          "投资圈术语（如植物基2.0、预制菜3R）"
+        ]
+      },
+      "unknowns": {
+        "research_will_surface_more": true
+      },
+      "disputes": {
+        "more_likely_in": [
+          "预制菜进校园的社会争议",
+          "植物基超加工属性健康争议",
+          "代餐长期营养安全性"
+        ]
+      },
+      "risks": {
+        "more_likely_in": [
+          "法规突变（如预制菜国标收紧）",
+          "消费者信任危机（食安事件）",
+          "资本退潮后的行业洗牌"
+        ]
+      }
+    }
+  },
+
+  "hypotheses_to_test": [
+    {
+      "claim": "预制菜是中国未来餐桌五大领域中增长最快、确定性最高的赛道",
+      "basis": "中国城镇化率提升、家庭小型化、餐饮连锁化率远低于发达国家",
+      "confidence": "medium",
+      "disconfirming_evidence": "若预制菜国标大幅收紧或出现重大食品安全事件，增速可能腰斩"
+    },
+    {
+      "claim": "植物基食品在中国市场已进入泡沫破裂后的理性调整期，短期内难回高速增长",
+      "basis": "Beyond Meat股价暴跌、中国植物基品牌融资降温、消费者复购率低",
+      "confidence": "medium",
+      "disconfirming_evidence": "若植物基技术突破实现成本大幅低于真肉，或政策强力补贴"
+    },
+    {
+      "claim": "功能食品与代餐的边界将持续模糊，个性化营养是二者的共同终局",
+      "basis": "AI+肠道菌群检测技术成熟、消费者从泛功能转向精准营养",
+      "confidence": "low",
+      "disconfirming_evidence": "个性化营养成本过高无法普及，或监管禁止AI驱动的功效声称"
+    }
+  ],
+
+  "risk_flags": [
+    {
+      "risk": "时效性",
+      "why_it_matters": "食品消费趋势变化快，数据易过时",
+      "mitigation": "限定2023-2026时间窗口，优先2024-2025数据",
+      "severity": "high"
+    },
+    {
+      "risk": "来源偏见",
+      "why_it_matters": "品牌方和行业媒体倾向乐观预测",
+      "mitigation": "交叉验证品牌方数据与第三方独立报告",
+      "severity": "medium"
+    },
+    {
+      "risk": "口径不一致",
+      "why_it_matters": "中英文市场报告对品类定义不同",
+      "mitigation": "开篇明确定义各领域边界，统一口径",
+      "severity": "high"
+    },
+    {
+      "risk": "数据过时",
+      "why_it_matters": "部分引用可能来自2022年前报告",
+      "mitigation": "优先使用2024年后数据，标注旧数据年份",
+      "severity": "medium"
+    },
+    {
+      "risk": "地区差异",
+      "why_it_matters": "中国一二线与下沉市场差异巨大",
+      "mitigation": "区分城市层级，避免以一线代全国",
+      "severity": "high"
+    },
+    {
+      "risk": "法规不确定",
+      "why_it_matters": "预制菜/代餐国标仍在制定中",
+      "mitigation": "标注"据征求意见稿"或"截至2026年X月"",
+      "severity": "high"
+    },
+    {
+      "risk": "营销话术",
+      "why_it_matters": "功能食品功效声称缺乏严格监管",
+      "mitigation": "区分科学证据与企业宣称，标注证据等级",
+      "severity": "medium"
+    },
+    {
+      "risk": "缺一手证据",
+      "why_it_matters": "消费者调研多为品牌方委托",
+      "mitigation": "寻找独立学术机构或统计局调研",
+      "severity": "medium"
+    },
+    {
+      "risk": "幸存者偏差",
+      "why_it_matters": "只看到成功品牌，忽略大量失败案例",
+      "mitigation": "主动搜索退市/倒闭品牌，纳入失败分析",
+      "severity": "medium"
+    },
+    {
+      "risk": "benchmark不可比",
+      "why_it_matters": "跨国对比时市场规模、人均消费口径不同",
+      "mitigation": "统一换算为美元/人均，标注汇率和基准年",
+      "severity": "medium"
+    }
+  ]
+}

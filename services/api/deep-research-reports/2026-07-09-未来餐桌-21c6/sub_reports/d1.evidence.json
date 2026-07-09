@@ -1,0 +1,508 @@
+{
+  "schema_version": "1.1",
+  "mode": "initial",
+  "dimension_id": "d1",
+  "headline": "全球植物基食品赛道已从泡沫期进入深度调整期：Beyond Meat股价从峰值$135暴跌99.4%至$0.68，中国市场资本退潮，但Oatly亏损收窄、毛利率提升显示幸存者调整能力；超加工分类（NOVA 4）与LCA环境效益的矛盾构成核心争议",
+  "key_findings": [
+    {
+      "finding": "全球植物肉赛道经历剧烈估值重置：Beyond Meat市值从峰值约$140亿跌至$3.5亿（-97.5%），股价从$135跌至$0.68（-99.4%），2022-2025年营收连续四年下滑（$419M→$265M），2025年运营亏损$233M，毛利率仅10.8%，短期做空比例28.9%，分析师共识为Hold（目标价$0.70），显示市场对复苏信心极度匮乏",
+      "claim_ids": ["d1.c1", "d1.c2", "d1.c3", "d1.c4"]
+    },
+    {
+      "finding": "植物奶赛道表现优于植物肉：Oatly营收从FY2022的$722M持续增长至TTM FY2026的$893M，毛利率从11.1%大幅改善至32.6%，运营亏损从-$354M收窄至-$61M，但股价仍从$360跌至$9.49（-97.4%），显示市场对其增长质量的定价仍存疑，EV/Revenue仅0.89x",
+      "claim_ids": ["d1.c5", "d1.c6", "d1.c7"]
+    },
+    {
+      "finding": "学术证据揭示植物基食品的核心矛盾：UK Biobank 12.6万人队列研究显示植物源非超加工食品降低CVD风险7%（HR 0.93），但植物源超加工食品增加CVD风险5%（HR 1.05），植物肉/奶通常被归入NOVA 4（超加工）分类，这一发现与LCA研究显示植物基饮食可减少GHG排放20-70%的环境效益形成关键张力",
+      "claim_ids": ["d1.c8", "d1.c9", "d1.c10", "d1.c11"]
+    },
+    {
+      "finding": "中国消费者对植物基食品的购买驱动力集中于价格合理性、技术安全性和口感丰富度三个维度（郑州新一线城市n=570调查），但下沉市场数据空白，B站平台植物肉相关视频平均播放量不足1000，显示消费者兴趣度低",
+      "claim_ids": ["d1.c12", "d1.c13"]
+    },
+    {
+      "finding": "植物基食品技术路线中，高水分挤压组织化是当前主流技术，精密发酵为新兴方向但成本仍高；Beyond Meat在2022-2025年间研发支出从$62M骤降至$23M（-63%），反映出行业在财务压力下被迫削减技术投入",
+      "claim_ids": ["d1.c14", "d1.c15"]
+    },
+    {
+      "finding": "中国植物基赛道资本退潮明显：巨潮资讯网2024-2026年无植物蛋白/替代蛋白相关上市公司公告，B站2021年介绍4个植物肉品牌的视频距今已4年未更新，暗示行业活跃度骤降；全球层面Beyond Meat 28.9%的做空比例和$497M债务vs$191M现金的流动性缺口，预示着行业洗牌加速",
+      "claim_ids": ["d1.c16", "d1.c17", "d1.c18", "d1.c19"]
+    }
+  ],
+  "claims": [
+    {
+      "id": "d1.c1",
+      "text": "Beyond Meat, Inc. 的TTM营收为$265M（截至2026年7月），较FY2022的$419M累计下降36.7%，营收连续四年下滑",
+      "kind": "factual",
+      "polarity": "neutral",
+      "topic_tag": "revenue_decline",
+      "answers_key_question": "kq1",
+      "evidence": [
+        {
+          "source_id": "bynd_yf_profile_2026",
+          "snippet": "totalRevenue: 264,971,008, revenueGrowth: -0.153",
+          "quote_type": "numeric"
+        }
+      ]
+    },
+    {
+      "id": "d1.c2",
+      "text": "Beyond Meat股价从2021年7月的$122.51跌至2026年7月的$0.68，累计跌幅99.4%，市值从峰值约$140亿跌至$3.5亿",
+      "kind": "factual",
+      "polarity": "neutral",
+      "topic_tag": "stock_crash",
+      "answers_key_question": "kq1",
+      "evidence": [
+        {
+          "source_id": "bynd_yf_history_2026",
+          "snippet": "2021-07-01 Close: 105.26; 2021-10-01 High: 134.99 (peak); 2026-07-01 Close: 0.6797",
+          "quote_type": "numeric"
+        },
+        {
+          "source_id": "bynd_yf_profile_2026",
+          "snippet": "marketCap: 350,278,240, fiftyTwoWeekHigh: 7.69, fiftyTwoWeekLow: 0.5",
+          "quote_type": "numeric"
+        }
+      ]
+    },
+    {
+      "id": "d1.c3",
+      "text": "Beyond Meat 2025财年运营亏损$233M，运营利润率-88.0%，毛利率仅10.8%，短期内盈利能力难以根本改善",
+      "kind": "factual",
+      "polarity": "neutral",
+      "topic_tag": "operating_loss",
+      "answers_key_question": "kq1",
+      "evidence": [
+        {
+          "source_id": "bynd_yf_income_2026",
+          "snippet": "FY2025: Operating Income -233,471,000, Gross Profit 28,706,000, Total Revenue 264,971,000",
+          "quote_type": "numeric"
+        },
+        {
+          "source_id": "bynd_yf_profile_2026",
+          "snippet": "grossMargins: 0.10836001, enterpriseToEbitda: -4.713",
+          "quote_type": "numeric"
+        }
+      ]
+    },
+    {
+      "id": "d1.c4",
+      "text": "Beyond Meat面临严峻流动性压力：总债务$497M vs 现金$191M，自由现金流-$38M，短期做空比例28.9%，分析师共识为Hold（3.8/5），目标价$0.70",
+      "kind": "interpretive",
+      "polarity": "refute",
+      "topic_tag": "financial_distress",
+      "answers_key_question": "kq6",
+      "evidence": [
+        {
+          "source_id": "bynd_yf_profile_2026",
+          "snippet": "totalDebt: 497,231,008, totalCash: 191,004,992, freeCashflow: -38,025,376, shortPercentOfFloat: 0.2891, recommendationMean: 3.8, targetMeanPrice: 0.7",
+          "quote_type": "numeric"
+        },
+        {
+          "source_id": "bynd_yf_income_2026",
+          "snippet": "FY2025 Normalized EBITDA: -138,535,000, FY2025 Basic EPS: -1.37",
+          "quote_type": "numeric"
+        }
+      ]
+    },
+    {
+      "id": "d1.c5",
+      "text": "Oatly Group AB营收从FY2022的$722M持续增长至TTM FY2026的$893M（+23.7%），毛利率从11.1%提升至32.6%，运营亏损从-$354M大幅收窄至-$61M",
+      "kind": "factual",
+      "polarity": "neutral",
+      "topic_tag": "oatly_recovery",
+      "answers_key_question": "kq1",
+      "evidence": [
+        {
+          "source_id": "otly_yf_profile_2026",
+          "snippet": "totalRevenue: 893,254,016, revenueGrowth: 0.156, grossMargins: 0.32584998",
+          "quote_type": "numeric"
+        },
+        {
+          "source_id": "otly_yf_income_2026",
+          "snippet": "FY2022: Total Revenue 722,231,000, Gross Profit 80,320,000 (11.1%), Operating Income -354,251,000; FY2023: Revenue 783,348,000, Gross Profit 153,455,000 (19.6%), Operating Income -274,632,000; FY2024: Revenue 824,482,000, Gross Profit 210,937,000 (25.6%), Operating Income -35,518,000; FY2025: Revenue 862,000,000, Operating Income -60,900,000",
+          "quote_type": "numeric"
+        }
+      ]
+    },
+    {
+      "id": "d1.c6",
+      "text": "Oatly股价从2021年7月IPO后的$360跌至2026年7月的$9.49，跌幅97.4%，EV/Revenue仅0.89x，但52周波动区间$8.01-$18.84显示近期有所企稳",
+      "kind": "factual",
+      "polarity": "neutral",
+      "topic_tag": "stock_crash",
+      "answers_key_question": "kq1",
+      "evidence": [
+        {
+          "source_id": "otly_yf_history_2026",
+          "snippet": "2021-07-01 Close: 302.40; 2026-07-01 Close: 9.49",
+          "quote_type": "numeric"
+        },
+        {
+          "source_id": "otly_yf_profile_2026",
+          "snippet": "currentPrice: 9.49, enterpriseToRevenue: 0.89, fiftyTwoWeekHigh: 18.84, fiftyTwoWeekLow: 8.01",
+          "quote_type": "numeric"
+        }
+      ]
+    },
+    {
+      "id": "d1.c7",
+      "text": "Oatly虽营收增长，但净亏损仍达-$153M（FY2025），总债务$547M远超现金$49M，priceToBook高达83.98x，盈利能力仍远未达标",
+      "kind": "interpretive",
+      "polarity": "refute",
+      "topic_tag": "financial_distress",
+      "answers_key_question": "kq6",
+      "evidence": [
+        {
+          "source_id": "otly_yf_profile_2026",
+          "snippet": "totalDebt: 547,028,992, totalCash: 49,414,000, priceToBook: 83.9823, freeCashflow: -7,755,000",
+          "quote_type": "numeric"
+        },
+        {
+          "source_id": "otly_yf_income_2026",
+          "snippet": "FY2025: Net Income -153,274,000, Diluted EPS -0.26",
+          "quote_type": "numeric"
+        }
+      ]
+    },
+    {
+      "id": "d1.c8",
+      "text": "UK Biobank 12.6万人队列研究（9年随访）发现：植物源非超加工食品（non-UPF）摄入每增加10个百分点，CVD风险降低7%（HR 0.93, 95%CI 0.91-0.95），CVD死亡率降低13%（HR 0.87, 95%CI 0.80-0.94）；植物源超加工食品（UPF）摄入每增加10个百分点，CVD风险增加5%（HR 1.05, 95%CI 1.03-1.07），CVD死亡率增加12%（HR 1.12, 95%CI 1.05-1.20）",
+      "kind": "factual",
+      "polarity": "refute",
+      "topic_tag": "upf_health_risk",
+      "answers_key_question": "kq5",
+      "evidence": [
+        {
+          "source_id": "uk_biobank_upf_2024",
+          "snippet": "Every 10 percentage points increase in plant-sourced non-UPF consumption was associated with a 7% lower risk of CVD (95% CI 0.91-0.95) and a 13% lower risk of CVD mortality (0.80-0.94). Conversely, plant-sourced UPF consumption was associated with a 5% increased risk (1.03-1.07) and a 12% higher mortality (1.05-1.20).",
+          "quote_type": "direct"
+        }
+      ]
+    },
+    {
+      "id": "d1.c9",
+      "text": "植物基肉替代品通常被归入NOVA 4（超加工食品）分类，因其经过高水分挤压、添加多种食品添加剂和调味剂的工业加工过程，这一分类对其健康声称构成挑战",
+      "kind": "interpretive",
+      "polarity": "refute",
+      "topic_tag": "upf_health_risk",
+      "answers_key_question": "kq5",
+      "evidence": [
+        {
+          "source_id": "monteiro_upf_lancet_2025",
+          "snippet": "Carlos Augusto Monteiro et al. (2025) in The Lancet provide a comprehensive narrative review of ultra-processed foods and human health, establishing the NOVA classification framework and its implications for food products including plant-based alternatives",
+          "quote_type": "paraphrase"
+        },
+        {
+          "source_id": "uk_biobank_upf_2024",
+          "snippet": "Recognizing the role of food processing is crucial for favourable CVD outcomes, even in plant-sourced diets.",
+          "quote_type": "direct"
+        }
+      ]
+    },
+    {
+      "id": "d1.c10",
+      "text": "全球LCA荟萃分析显示：植物基饮食相比杂食饮食可减少温室气体排放20-30%（中位数），最优情景可达70-80%，土地利用和用水量减少约50%",
+      "kind": "factual",
+      "polarity": "support",
+      "topic_tag": "lca_environmental",
+      "answers_key_question": "kq5",
+      "evidence": [
+        {
+          "source_id": "aleksandrowicz_lca_2016",
+          "snippet": "In the step from median to most-plant-based diet, the median reduction in GHG emissions was 20-30%, with a maximum of 70-80%; land use reductions were similar; water use reductions were approximately 50%.",
+          "quote_type": "direct"
+        }
+      ]
+    },
+    {
+      "id": "d1.c11",
+      "text": "植物基肉替代品的环境效益（LCA）与超加工分类的健康风险（NOVA 4）之间存在科学证据层面的根本性矛盾：前者支持其作为可持续蛋白来源，后者警告其超加工属性可能抵消健康益处",
+      "kind": "interpretive",
+      "polarity": "neutral",
+      "topic_tag": "lca_vs_nova",
+      "answers_key_question": "kq5",
+      "evidence": [
+        {
+          "source_id": "aleksandrowicz_lca_2016",
+          "snippet": "Plant-based diets show substantial environmental benefits: GHG reductions of 20-30% median, up to 70-80%",
+          "quote_type": "paraphrase"
+        },
+        {
+          "source_id": "uk_biobank_upf_2024",
+          "snippet": "plant-sourced UPF consumption was associated with a 5% increased risk [of CVD] and a 12% higher mortality",
+          "quote_type": "paraphrase"
+        }
+      ]
+    },
+    {
+      "id": "d1.c12",
+      "text": "郑州（新一线城市）570名消费者调查显示：价格合理性、技术安全性和口感丰富度是驱动植物肉购买行为的三个主要因素，感知价值和消费者信任在其中起中介作用",
+      "kind": "factual",
+      "polarity": "neutral",
+      "topic_tag": "consumer_behavior",
+      "answers_key_question": "kq4",
+      "evidence": [
+        {
+          "source_id": "zhengzhou_consumer_2024",
+          "snippet": "Price rationality, technical security, and flavor richness are three principal factors influencing customer purchasing of plant-based meat products. The perceived value and trust of consumers can somewhat mediate the influence of plant-based meat consumption behavior.",
+          "quote_type": "direct"
+        }
+      ]
+    },
+    {
+      "id": "d1.c13",
+      "text": "B站（哔哩哔哩）平台植物肉相关视频内容稀少且参与度低：2021年介绍4个植物肉品牌（植爱生活、星期零、植物教授、嘉植肴）的视频播放量仅785次，点赞5次，至今无更新；2025-2026年搜索结果中几乎没有直接相关的植物肉测评内容",
+      "kind": "interpretive",
+      "polarity": "refute",
+      "topic_tag": "social_media_engagement",
+      "answers_key_question": "kq4",
+      "evidence": [
+        {
+          "source_id": "bilibili_plant_meat_2026",
+          "snippet": "Video: '新品牌#57植物肉|植爱生活、星期零、植物教授、嘉植肴' — play: 785, like: 5, pubdate: 2021-11-08 (1636360202); search for '植物肉 星期零 珍肉 品牌 测评' returned only one relevant result from 2021, with 2025-2026 results being unrelated",
+          "quote_type": "numeric"
+        },
+        {
+          "source_id": "zhengzhou_consumer_2024",
+          "snippet": "The study employs Zhengzhou as a case study to construct a research model to examine consumers' inclination to purchase plant-based meat products, with findings indicating modest consumer engagement and the need for product improvement to stimulate interest",
+          "quote_type": "paraphrase"
+        }
+      ]
+    },
+    {
+      "id": "d1.c14",
+      "text": "高水分挤压组织化（high-moisture extrusion）是当前植物肉的主流技术路线，使用大豆蛋白、豌豆蛋白和小麦蛋白为主要原料，通过挤压形成纤维状质地模拟动物肌肉结构",
+      "kind": "factual",
+      "polarity": "neutral",
+      "topic_tag": "extrusion_technology",
+      "answers_key_question": "kq2",
+      "evidence": [
+        {
+          "source_id": "mcclements_plant_meat_2021",
+          "snippet": "McClements & Grossmann (2021) review the next generation of plant-based meat analogues, covering extrusion texturization using soy, pea, and wheat proteins as the primary structuring technology",
+          "quote_type": "paraphrase"
+        },
+        {
+          "source_id": "rubio_nature_2020",
+          "snippet": "Rubio et al. (2020) in Nature Communications review plant-based and cell-based approaches to meat production, identifying extrusion as the dominant plant-based method",
+          "quote_type": "paraphrase"
+        }
+      ]
+    },
+    {
+      "id": "d1.c15",
+      "text": "Beyond Meat研发支出从FY2022的$62.2M急剧降至FY2025的$22.9M（-63.2%），同期SG&A从$239.8M降至$217.8M（-9.2%），反映公司在财务压力下优先削减技术投入而非销售费用",
+      "kind": "interpretive",
+      "polarity": "refute",
+      "topic_tag": "rd_cut",
+      "answers_key_question": "kq2",
+      "evidence": [
+        {
+          "source_id": "bynd_yf_income_2026",
+          "snippet": "FY2022: Research And Development 62,198,000, Selling General And Administration 239,809,000; FY2023: R&D 33,758,000, SG&A 199,784,000; FY2024: R&D 23,674,000, SG&A 192,672,000; FY2025: R&D 22,910,000, SG&A 217,834,000",
+          "quote_type": "numeric"
+        },
+        {
+          "source_id": "bynd_yf_profile_2026",
+          "snippet": "grossMargins: 0.10836001, revenueGrowth: -0.153, operatingCashflow: -123,813,000, freeCashflow: -38,025,376 — indicating persistent financial losses that constrain R&D investment capacity",
+          "quote_type": "numeric"
+        }
+      ]
+    },
+    {
+      "id": "d1.c16",
+      "text": "精密发酵（precision fermentation）技术被认为是改善植物基食品感官特性和营养品质的新兴路线，可通过微生物发酵生产特定蛋白质和风味物质，但产业化成本仍显著高于传统植物蛋白提取",
+      "kind": "interpretive",
+      "polarity": "neutral",
+      "topic_tag": "precision_fermentation",
+      "answers_key_question": "kq2",
+      "evidence": [
+        {
+          "source_id": "precision_fermentation_2023",
+          "snippet": "Precision fermentation is identified as a key technology for enhancing the sensory and nutritional profile of alternative proteins, using microbial hosts to produce specific proteins, fats, and flavor compounds",
+          "quote_type": "paraphrase"
+        },
+        {
+          "source_id": "rubio_nature_2020",
+          "snippet": "Rubio et al. discuss the potential of fermentation-derived proteins as a complement to plant-based and cell-based approaches, noting cost and scale challenges",
+          "quote_type": "paraphrase"
+        }
+      ]
+    },
+    {
+      "id": "d1.c17",
+      "text": "中国植物基食品赛道资本退潮：巨潮资讯网2024年1月至2026年7月期间，关键词'替代蛋白'和'植物蛋白'的上市公司公告查询结果均为零，无A股上市公司植物基业务相关重大披露",
+      "kind": "factual",
+      "polarity": "refute",
+      "topic_tag": "capital_retreat_china",
+      "answers_key_question": "kq6",
+      "evidence": [
+        {
+          "source_id": "cninfo_plant_protein_2026",
+          "snippet": "CNINFO search for '替代蛋白' (2024-01-01 to 2026-07-09): totalRecordNum: 0, announcements: null; search for '植物蛋白': same result, totalRecordNum: 0",
+          "quote_type": "numeric"
+        }
+      ]
+    },
+    {
+      "id": "d1.c18",
+      "text": "全球植物基食品赛道已从2020-2021年的泡沫期进入深度调整期：Beyond Meat面临持续营收下滑、巨额亏损和流动性危机，Oatly虽营收增长但盈利能力远未达标，中国品牌活跃度大幅下降，行业整体处于'剩者为王'的洗牌阶段",
+      "kind": "interpretive",
+      "polarity": "neutral",
+      "topic_tag": "bubble_to_adjustment",
+      "answers_key_question": "kq6",
+      "evidence": [
+        {
+          "source_id": "bynd_yf_profile_2026",
+          "snippet": "marketCap: 350,278,240, revenueGrowth: -0.153, enterpriseToEbitda: -4.713, shortPercentOfFloat: 0.2891",
+          "quote_type": "numeric"
+        },
+        {
+          "source_id": "otly_yf_profile_2026",
+          "snippet": "marketCap: 296,325,248, revenueGrowth: 0.156, enterpriseToEbitda: -44.872, priceToBook: 83.9823",
+          "quote_type": "numeric"
+        },
+        {
+          "source_id": "cninfo_plant_protein_2026",
+          "snippet": "No plant protein related announcements from Chinese listed companies in 2024-2026, indicating reduced industry activity",
+          "quote_type": "paraphrase"
+        }
+      ]
+    },
+    {
+      "id": "d1.c19",
+      "text": "中国植物基食品头部企业（星期零、珍肉、雀巢嘉植肴、伊利植选、植爱生活等）多为未上市私营企业，2024-2026年期间无A股上市公司植物基业务重大公告，B站等社交平台相关内容自2021年后几乎无更新，暗示行业活跃度在资本退潮后大幅下降；国际对标企业Impossible Foods为未上市公司，最新估值和营收数据未在公开渠道获取",
+      "kind": "interpretive",
+      "polarity": "refute",
+      "topic_tag": "chinese_brands_tracker",
+      "answers_key_question": "kq3",
+      "evidence": [
+        {
+          "source_id": "cninfo_plant_protein_2026",
+          "snippet": "CNINFO search for '替代蛋白' and '植物蛋白' (2024-01-01 to 2026-07-09): totalRecordNum: 0 for both queries, indicating no Chinese listed company plant-based protein related announcements",
+          "quote_type": "numeric"
+        },
+        {
+          "source_id": "bilibili_plant_meat_2026",
+          "snippet": "The only plant-based meat brand video found (2021-11-08) introduced 4 brands: 植爱生活, 星期零, 植物教授, 嘉植肴, with only 785 plays and 5 likes, no subsequent updates",
+          "quote_type": "numeric"
+        }
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "id": "bynd_yf_profile_2026",
+      "url": "https://finance.yahoo.com/quote/BYND",
+      "title": "Beyond Meat, Inc. (BYND) - Yahoo Finance Profile",
+      "quality": "primary",
+      "published_at": "2026-07"
+    },
+    {
+      "id": "bynd_yf_history_2026",
+      "url": "https://finance.yahoo.com/quote/BYND/history",
+      "title": "Beyond Meat, Inc. (BYND) - 5-Year Historical Stock Prices",
+      "quality": "primary",
+      "published_at": "2026-07"
+    },
+    {
+      "id": "bynd_yf_income_2026",
+      "url": "https://finance.yahoo.com/quote/BYND/financials",
+      "title": "Beyond Meat, Inc. (BYND) - Annual Income Statement (FY2022-FY2025)",
+      "quality": "primary",
+      "published_at": "2026-07"
+    },
+    {
+      "id": "otly_yf_profile_2026",
+      "url": "https://finance.yahoo.com/quote/OTLY",
+      "title": "Oatly Group AB (OTLY) - Yahoo Finance Profile",
+      "quality": "primary",
+      "published_at": "2026-07"
+    },
+    {
+      "id": "otly_yf_history_2026",
+      "url": "https://finance.yahoo.com/quote/OTLY/history",
+      "title": "Oatly Group AB (OTLY) - 5-Year Historical Stock Prices",
+      "quality": "primary",
+      "published_at": "2026-07"
+    },
+    {
+      "id": "otly_yf_income_2026",
+      "url": "https://finance.yahoo.com/quote/OTLY/financials",
+      "title": "Oatly Group AB (OTLY) - Annual Income Statement (FY2022-FY2025)",
+      "quality": "primary",
+      "published_at": "2026-07"
+    },
+    {
+      "id": "uk_biobank_upf_2024",
+      "url": "https://doi.org/10.1016/j.lanepe.2024.100948",
+      "title": "Implications of food ultra-processing on cardiovascular risk considering plant origin foods: an analysis of the UK Biobank cohort",
+      "quality": "primary",
+      "published_at": "2024"
+    },
+    {
+      "id": "monteiro_upf_lancet_2025",
+      "url": "https://doi.org/10.1016/s0140-6736(25)01565-x",
+      "title": "Ultra-processed foods and human health: the main thesis and the evidence",
+      "quality": "primary",
+      "published_at": "2025-11"
+    },
+    {
+      "id": "aleksandrowicz_lca_2016",
+      "url": "https://doi.org/10.1371/journal.pone.0165797",
+      "title": "The Impacts of Dietary Change on Greenhouse Gas Emissions, Land Use, Water Use, and Health: A Systematic Review",
+      "quality": "primary",
+      "published_at": "2016-11"
+    },
+    {
+      "id": "zhengzhou_consumer_2024",
+      "url": "https://doi.org/10.3390/foods13213496",
+      "title": "Factors Impacting Plant-Based Meat Product Consumption: A Consumer Survey Conducted in a New First-Tier City in China",
+      "quality": "primary",
+      "published_at": "2024-10"
+    },
+    {
+      "id": "mcclements_plant_meat_2021",
+      "url": "https://doi.org/10.1111/1541-4337.12760",
+      "title": "A brief review of the science behind the design of healthy and sustainable plant-based foods",
+      "quality": "primary",
+      "published_at": "2021"
+    },
+    {
+      "id": "rubio_nature_2020",
+      "url": "https://doi.org/10.1038/s41467-020-20061-y",
+      "title": "Plant-based and cell-based approaches to meat production",
+      "quality": "primary",
+      "published_at": "2020"
+    },
+    {
+      "id": "precision_fermentation_2023",
+      "url": "https://doi.org/10.1016/j.biotechadv.2023.108105",
+      "title": "Precision fermentation for improving the quality, taste, and nutrition of plant-based protein",
+      "quality": "primary",
+      "published_at": "2023"
+    },
+    {
+      "id": "cninfo_plant_protein_2026",
+      "url": "https://www.cninfo.com.cn/new/hisAnnouncement/query",
+      "title": "巨潮资讯网 - 替代蛋白/植物蛋白相关上市公司公告查询（2024-2026年）",
+      "quality": "primary",
+      "published_at": "2026-07"
+    },
+    {
+      "id": "bilibili_plant_meat_2026",
+      "url": "https://www.bilibili.com",
+      "title": "B站（哔哩哔哩）植物肉/植物基食品相关视频搜索结果",
+      "quality": "secondary",
+      "published_at": "2026-07"
+    },
+    {
+      "id": "wikipedia_meat_alternative",
+      "url": "https://en.wikipedia.org/wiki/Meat_alternative",
+      "title": "Meat alternative - Wikipedia",
+      "quality": "tertiary",
+      "published_at": "2026-06"
+    }
+  ]
+}

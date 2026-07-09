@@ -6,7 +6,7 @@ import { ModelSelector } from "./model-selector";
 import { SkillSelector } from "./skill-selector";
 import type { SkillKey } from "@/types";
 import { useChatStore, useUiStore } from "@/stores";
-import { ArrowUp, Sparkles } from "lucide-react";
+import { ArrowUp, Sparkles, Square } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 
 export function ChatComposer() {
@@ -14,8 +14,11 @@ export function ChatComposer() {
   const [content, setContent] = useState("");
   const [skillKey, setSkillKey] = useState<SkillKey | undefined>();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const activeAgentRunId = useChatStore((state) => state.activeAgentRunId);
   const sendMessage = useChatStore((state) => state.sendMessage);
+  const stopActiveRun = useChatStore((state) => state.stopActiveRun);
   const sendShortcut = useUiStore((state) => state.sendShortcut);
+  const running = Boolean(activeAgentRunId);
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -30,7 +33,7 @@ export function ChatComposer() {
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!content.trim()) {
+    if (!content.trim() || running) {
       return;
     }
 
@@ -76,13 +79,27 @@ export function ChatComposer() {
             <SkillSelector value={skillKey} onChange={setSkillKey} />
             <ModelSelector />
           </div>
-          <button
-            className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-[#242424] text-white hover:bg-[#111] disabled:cursor-not-allowed disabled:opacity-40"
-            disabled={!content.trim()}
-            type="submit"
-          >
-            <ArrowUp className="size-4" />
-          </button>
+          <div className="flex shrink-0 items-center gap-1.5">
+            {running ? (
+              <button
+                aria-label={t("stop")}
+                className="flex size-8 items-center justify-center rounded-lg border border-[#d8d8d2] bg-white text-muted-foreground hover:bg-[#f1f1ed] hover:text-foreground"
+                onClick={stopActiveRun}
+                title={t("stop")}
+                type="button"
+              >
+                <Square className="size-3.5" />
+              </button>
+            ) : null}
+            <button
+              aria-label={t("send")}
+              className="flex size-8 items-center justify-center rounded-lg bg-[#242424] text-white hover:bg-[#111] disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={!content.trim() || running}
+              type="submit"
+            >
+              <ArrowUp className="size-4" />
+            </button>
+          </div>
         </div>
       </div>
     </form>

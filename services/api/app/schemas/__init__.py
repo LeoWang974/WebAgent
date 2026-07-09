@@ -1,4 +1,4 @@
-from app.schemas.agent_run import AgentRun, AgentRunCreate, AgentRunEvent
+from app.schemas.agent_run import AgentRun, AgentRunCreate, AgentRunEvent, AgentRunStep
 from app.schemas.artifact import Artifact, FileAsset
 from app.schemas.auth import AuthResult, LoginInput
 from app.schemas.message import Message, MessageCreate, SendMessageResult
@@ -12,6 +12,7 @@ __all__ = [
     "AgentRun",
     "AgentRunCreate",
     "AgentRunEvent",
+    "AgentRunStep",
     "Artifact",
     "AuthResult",
     "DataContextSettings",
@@ -28,4 +29,3 @@ __all__ = [
     "Skill",
     "User",
 ]
-

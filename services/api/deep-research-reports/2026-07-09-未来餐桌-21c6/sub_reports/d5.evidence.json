@@ -1,0 +1,536 @@
+{
+  "schema_version": "1.1",
+  "mode": "initial",
+  "dimension_id": "d5",
+  "headline": "全球健康饮食消费趋势正在加速转型。2024年全球仍有31.9%的人口无法负担健康饮食，较2020年的36.9%和2017年的38.4%有所改善，但非洲高达66.6%。FAO和WHO定义了健康饮食四大原则：充足性、多样性、平衡性和适度性。美国成人饮食质量在1999-2012年间有所改善，AHA饮食评分从19.0提升至21.2（满分50），主要得益于全谷物和坚果摄入增加。中国方面，COVID-19疫情",
+  "key_findings": [
+    {
+      "finding": "全球健康饮食消费趋势正在加速转型。2024年全球仍有31.9%的人口无法负担健康饮食，较2020年的36.9%和2017年的38.4%有所改善，但非洲高达66.6%。FAO和WHO定义了健康饮食四大原则：充足性、多样性、平衡性和适度性。美国成人饮食质量在1999-2012年间有所改善，AHA饮食评分从19.0提升至21.2（满分50），主要得益于全谷物和坚果摄入增加。中国方面，COVID-19疫情成为饮食行为转折点，61.6%减少外出就餐，64.8%增加居家烹饪，良好饮食习惯比例从疫情前68.4%增至71.8%。但中国居民膳食指南知晓率仅37.4%，谷物、蔬菜、水果、乳制品摄入仍不足，肉类摄入过量。糖消费方面，全球游离糖摄入儿童和青少年最高（12-14%E），老年人最低（8%E），整体仍高于推荐水平。SSB（含糖饮料）消费北美、拉美、澳大拉西亚和西欧最高，中国等中等收入国家增长最快。",
+      "claim_ids": [
+        "d5.c1",
+        "d5.c2",
+        "d5.c3",
+        "d5.c4",
+        "d5.c5",
+        "d5.c6"
+      ]
+    },
+    {
+      "finding": "全球膳食指南正在向更多植物基、全谷物、减盐减糖方向演进。美国膳食指南（DGA）自1980年首次发布，每五年修订，2026年1月发布第10版。DGA强调全谷物、水果蔬菜、低脂乳制品，限制添加糖和饱和脂肪。中国2022版《中国居民膳食指南》更新了膳食宝塔，但知晓率仅37.4%。中国政府在2019年《健康中国行动（2019-2030）》中设定人均每日添加糖摄入不超过25克的目标。WHO推荐游离糖摄入低于总能量10%，并建议进一步降至5%以下。中国素食主义正在增长，2013年估计4-5%人口为素食者（超过5000万人），2020年中国素食协会推广纯素汉字“茻”。中国政府在2016年发布膳食指南目标将肉类消费减少50%。EAT-Lancet委员会倡导“星球健康饮食”，强调植物基食物为主。",
+      "claim_ids": [
+        "d5.c7",
+        "d5.c8",
+        "d5.c9",
+        "d5.c10",
+        "d5.c11",
+        "d5.c12"
+      ]
+    },
+    {
+      "finding": "全球减糖已成为不可逆趋势，代糖市场快速增长。常见代糖包括阿斯巴甜、罗汉果提取物、糖精、三氯蔗糖、甜菊糖苷、安赛蜜和甜蜜素。糖醇类如赤藓糖醇、木糖醇、山梨糖醇也广泛使用。安全性方面，已批准的代糖未发现与癌症的直接关联，适量使用可帮助控制能量摄入和血糖。但2023年WHO建议不要使用非糖甜味剂控制体重，引发争议。饮料行业减糖策略包括直接减糖、多感官整合、甜味剂和甜味增强剂。非营养甜味剂（NNS）的消费趋势显示全球饮料中NNS使用增加，但不同地区和产品类别的纵向趋势仍需进一步研究。NNS的潜在超加工食品替代效应引发关注。全球含糖饮料税政策在墨西哥等国已见成效。",
+      "claim_ids": [
+        "d5.c13",
+        "d5.c14",
+        "d5.c15",
+        "d5.c16",
+        "d5.c17",
+        "d5.c18"
+      ]
+    },
+    {
+      "finding": "清洁标签已成为全球食品行业定义性趋势，但缺乏统一定义。Asioli等（2017）提出清洁标签的广义定义（消费者通过前包装推断）和严格定义（通过后包装配料表检查）。消费者动机以“健康”为主，但受内在/外在产品特征和社会文化因素多元驱动。中国方面，Bilibili内容显示清洁标签概念正在普及，但存在“清洁标签≠健康”的消费者教育需求。2025年新国标GB 28050-2025和GB 7718-2025将规范“0糖”“0添加”等宣称，打击误导性标签。蛋白质饮料消费者调查显示，消费者最看重“可识别成分”和“简单语言”，对过多配料表示怀疑。肉类行业清洁标签方案包括使用植物源硝酸盐替代亚硝酸钠。功能性配料（亲水胶体、植物基成分）为清洁标签提供新路径。技术创新（HPP、PEF、冷等离子体）正在推动清洁标签产品开发。",
+      "claim_ids": [
+        "d5.c19",
+        "d5.c20",
+        "d5.c21",
+        "d5.c22",
+        "d5.c23",
+        "d5.c24",
+        "d5.c25"
+      ]
+    },
+    {
+      "finding": "健康饮食与四大细分领域深度交叉。植物基饮食方面，全球植物基饮食运动正在增长，WHO 2021年声明植物基饮食构成健康生活方式。中国2013年已有超过5000万素食者。弹性素食（flexitarian）被认为比纯素更可持续，Moreno等（2022）指出弹性素食可满足不同人群需求且无需膳食教育或补充剂。代餐方面，欧盟指令96/8/EC规定代餐必须提供200-400千卡热量，脂肪不超过30%能量，必须标注使用不超过三周需医疗建议。美国FDA未定义“代餐”，但通常指热量控制、预包装的棒或饮料，强化20多种维生素和矿物质。功能食品方面，该术语1980年代起源于日本FOSHU制度，欧盟FUFOSE定义功能性食品为“超越营养有益身体功能”。预制菜（prepared meals）虽在本次研究中证据有限，但清洁标签和减盐减糖趋势正在重塑预制菜行业。",
+      "claim_ids": [
+        "d5.c26",
+        "d5.c27",
+        "d5.c28",
+        "d5.c29",
+        "d5.c30",
+        "d5.c31"
+      ]
+    },
+    {
+      "finding": "未来饮食行为正朝个性化、数字化和可持续化方向发展。弹性素食（flexitarian）成为主流趋势，被认为是比纯素更可持续的路径。UK Biobank研究（2024）显示，弹性素食者超加工食品（UPF）消费为22.0%，低于常规红肉食者的24.2%，但素食者UPF消费反而更高（23.8%）。Gillies等（2023）首次随机对照试验显示，弹性素食组（含红肉）的依从性（96.1/100）显著高于植物肉替代组（86.7/100）。全球肉类需求预计2030年超过376 MMT（百万公吨），弹性素食被视为可持续生产的关键。植物基饮食创新包括肉替代品、乳替代品、蛋替代品、海鲜替代品。但并非所有动物食品替代品都可持续，部分甚至是超加工食品。消费者对精密发酵和细胞农业技术认知度低。AI驱动的成分创新、个性化营养、预测货架期模型被视为清洁标签未来方向。",
+      "claim_ids": [
+        "d5.c32",
+        "d5.c33",
+        "d5.c34",
+        "d5.c35",
+        "d5.c36",
+        "d5.c37",
+        "d5.c38"
+      ]
+    }
+  ],
+  "claims": [
+    {
+      "id": "d5.c1",
+      "content": "2024年全球31.9%人口无法负担健康饮食，较2020年的36.9%改善。非洲66.6%、亚洲28.1%、拉美27.4%、大洋洲19.6%、北美和欧洲5.0%。FAO和WHO定义健康饮食四大原则：充足性、多样性、平衡性、适度性。",
+      "source": "Wikipedia/Healthy diet",
+      "source_url": "https://en.wikipedia.org/wiki/Healthy_diet",
+      "type": "encyclopedia",
+      "title": "全球健康饮食可负担性数据",
+      "relevance": "提供全球健康饮食宏观背景和可负担性数据",
+      "confidence": 0.9,
+      "topic_tag": "d5-kq1-e1"
+    },
+    {
+      "id": "d5.c2",
+      "content": "基于NHANES 33,932名成人数据，AHA初级饮食评分从19.0提升至21.2（满分50），改善11.6%。全谷物摄入增加0.43份/天，坚果/种子增加0.25份/天。但含糖饮料、钠摄入仍远高于推荐水平。",
+      "source": "PubMed/JAMA (2016)",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/27327801/",
+      "type": "academic_journal",
+      "title": "美国成人饮食摄入趋势1999-2012",
+      "relevance": "量化美国饮食质量改善趋势，为全球参照",
+      "confidence": 0.9,
+      "topic_tag": "d5-kq1-e2"
+    },
+    {
+      "id": "d5.c3",
+      "content": "相比2019年，61.6%减少外出就餐，64.8%增加居家烹饪，53.1%减少海鲜消费，60.5%减少生食。在线购买食品依赖度增加与更高膳食多样性显著相关。",
+      "source": "PubMed/Nutrients (2020)",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/33114499/",
+      "type": "academic_journal",
+      "title": "COVID-19后中国居民膳食行为变化",
+      "relevance": "揭示疫情对中国居民饮食行为的结构性影响",
+      "confidence": 0.85,
+      "topic_tag": "d5-kq1-e3"
+    },
+    {
+      "id": "d5.c4",
+      "content": "基于141,250名参与者，良好饮食习惯比例从疫情前68.4%增至封锁期71.2%，后维持71.8%。男性吸烟率从39.2%降至34.8%。",
+      "source": "PubMed/International Health (2025)",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/40331255/",
+      "type": "academic_journal",
+      "title": "中国10万人生活方式纵向研究",
+      "relevance": "大规模纵向数据验证中国居民健康行为改善趋势",
+      "confidence": 0.9,
+      "topic_tag": "d5-kq1-e4"
+    },
+    {
+      "id": "d5.c5",
+      "content": "全球游离糖摄入儿童和青少年最高（12-14%E），老年人最低（8%E）。整体游离糖/添加糖摄入仍高于推荐水平。发展中国家缺乏高质量糖摄入数据，需要国际协调统一糖术语定义。",
+      "source": "PubMed/Nutrition Research Reviews (2023)",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/34369326/",
+      "type": "academic_journal",
+      "title": "全球糖消费现状与趋势",
+      "relevance": "提供全球糖消费基线数据，为减糖趋势提供背景",
+      "confidence": 0.9,
+      "topic_tag": "d5-kq1-e5"
+    },
+    {
+      "id": "d5.c6",
+      "content": "美国食品供应中74%产品含热量或低热量甜味剂。2013年美国家庭购买包装食品68%热量含甜味剂。SSB消费最高区域：北美、拉美、澳大拉西亚、西欧。2009-2014年SSB增长最快国家为智利。政府应对措施包括税收（墨西哥）、学校限制、营销限制、正面/负面标签。",
+      "source": "PubMed/The Lancet Diabetes & Endocrinology (2016)",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/26654575/",
+      "type": "academic_journal",
+      "title": "全球饮食甜化趋势与政策应对",
+      "relevance": "全球含糖饮料消费趋势和政策干预的权威综述",
+      "confidence": 0.95,
+      "topic_tag": "d5-kq1-e6"
+    },
+    {
+      "id": "d5.c7",
+      "content": "DGA自1980年首次发布，每五年修订，2026年1月发布第10版。由USDA和HHS联合发布。配套健康饮食指数（HEI）评估饮食质量。DGA是美国联邦社会福利项目（SNAP、WIC等）的核心科学依据。面临统一膳食建议和不偏袒食品行业的批评。",
+      "source": "Wikipedia/Dietary Guidelines for Americans",
+      "source_url": "https://en.wikipedia.org/wiki/Dietary_Guidelines_for_Americans",
+      "type": "encyclopedia",
+      "title": "美国膳食指南演进",
+      "relevance": "提供美国膳食指南制度框架和历史演进",
+      "confidence": 0.9,
+      "topic_tag": "d5-kq2-e1"
+    },
+    {
+      "id": "d5.c8",
+      "content": "仅37.4%参与者了解中国居民膳食宝塔或膳食指南。39.8%具有足够膳食知识素养，27.8%有积极膳食态度，35.3%主动寻找营养知识。教育程度越高，膳食知识素养越高（OR=2.089）。",
+      "source": "PubMed/Frontiers in Public Health (2022)",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/36117602/",
+      "type": "academic_journal",
+      "title": "中国居民膳食指南知晓率",
+      "relevance": "量化中国膳食指南公众知晓率，揭示营养教育缺口",
+      "confidence": 0.85,
+      "topic_tag": "d5-kq2-e2"
+    },
+    {
+      "id": "d5.c9",
+      "content": "中国2019年《健康中国行动（2019-2030）》设定人均每日添加糖摄入不超过25克目标。WHO和FDI提出减糖倡议。共识涵盖游离糖分类、龋齿最新证据、WHO含糖饮料税建议、营养标签、广告限制、食品配方调整等。",
+      "source": "PubMed/Zhonghua kou qiang yi xue za zhi (2025)",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/40147887/",
+      "type": "academic_consensus",
+      "title": "中国减糖专家共识",
+      "relevance": "直接反映中国官方减糖政策框架和目标",
+      "confidence": 0.95,
+      "topic_tag": "d5-kq2-e3"
+    },
+    {
+      "id": "d5.c10",
+      "content": "2013年估计中国4-5%人口为素食者（超过5000万人）。素食源于道教和儒家的“斋”修习。2020年中国素食协会推广纯素汉字“茻”。2016年中国政府发布膳食指南目标将肉类消费减少50%。",
+      "source": "Wikipedia/Vegetarianism and veganism in China",
+      "source_url": "https://en.wikipedia.org/wiki/Vegetarianism_and_veganism_in_China",
+      "type": "encyclopedia",
+      "title": "中国素食主义历史与现状",
+      "relevance": "提供中国植物基饮食的历史文化背景和政策方向",
+      "confidence": 0.85,
+      "topic_tag": "d5-kq2-e4"
+    },
+    {
+      "id": "d5.c11",
+      "content": "FAO食物基膳食指南网站收集超过80个国家的膳食指南。最早营养指南可追溯至古希腊希波克拉底文集和唐代孙思邈《备急千金要方》。1972年瑞典首创食物金字塔概念。",
+      "source": "Wikipedia/List of nutrition guides",
+      "source_url": "https://en.wikipedia.org/wiki/List_of_nutrition_guides",
+      "type": "encyclopedia",
+      "title": "全球营养指南概览",
+      "relevance": "提供全球膳食指南历史和多样性概览",
+      "confidence": 0.9,
+      "topic_tag": "d5-kq2-e5"
+    },
+    {
+      "id": "d5.c12",
+      "content": "植物基饮食术语由康奈尔大学T. Colin Campbell于1980年提出。2021年WHO声明植物基饮食构成健康生活方式。医学文献中50%临床试验将植物基与纯素互换使用，30%包含乳制品，20%包含肉类。",
+      "source": "Wikipedia/Plant-based diet",
+      "source_url": "https://en.wikipedia.org/wiki/Plant-based_diet",
+      "type": "encyclopedia",
+      "title": "植物基饮食定义与WHO立场",
+      "relevance": "澄清植物基饮食术语定义，提供WHO立场",
+      "confidence": 0.9,
+      "topic_tag": "d5-kq2-e6"
+    },
+    {
+      "id": "d5.c13",
+      "content": "常见代糖：阿斯巴甜、罗汉果提取物、糖精、三氯蔗糖、甜菊糖苷、安赛蜜、甜蜜素。糖醇类：赤藓糖醇、木糖醇、山梨糖醇。已批准代糖与癌症无关联。适量使用可帮助控制能量摄入和血糖。高倍甜味剂甜度是蔗糖数百倍，常混合使用。",
+      "source": "Wikipedia/Sugar substitute",
+      "source_url": "https://en.wikipedia.org/wiki/Sugar_substitute",
+      "type": "encyclopedia",
+      "title": "代糖分类与安全性",
+      "relevance": "提供代糖基础知识、分类和安全性评估",
+      "confidence": 0.9,
+      "topic_tag": "d5-kq3-e1"
+    },
+    {
+      "id": "d5.c14",
+      "content": "四种主要减糖策略：直接减糖、多感官整合、甜味剂、甜味增强剂。甜味剂是最有效和广泛使用的策略，但存在风味和健康担忧。多感官整合也是有前景的策略。",
+      "source": "PubMed/Food Research International (2022)",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/36461393/",
+      "type": "academic_journal",
+      "title": "饮料减糖策略综述",
+      "relevance": "系统总结饮料行业减糖技术路径",
+      "confidence": 0.9,
+      "topic_tag": "d5-kq3-e2"
+    },
+    {
+      "id": "d5.c15",
+      "content": "NNS广泛存在于碳酸饮料、乳制品、糖果、餐桌甜味剂和果汁饮料中。全球NNS饮料消费呈增加趋势。NNS的毒理学风险证据不一致，超加工食品替代效应引发担忧。产品类别纵向趋势和地区差异需进一步研究。",
+      "source": "PubMed/Nutrition Research Reviews (2021)",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/33148371/",
+      "type": "academic_journal",
+      "title": "非营养甜味剂趋势与膳食影响",
+      "relevance": "全面综述NNS消费趋势、政策影响和健康效应",
+      "confidence": 0.85,
+      "topic_tag": "d5-kq3-e3"
+    },
+    {
+      "id": "d5.c16",
+      "content": "SSB减量政策框架分为四类：财务（税收）、信息（标签）、默认（环境干预）、可获得性（学校限制）。单一政策不足以将SSB消费降至健康水平，需要整合政策方法。",
+      "source": "PubMed/Annual Review of Public Health (2021)",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/33256536/",
+      "type": "academic_journal",
+      "title": "含糖饮料减量政策综述",
+      "relevance": "提供SSB减量政策框架和效果评估",
+      "confidence": 0.9,
+      "topic_tag": "d5-kq3-e4"
+    },
+    {
+      "id": "d5.c17",
+      "content": "基于Kantar中国消费者指数，收入与含糖饮料消费呈“倒U型”关系。收入与无糖饮料消费正相关。未来糖与代糖关系将从互补转向替代。",
+      "source": "PubMed/Nutrients (2022)",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/36364736/",
+      "type": "academic_journal",
+      "title": "中国收入与饮料消费关系",
+      "relevance": "揭示中国饮料市场从含糖向无糖转型的经济机制",
+      "confidence": 0.85,
+      "topic_tag": "d5-kq3-e5"
+    },
+    {
+      "id": "d5.c18",
+      "content": "消费者高度偏好清洁标签、天然成分、兼具功能性的食品。食品行业提供天然甜味剂替代品。天然不等于市场成功。",
+      "source": "PubMed/International Journal of Environmental Research and Public Health (2020)",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/32872325/",
+      "type": "academic_journal",
+      "title": "天然甜味剂与消费者洁净标签需求",
+      "relevance": "链接代糖与清洁标签运动，提供消费者洞察",
+      "confidence": 0.8,
+      "topic_tag": "d5-kq3-e6"
+    },
+    {
+      "id": "d5.c19",
+      "content": "提出清洁标签广义定义（前包装标签推断）和严格定义（后包装配料表检查）。“健康”是主要消费者动机，但受内在/外在产品特征和社会文化因素多元驱动。“不含人工添加剂”的产品与有机/天然产品有所不同。",
+      "source": "PubMed/Food Research International (2017)",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/28784520/",
+      "type": "academic_journal",
+      "title": "清洁标签趋势综述：消费者选择行为与行业影响",
+      "relevance": "清洁标签领域的奠基性综述，提供定义框架和消费者行为分析",
+      "confidence": 0.95,
+      "topic_tag": "d5-kq4-e1"
+    },
+    {
+      "id": "d5.c20",
+      "content": "清洁标签运动已成为全球食品行业定义性趋势。天然替代品、植物基和发酵源成分、生物技术进展、功能性配方挑战。HPP、PEF、冷等离子体、天然防腐策略和封装系统等技术创新。AI驱动成分创新、个性化营养、预测货架期模型为未来方向。",
+      "source": "PubMed/Comprehensive Reviews in Food Science and Food Safety (2026)",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/42117888/",
+      "type": "academic_journal",
+      "title": "清洁标签趋势与食品技术创新",
+      "relevance": "最新（2026年）清洁标签技术综述，覆盖技术创新和未来方向",
+      "confidence": 0.9,
+      "topic_tag": "d5-kq4-e2"
+    },
+    {
+      "id": "d5.c21",
+      "content": "清洁标签≠健康食品。配料干净不等于健康，清洁标签只剔除添加剂，不控制糖油盐和原料好坏。90%的人踩过食品营销陷阱。",
+      "source": "Bilibili/餐桌选品会NoshNote",
+      "source_url": "https://www.bilibili.com/video/BV1GTM86bEPm",
+      "type": "social_media",
+      "title": "清洁标签≠健康：中国消费者教育",
+      "relevance": "反映中国消费者对清洁标签的认知误区和教育需求",
+      "confidence": 0.7,
+      "topic_tag": "d5-kq4-e3"
+    },
+    {
+      "id": "d5.c22",
+      "content": "GB 28050-2025和GB 7718-2025新食品安全国家标准将打击“0糖”但含糖、“0添加”但有添加的误导式宣传。视频播放量438,893，点赞8,780。",
+      "source": "Bilibili/动动枪DongDongGun",
+      "source_url": "https://www.bilibili.com/video/BV1wmfKYGEHv",
+      "type": "social_media",
+      "title": "中国新国标规范“0糖”“0添加”宣称",
+      "relevance": "反映中国食品标签监管升级和消费者关注度",
+      "confidence": 0.8,
+      "topic_tag": "d5-kq4-e4"
+    },
+    {
+      "id": "d5.c23",
+      "content": "消费者对蛋白质饮料配料最看重可识别成分和简单语言。天然甜味剂（龙舌兰、罗汉果、蔗糖）最受欢迎。纤维和淀粉比胶体更受欢迎。磷酸盐类最不受欢迎。消费者对过多配料感到怀疑。",
+      "source": "PubMed/Journal of Dairy Science (2025)",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/39521406/",
+      "type": "academic_journal",
+      "title": "蛋白质饮料消费者配料偏好",
+      "relevance": "量化消费者对清洁标签配料的具体偏好",
+      "confidence": 0.85,
+      "topic_tag": "d5-kq4-e5"
+    },
+    {
+      "id": "d5.c24",
+      "content": "消费者希望蛋白质产品是“优质蛋白来源”和“完整蛋白”，但对食品配料、蛋白质声明、加工技术和食品技术了解甚少。理想产品：全天然、优质完整蛋白、美味。乳蛋白被认为口感更好，植物蛋白被认为更可持续和道德。消费者对精密发酵和动物游离乳蛋白不熟悉。",
+      "source": "PubMed/Journal of Dairy Science (2026)",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/41317847/",
+      "type": "academic_journal",
+      "title": "清洁标签、完整蛋白与可持续性消费者认知",
+      "relevance": "揭示消费者对清洁标签和蛋白质产品认知的深度数据",
+      "confidence": 0.85,
+      "topic_tag": "d5-kq4-e6"
+    },
+    {
+      "id": "d5.c25",
+      "content": "清洁标签是非物质清单，避免消费者认为不理想的成分。正面宣称包括“天然”“无色素防腐剂”“无人工防腐剂”。无统一定义。可能通过替代成分隐藏添加剂。消费者不信任色素、防腐剂、调味剂和添加剂。",
+      "source": "Wikipedia/Clean label",
+      "source_url": "https://en.wikipedia.org/wiki/Clean_label",
+      "type": "encyclopedia",
+      "title": "清洁标签定义与背景",
+      "relevance": "提供清洁标签基础定义和消费者认知",
+      "confidence": 0.9,
+      "topic_tag": "d5-kq4-e7"
+    },
+    {
+      "id": "d5.c26",
+      "content": "植物基饮食定义广泛，从传统素食到半素食/弹性素食。DASH、地中海式、北欧式、星球健康饮食等也被纳入定义。植物基消费者更可能满足碳水化合物、膳食纤维和维生素E推荐量，但蛋白质、维生素B12和碘摄入不足。无论饮食类型，维生素D、钙和钠均未达标。",
+      "source": "PubMed/Proceedings of the Nutrition Society (2022)",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/35760588/",
+      "type": "academic_journal",
+      "title": "植物基饮食定义与营养角色综述",
+      "relevance": "系统梳理植物基饮食定义和营养充足性",
+      "confidence": 0.9,
+      "topic_tag": "d5-kq5-e1"
+    },
+    {
+      "id": "d5.c27",
+      "content": "弹性素食和地域多样化饮食（如地中海饮食）可满足不同人群能量和营养需求，无需膳食教育或补充剂。相比纯素/素食/鱼素，弹性素食食物浪费更少，更易被西方饮食人群接受和维持。环境影响虽大于纯素，但远小于西方饮食。",
+      "source": "PubMed/Advances in Nutrition (2022)",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/34849542/",
+      "type": "academic_journal",
+      "title": "弹性素食：平衡地球与人类健康",
+      "relevance": "提供弹性素食作为可持续饮食最佳路径的权威论证",
+      "confidence": 0.9,
+      "topic_tag": "d5-kq5-e2"
+    },
+    {
+      "id": "d5.c28",
+      "content": "欧盟指令96/8/EC规定：代餐200-400千卡，脂肪不超过30%能量，必须提供规定维生素和矿物质。标签须声明使用超过三周需医疗建议。美国FDA未定义“代餐”，通常指热量控制预包装产品，强化20多种维生素和矿物质。",
+      "source": "Wikipedia/Meal replacement",
+      "source_url": "https://en.wikipedia.org/wiki/Meal_replacement",
+      "type": "encyclopedia",
+      "title": "代餐定义与监管",
+      "relevance": "提供代餐产品监管框架和科学标准",
+      "confidence": 0.9,
+      "topic_tag": "d5-kq5-e3"
+    },
+    {
+      "id": "d5.c29",
+      "content": "术语1980年代起源于日本FOSHU（特定保健用食品）制度。欧盟FUFOSE定义：超越营养有益身体功能，改善健康或降低疾病风险。功能食品包括：通过育种增加花青素/类胡萝卜素的紫色/金色土豆，以及加工中添加功能性成分的食品。",
+      "source": "Wikipedia/Functional food",
+      "source_url": "https://en.wikipedia.org/wiki/Functional_food",
+      "type": "encyclopedia",
+      "title": "功能食品定义与全球监管",
+      "relevance": "提供功能食品定义、监管制度和全球发展历程",
+      "confidence": 0.9,
+      "topic_tag": "d5-kq5-e4"
+    },
+    {
+      "id": "d5.c30",
+      "content": "清洁标签在肉类行业的应用面临挑战，消费者对加工肉制品有负面态度。新兴清洁标签配料（亲水胶体、植物基替代品）和混合肉/植物产品为行业提供新路径。",
+      "source": "PubMed/Foods (2023)",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/37238880/",
+      "type": "academic_journal",
+      "title": "肉类加工清洁标签策略",
+      "relevance": "链接清洁标签与植物基，展示预制肉类产品创新方向",
+      "confidence": 0.8,
+      "topic_tag": "d5-kq5-e5"
+    },
+    {
+      "id": "d5.c31",
+      "content": "消费者对代餐棒最重要的配料因素：高蛋白含量、高饱腹感、最少配料、天然成分、无添加糖。消费者普遍希望更少的配料、更天然的成分和高饱腹感零食。",
+      "source": "PubMed/Foods (2026)",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/41683137/",
+      "type": "academic_journal",
+      "title": "清洁标签高蛋白代餐棒消费者洞察",
+      "relevance": "直接揭示代餐与清洁标签的交叉消费者需求",
+      "confidence": 0.85,
+      "topic_tag": "d5-kq5-e6"
+    },
+    {
+      "id": "d5.c32",
+      "content": "基于UK Biobank 199,502名参与者，UPF消费占比：常规红肉食者24.2%、低红肉食者21.9%、弹性素食者22.0%、鱼素者20.4%、素食者23.8%、纯素者22.7%。素食者UPF消费反而比常规红肉食者高1.3个百分点。",
+      "source": "PubMed/EClinicalMedicine (2024)",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/39619237/",
+      "type": "academic_journal",
+      "title": "植物基饮食模式与超加工食品消费",
+      "relevance": "揭示植物基饮食转型中UPF消费的复杂性",
+      "confidence": 0.9,
+      "topic_tag": "d5-kq6-e1"
+    },
+    {
+      "id": "d5.c33",
+      "content": "首次弹性素食随机对照试验。弹性素食组（含红肉）依从性96.1/100 vs 植物肉替代组86.7/100。红肉组对该分配更满意。10周干预显示弹性素食可行性更高。",
+      "source": "PubMed/Frontiers in Nutrition (2023)",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/37388633/",
+      "type": "academic_journal",
+      "title": "弹性素食 vs 植物肉替代随机对照试验",
+      "relevance": "提供弹性素食vs植物肉替代的实证对比数据",
+      "confidence": 0.9,
+      "topic_tag": "d5-kq6-e2"
+    },
+    {
+      "id": "d5.c34",
+      "content": "弹性素食无统一定义，导致内部差异大，常将频繁食肉者纳入，可能过度乐观估计其流行度和转型潜力。弹性素食者能否被视为独特消费者群体尚不明确。",
+      "source": "PubMed/Appetite (2026)",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/41352487/",
+      "type": "academic_journal",
+      "title": "弹性素食概念批判性分析",
+      "relevance": "对弹性素食概念的学术批判，提供更严谨的视角",
+      "confidence": 0.85,
+      "topic_tag": "d5-kq6-e3"
+    },
+    {
+      "id": "d5.c35",
+      "content": "全球每年约1.9亿公吨红肉，不到25%人口（发达国家）消费一半。预计2030年肉类需求超过3.76亿公吨。弹性素食是世界的默认生活方式，植物材料提供大部分热量，肉类提供关键营养。",
+      "source": "PubMed/Frontiers in Nutrition (2018)",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/29963555/",
+      "type": "academic_journal",
+      "title": "全球红肉供应与弹性素食",
+      "relevance": "提供全球肉类供需数据，为弹性素食趋势提供背景",
+      "confidence": 0.85,
+      "topic_tag": "d5-kq6-e4"
+    },
+    {
+      "id": "d5.c36",
+      "content": "植物基肉和乳替代品已成熟，蛋和海鲜替代品存在市场机会。但并非所有动物替代品都可持续，部分为超加工食品。消费者要求清晰信息和监管。挑战涉及食品设计、感官科学、营养学。",
+      "source": "PubMed/Foods (2021)",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/33535684/",
+      "type": "academic_journal",
+      "title": "植物基饮食食品创新与挑战",
+      "relevance": "系统梳理植物基食品创新现状和挑战",
+      "confidence": 0.85,
+      "topic_tag": "d5-kq6-e5"
+    },
+    {
+      "id": "d5.c37",
+      "content": "通过弹性素食和植物基方法满足蛋白质需求（不超标），减少包装食品和食物浪费，优先季节性农产品是运动员的可行减排方案。需要更多研究植物基全食策略对运动后骨骼肌和训练适应的影响。",
+      "source": "PubMed/Current Nutrition Reports (2020)",
+      "source_url": "https://pubmed.ncbi.nlm.nih.gov/32504413/",
+      "type": "academic_journal",
+      "title": "运动员可持续饮食",
+      "relevance": "展示弹性素食在专业运动领域的应用",
+      "confidence": 0.8,
+      "topic_tag": "d5-kq6-e6"
+    },
+    {
+      "id": "d5.c38",
+      "content": "弹性素食2012年收入韦氏词典，2003年被美国方言协会评为年度最有用的词。荷兰不同机构定义不同：Natuur & Milieu认为每周至少一天不吃肉/鱼即弹性素食；Voedingscentrum定义为每周三天以上不吃肉。",
+      "source": "Wikipedia/Flexitarianism",
+      "source_url": "https://en.wikipedia.org/wiki/Flexitarianism",
+      "type": "encyclopedia",
+      "title": "弹性素食定义与全球实践",
+      "relevance": "提供弹性素食术语起源和各国定义差异",
+      "confidence": 0.9,
+      "topic_tag": "d5-kq6-e7"
+    }
+  ],
+  "sources": [
+    "Wikipedia/Meal replacement",
+    "PubMed/Frontiers in Public Health (2022)",
+    "Wikipedia/Healthy diet",
+    "Wikipedia/Plant-based diet",
+    "PubMed/Foods (2023)",
+    "Wikipedia/Clean label",
+    "PubMed/EClinicalMedicine (2024)",
+    "Bilibili/餐桌选品会NoshNote",
+    "PubMed/Food Research International (2022)",
+    "Wikipedia/Functional food",
+    "PubMed/Zhonghua kou qiang yi xue za zhi (2025)",
+    "PubMed/Advances in Nutrition (2022)",
+    "PubMed/Nutrition Research Reviews (2023)",
+    "PubMed/Annual Review of Public Health (2021)",
+    "Bilibili/动动枪DongDongGun",
+    "PubMed/The Lancet Diabetes & Endocrinology (2016)",
+    "PubMed/International Journal of Environmental Research and Public Health (2020)",
+    "PubMed/Foods (2021)",
+    "PubMed/Foods (2026)",
+    "PubMed/Journal of Dairy Science (2026)",
+    "PubMed/Comprehensive Reviews in Food Science and Food Safety (2026)",
+    "PubMed/Proceedings of the Nutrition Society (2022)",
+    "PubMed/Nutrition Research Reviews (2021)",
+    "PubMed/Frontiers in Nutrition (2018)",
+    "PubMed/Appetite (2026)",
+    "PubMed/Food Research International (2017)",
+    "PubMed/Journal of Dairy Science (2025)",
+    "PubMed/JAMA (2016)",
+    "Wikipedia/Dietary Guidelines for Americans",
+    "Wikipedia/Sugar substitute",
+    "PubMed/Nutrients (2022)",
+    "PubMed/Frontiers in Nutrition (2023)",
+    "Wikipedia/Flexitarianism",
+    "PubMed/Nutrients (2020)",
+    "PubMed/Current Nutrition Reports (2020)",
+    "Wikipedia/List of nutrition guides",
+    "Wikipedia/Vegetarianism and veganism in China",
+    "PubMed/International Health (2025)"
+  ]
+}

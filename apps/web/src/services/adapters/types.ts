@@ -29,6 +29,7 @@ export interface AuthResult {
 export interface SendMessageInput {
   content: string;
   modelId?: string;
+  signal?: AbortSignal;
   sessionId: string;
   skillKey?: SkillKey;
 }
@@ -37,6 +38,25 @@ export interface SendMessageResult {
   messages: Message[];
   session: Session;
 }
+
+export type SendMessageStreamEvent =
+  | {
+      message: Message;
+      type: "user_message";
+    }
+  | {
+      content: string;
+      messageId: string;
+      sessionId: string;
+      type: "assistant_delta";
+    }
+  | {
+      message: Message;
+      session: Session;
+      type: "assistant_done";
+    };
+
+export type SendMessageStreamHandler = (event: SendMessageStreamEvent) => void;
 
 export interface UpdateSessionInput {
   pinned?: boolean;
@@ -79,6 +99,10 @@ export interface WebAgentApiAdapter {
   listSkills(): Promise<Skill[]>;
   register(input: LoginInput): Promise<AuthResult>;
   sendMessage(input: SendMessageInput): Promise<SendMessageResult>;
+  sendMessageStream(
+    input: SendMessageInput,
+    onEvent: SendMessageStreamHandler,
+  ): Promise<void>;
   subscribeAgentRun(
     runId: string,
     onEvent: AgentRunEventHandler,

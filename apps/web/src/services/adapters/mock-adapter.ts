@@ -4,6 +4,7 @@ import type {
   LoginInput,
   SendMessageInput,
   SendMessageResult,
+  SendMessageStreamHandler,
   UpdateSessionInput,
   UploadFileInput,
   WebAgentApiAdapter,
@@ -206,6 +207,34 @@ export const mockAdapter: WebAgentApiAdapter = {
       messages: [userMessage, assistantMessage],
       session,
     };
+  },
+  async sendMessageStream(
+    input: SendMessageInput,
+    onEvent: SendMessageStreamHandler,
+  ) {
+    const result = await this.sendMessage(input);
+    const userMessage = result.messages.find((message) => message.role === "user");
+    const assistantMessage = result.messages.find(
+      (message) => message.role === "assistant",
+    );
+
+    if (userMessage) {
+      onEvent({ message: userMessage, type: "user_message" });
+    }
+
+    if (assistantMessage) {
+      onEvent({
+        content: assistantMessage.content,
+        messageId: assistantMessage.id,
+        sessionId: assistantMessage.sessionId,
+        type: "assistant_delta",
+      });
+      onEvent({
+        message: assistantMessage,
+        session: result.session,
+        type: "assistant_done",
+      });
+    }
   },
   subscribeAgentRun(runId, onEvent) {
     const steps = [
