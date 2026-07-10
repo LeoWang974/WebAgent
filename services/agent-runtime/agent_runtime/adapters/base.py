@@ -22,3 +22,10 @@ class AgentRuntimeAdapter(ABC):
         self, run_id: str
     ) -> AsyncGenerator[AgentRunEvent, None]:
         pass
+
+    async def stream_response(
+        self, input_data: AgentRunCreate
+    ) -> AsyncGenerator[str, None]:
+        run = await self.create_run(input_data)
+        if getattr(run, "output", None):
+            yield run.output

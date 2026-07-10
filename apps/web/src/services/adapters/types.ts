@@ -54,6 +54,12 @@ export type SendMessageStreamEvent =
       message: Message;
       session: Session;
       type: "assistant_done";
+    }
+  | {
+      artifact: Artifact;
+      messageId: string;
+      sessionId: string;
+      type: "artifact_created";
     };
 
 export type SendMessageStreamHandler = (event: SendMessageStreamEvent) => void;

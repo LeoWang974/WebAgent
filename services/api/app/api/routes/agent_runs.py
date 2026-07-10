@@ -46,6 +46,7 @@ def _to_api_event(event) -> schemas.AgentRunEvent:
         progress=getattr(event, "progress", 0),
         completed_at=completed_at,
         step=api_step,
+        output=getattr(event, "output", None),
     )
 
 
@@ -107,6 +108,7 @@ async def create_agent_run(input_data: schemas.AgentRunCreate) -> schemas.AgentR
                 started_at=run.started_at or mock_store.now_iso(),
                 completed_at=run.completed_at,
                 error=run.error,
+                output=getattr(run, "output", None),
             )
             mock_store.runs.insert(0, adapter_run)
             return adapter_run

@@ -18,6 +18,7 @@ interface AgentFeedback {
   modelName: string;
   sessionId: string;
   stage: string;
+  startedAt: string;
 }
 
 interface ChatState {
@@ -61,7 +62,7 @@ interface ChatState {
 }
 
 function createId(prefix: string) {
-  return `${prefix}_${Date.now()}`;
+  return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
 }
 
 let activeRequestAbortController: AbortController | undefined;
@@ -95,67 +96,25 @@ function setSwitchingState(
   }, 260);
 }
 
-function scheduleFeedback({
-  modelName,
-  requestedSkill,
-  runId,
-  sessionId,
-  set,
-}: {
-  modelName: string;
-  requestedSkill?: string;
-  runId: string;
-  sessionId: string;
-  set: (partial: Partial<ChatState> | ((state: ChatState) => Partial<ChatState>)) => void;
-}) {
-  const steps = [
-    {
-      delay: 900,
-      detail: requestedSkill
-        ? `Detected ${requestedSkill}. Preparing runtime context and parameters.`
-        : "Parsing the request and deciding whether tools or skills are needed.",
-      stage: "Parsing request",
-    },
-    {
-      delay: 2200,
-      detail: `The request is now running in ${modelName}. Hermes output will stream into the conversation as it appears.`,
-      stage: "Calling Hermes",
-    },
-    {
-      delay: 4800,
-      detail: requestedSkill
-        ? `${modelName} is working through ${requestedSkill}. Tool and subtask messages will be appended below when Hermes prints them.`
-        : `${modelName} is working. Tool and subtask messages will be appended below when Hermes prints them.`,
-      stage: "Running tools and skills",
-    },
-    {
-      delay: 9000,
-      detail: "Waiting for structured output. Long reports and deep research requests can take longer.",
-      stage: "Organizing content",
-    },
-    {
-      delay: 15000,
-      detail: "Still running. Keep this page open; new Hermes output will continue to stream here.",
-      stage: "Waiting for final response",
-    },
-  ];
+function createPendingAssistantMessage(
+  sessionId: string,
+  modelName: string,
+  requestedSkill?: string,
+): Message {
+  const now = new Date().toISOString();
 
-  feedbackTimers = steps.map((step) =>
-    window.setTimeout(() => {
-      set((state) =>
-        state.activeAgentRunId === runId
-          ? {
-              agentFeedback: {
-                detail: step.detail,
-                modelName,
-                sessionId,
-                stage: step.stage,
-              },
-            }
-          : {},
-      );
-    }, step.delay),
-  );
+  return {
+    id: createId("message_assistant_pending"),
+    sessionId,
+    role: "assistant",
+    content: "",
+    createdAt: now,
+    isPending: true,
+    pendingLabel: requestedSkill
+      ? `${modelName} 正在执行 ${requestedSkill}，等待 Hermes 阶段反馈...`
+      : `${modelName} 正在工作，等待 Hermes 阶段反馈...`,
+    waitStartedAt: now,
+  };
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -376,6 +335,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       content: trimmed,
       createdAt: now,
     };
+    const pendingAssistantMessage = createPendingAssistantMessage(
+      sessionId,
+      modelName,
+      requestedSkill,
+    );
     const run: AgentRun = {
       id: runId,
       progress: 0,
@@ -392,23 +356,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     set((state) => ({
       activeAgentRunId: runId,
-      agentFeedback: {
-        detail: requestedSkill
-          ? `Detected ${requestedSkill}. Sending the request to ${modelName}.`
-          : `Sending the request to ${modelName}.`,
-        modelName,
-        sessionId,
-        stage: "Request received",
-      },
+      agentFeedback: undefined,
       agentRuns: [run, ...state.agentRuns],
       error: undefined,
-      messages: [...state.messages, optimisticUserMessage],
+      messages: [...state.messages, optimisticUserMessage, pendingAssistantMessage],
       sessions: state.sessions.map((session) =>
         session.id === sessionId ? { ...session, status: "running", updatedAt: now } : session,
       ),
     }));
-
-    scheduleFeedback({ modelName, requestedSkill, runId, sessionId, set });
 
     try {
       await webAgentApi.sendMessageStream(
@@ -426,64 +381,142 @@ export const useChatStore = create<ChatState>((set, get) => ({
               return;
             }
 
+            clearFeedbackTimers();
+
             set((state) => {
-              const existing = state.messages.find((message) => message.id === event.messageId);
-              const nextContent = existing?.content
-                ? `${existing.content}\n${chunk}`
-                : chunk;
+              const now = new Date().toISOString();
+              const pendingIndex = state.messages.findIndex(
+                (message) =>
+                  message.sessionId === sessionId &&
+                  message.role === "assistant" &&
+                  message.isPending,
+              );
+              const completedMessage: Message = {
+                id: event.messageId,
+                sessionId,
+                role: "assistant",
+                content: chunk,
+                createdAt: now,
+                waitStartedAt:
+                  pendingIndex >= 0
+                    ? state.messages[pendingIndex].waitStartedAt
+                    : undefined,
+              };
+              const nextPendingMessage = createPendingAssistantMessage(
+                sessionId,
+                modelName,
+                requestedSkill,
+              );
+
+              if (pendingIndex >= 0) {
+                return {
+                  agentFeedback: undefined,
+                  messages: [
+                    ...state.messages.slice(0, pendingIndex),
+                    completedMessage,
+                    nextPendingMessage,
+                    ...state.messages.slice(pendingIndex + 1),
+                  ],
+                };
+              }
 
               return {
-                agentFeedback: {
-                  detail: "Hermes produced a new update. It has been appended to the assistant message below.",
-                  modelName,
-                  sessionId,
-                  stage: "Streaming Hermes output",
-                },
-                messages: existing
-                  ? state.messages.map((message) =>
-                      message.id === event.messageId
-                        ? { ...message, content: nextContent }
-                        : message,
-                    )
-                  : [
-                      ...state.messages,
-                      {
-                        id: event.messageId,
-                        sessionId,
-                        role: "assistant",
-                        content: chunk,
-                        createdAt: new Date().toISOString(),
-                      },
-                    ],
+                agentFeedback: undefined,
+                messages: [...state.messages, completedMessage, nextPendingMessage],
+              };
+            });
+          }
+
+          if (event.type === "artifact_created") {
+            set((state) => {
+              const artifacts = state.artifacts.some(
+                (artifact) => artifact.id === event.artifact.id,
+              )
+                ? state.artifacts.map((artifact) =>
+                    artifact.id === event.artifact.id ? event.artifact : artifact,
+                  )
+                : [event.artifact, ...state.artifacts];
+
+              return {
+                artifacts,
+                messages: state.messages.map((message) =>
+                  message.id === event.messageId
+                    ? {
+                        ...message,
+                        artifactIds: Array.from(
+                          new Set([...(message.artifactIds ?? []), event.artifact.id]),
+                        ),
+                      }
+                    : message,
+                ),
+                selectedArtifactId: event.artifact.id,
               };
             });
           }
 
           if (event.type === "assistant_done") {
-            set((state) => ({
-              activeAgentRunId:
-                state.activeAgentRunId === runId ? undefined : state.activeAgentRunId,
-              agentFeedback:
-                state.activeAgentRunId === runId ? undefined : state.agentFeedback,
-              agentRuns: state.agentRuns.map((runItem) =>
-                runItem.id === runId
-                  ? {
-                      ...runItem,
-                      completedAt: new Date().toISOString(),
-                      progress: 100,
-                      status: "completed",
-                    }
-                  : runItem,
-              ),
-              messages: state.messages.some((message) => message.id === event.message.id)
-                ? state.messages.map((message) =>
-                    message.id === event.message.id ? event.message : message,
-                  )
-                : [...state.messages, event.message],
-              sessions: state.sessions.map((session) =>
-                session.id === event.session.id ? event.session : session,
-              ),
-            }));
+            set((state) => {
+              const existingMessage = state.messages.find(
+                (message) => message.id === event.message.id,
+              );
+              const pendingIndex = state.messages.findIndex(
+                (message) =>
+                  message.sessionId === sessionId &&
+                  message.role === "assistant" &&
+                  message.isPending,
+              );
+              let messages = state.messages.filter(
+                (message) =>
+                  !(
+                    message.sessionId === sessionId &&
+                    message.role === "assistant" &&
+                    message.isPending
+                  ),
+              );
+
+              if (existingMessage) {
+                messages = messages.map((message) =>
+                  message.id === event.message.id
+                    ? {
+                        ...event.message,
+                        waitStartedAt: existingMessage.waitStartedAt,
+                      }
+                    : message,
+                );
+              } else if (pendingIndex >= 0) {
+                messages = [
+                  ...state.messages.slice(0, pendingIndex),
+                  {
+                    ...event.message,
+                    waitStartedAt: state.messages[pendingIndex].waitStartedAt,
+                  },
+                  ...state.messages.slice(pendingIndex + 1).filter((message) => !message.isPending),
+                ];
+              } else {
+                messages = [...messages, event.message];
+              }
+
+              return {
+                activeAgentRunId:
+                  state.activeAgentRunId === runId ? undefined : state.activeAgentRunId,
+                agentFeedback:
+                  state.activeAgentRunId === runId ? undefined : state.agentFeedback,
+                agentRuns: state.agentRuns.map((runItem) =>
+                  runItem.id === runId
+                    ? {
+                        ...runItem,
+                        completedAt: new Date().toISOString(),
+                        progress: 100,
+                        status: "completed",
+                      }
+                    : runItem,
+                ),
+                messages,
+                sessions: state.sessions.map((session) =>
+                  session.id === event.session.id ? event.session : session,
+                ),
+              };
+            });
           }
         },
       );
@@ -511,6 +544,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
           : error instanceof Error
             ? error.message
             : "Failed to send message.",
+        messages: get().messages.filter(
+          (message) =>
+            !(
+              message.sessionId === sessionId &&
+              message.role === "assistant" &&
+              message.isPending
+            ),
+        ),
       });
     } finally {
       clearFeedbackTimers();
@@ -552,6 +593,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
         run.id === runId
           ? { ...run, completedAt: new Date().toISOString(), status: "cancelled" }
           : run,
+      ),
+      messages: state.messages.filter(
+        (message) =>
+          !(
+            message.sessionId === state.currentSessionId &&
+            message.role === "assistant" &&
+            message.isPending
+          ),
       ),
       sessions: state.sessions.map((session) =>
         session.id === state.currentSessionId ? { ...session, status: "active" } : session,

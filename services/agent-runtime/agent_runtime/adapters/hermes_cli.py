@@ -5,6 +5,10 @@ from typing import AsyncGenerator, Optional, Tuple
 
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
+ARTIFACT_PATH_RE = re.compile(
+    r"(?P<path>(?:[A-Za-z]:\\|/mnt/[a-zA-Z]/|/home/|/tmp/)[^\s\"'<>|]+?\.(?:md|pptx|png|jpe?g|csv|xlsx))",
+    re.IGNORECASE,
+)
 BOX_CODEPOINTS = {
     0x2500,
     0x2502,
@@ -44,8 +48,14 @@ class HermesCliWrapper:
             "HERMES_HOME": hermes_home,
             "HERMES_QUIET": "1",
         }
+        self.last_artifact_paths: list[str] = []
 
-    def _build_wsl_command(self, args: list[str], quiet: bool = True) -> str:
+    def _build_wsl_command(
+        self,
+        args: list[str],
+        quiet: bool = True,
+        use_pty: bool = False,
+    ) -> str:
         env = dict(self._env)
         if not quiet:
             env.pop("HERMES_QUIET", None)
@@ -53,6 +63,8 @@ class HermesCliWrapper:
         env_str = " ".join(f"{key}={shlex.quote(value)}" for key, value in env.items())
         quoted_args = " ".join(shlex.quote(arg) for arg in args)
         command = f"{env_str} {quoted_args}".strip()
+        if use_pty:
+            command = f"script -q -e -c {shlex.quote(command)} /dev/null"
         return f"wsl -d {shlex.quote(self.wsl_distribution)} -- bash -lc {shlex.quote(command)}"
 
     @staticmethod
@@ -85,6 +97,23 @@ class HermesCliWrapper:
             "query:",
         ]
         return any(marker in lower for marker in markers)
+
+    @staticmethod
+    def _normalize_artifact_path(path: str) -> str:
+        cleaned = path.strip().strip(".,;:)]}\"'")
+        match = re.match(r"^/mnt/([a-zA-Z])/(.*)$", cleaned)
+        if match:
+            drive = match.group(1).upper()
+            rest = match.group(2).replace("/", "\\")
+            return f"{drive}:\\{rest}"
+        return cleaned
+
+    def _remember_artifact_paths(self, text: str) -> None:
+        cleaned_text = ANSI_RE.sub("", text).replace("\r", "\n")
+        for match in ARTIFACT_PATH_RE.finditer(cleaned_text):
+            path = self._normalize_artifact_path(match.group("path"))
+            if path not in self.last_artifact_paths:
+                self.last_artifact_paths.append(path)
 
     @staticmethod
     def _should_emit_box(text: str) -> bool:
@@ -159,6 +188,9 @@ class HermesCliWrapper:
         stdout, stderr = await process.communicate()
         stdout_str = stdout.decode("utf-8", errors="replace").strip()
         stderr_str = stderr.decode("utf-8", errors="replace").strip()
+        self.last_artifact_paths = []
+        self._remember_artifact_paths(stdout_str)
+        self._remember_artifact_paths(stderr_str)
 
         if process.returncode != 0:
             error_msg = stderr_str or f"Hermes exited with code {process.returncode}"
@@ -174,6 +206,7 @@ class HermesCliWrapper:
         skills: Optional[str] = None,
         model: Optional[str] = None,
     ) -> AsyncGenerator[str, None]:
+        self.last_artifact_paths = []
         args = [self.hermes_path, "chat", "-q", question]
 
         if session_id:
@@ -186,29 +219,21 @@ class HermesCliWrapper:
             args.extend(["-m", model])
 
         process = await asyncio.create_subprocess_shell(
-            self._build_wsl_command(args, quiet=False),
+            self._build_wsl_command(args, quiet=False, use_pty=True),
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
 
-        stderr_chunks: list[str] = []
-
-        async def read_stderr() -> None:
-            if process.stderr is None:
-                return
-            while True:
-                chunk = await process.stderr.read(1024)
-                if not chunk:
-                    break
-                stderr_chunks.append(chunk.decode("utf-8", errors="replace"))
-
-        stderr_task = asyncio.create_task(read_stderr())
-
         pending = ""
         in_hermes_box = False
         box_lines: list[str] = []
+        emitted_output = False
         last_emitted = ""
+        stdout_tail = ""
+        stderr_tail = ""
+        stderr_chunks: list[str] = []
+        line_queue: asyncio.Queue[str | None] = asyncio.Queue()
 
         async def flush_box() -> str | None:
             text = "\n".join(line for line in box_lines if line).strip()
@@ -232,76 +257,144 @@ class HermesCliWrapper:
                     return True, False, None
                 return True, False, text
 
-            return False, False, None
+            return False, False, cleaned
 
-        if process.stdout is not None:
+        async def read_stream(stream: asyncio.StreamReader | None, is_stderr: bool) -> None:
+            nonlocal stderr_tail, stdout_tail
+
+            if stream is None:
+                await line_queue.put(None)
+                return
+
+            stream_pending = ""
             while True:
-                chunk = await process.stdout.read(1024)
+                chunk = await stream.read(1024)
                 if not chunk:
                     break
 
-                pending += chunk.decode("utf-8", errors="replace")
-                lines = pending.split("\n")
-                pending = lines.pop() if lines else ""
+                decoded = chunk.decode("utf-8", errors="replace")
+                self._remember_artifact_paths(decoded)
+                if is_stderr:
+                    stderr_tail = (stderr_tail + decoded)[-4000:]
+                else:
+                    stdout_tail = (stdout_tail + decoded)[-4000:]
+                if is_stderr:
+                    stderr_chunks.append(decoded)
+
+                stream_pending += decoded.replace("\r", "\n")
+                lines = stream_pending.split("\n")
+                stream_pending = lines.pop() if lines else ""
 
                 for raw_line in lines:
-                    is_box_line, starts_box, text = parse_box_line(raw_line)
+                    await line_queue.put(raw_line)
 
-                    if starts_box:
-                        if in_hermes_box:
-                            flushed = await flush_box()
-                            if flushed and flushed != last_emitted:
-                                last_emitted = flushed
-                                yield flushed
-                        in_hermes_box = True
-                        continue
+            if stream_pending.strip():
+                await line_queue.put(stream_pending)
+            await line_queue.put(None)
 
-                    if in_hermes_box and text:
-                        box_lines.append(text)
-                        continue
+        stream_tasks = [
+            asyncio.create_task(read_stream(process.stdout, False)),
+            asyncio.create_task(read_stream(process.stderr, True)),
+        ]
+        finished_streams = 0
 
-                    if in_hermes_box and is_box_line and box_lines:
-                        flushed = await flush_box()
-                        if flushed and flushed != last_emitted:
-                            last_emitted = flushed
-                            yield flushed
-                        in_hermes_box = False
-                        continue
+        while finished_streams < len(stream_tasks):
+            raw_line = await line_queue.get()
+            if raw_line is None:
+                finished_streams += 1
+                continue
 
-                    if in_hermes_box and is_box_line:
-                        continue
+            is_box_line, starts_box, text = parse_box_line(raw_line)
 
-        if pending.strip():
-            _, _, text = parse_box_line(pending)
+            if starts_box:
+                if in_hermes_box:
+                    flushed = await flush_box()
+                    if flushed and flushed != last_emitted:
+                        emitted_output = True
+                        last_emitted = flushed
+                        yield flushed
+                in_hermes_box = True
+                continue
+
             if in_hermes_box and text:
                 box_lines.append(text)
+                continue
+
+            if in_hermes_box and is_box_line and box_lines:
+                flushed = await flush_box()
+                if flushed and flushed != last_emitted:
+                    emitted_output = True
+                    last_emitted = flushed
+                    yield flushed
+                in_hermes_box = False
+                continue
+
+            if in_hermes_box and is_box_line:
+                continue
 
         if in_hermes_box:
             flushed = await flush_box()
             if flushed and flushed != last_emitted:
+                emitted_output = True
                 yield flushed
 
         await process.wait()
-        await stderr_task
+        await asyncio.gather(*stream_tasks)
 
         if process.returncode != 0:
             stderr_str = "".join(stderr_chunks).strip()
-            error_msg = stderr_str or f"Hermes exited with code {process.returncode}"
+            if process.returncode == 134 and (emitted_output or self.last_artifact_paths):
+                return
+
+            diagnostic_tail = (stderr_tail or stdout_tail).strip()
+            error_msg = diagnostic_tail or stderr_str or f"Hermes exited with code {process.returncode}"
             raise RuntimeError(f"Hermes CLI error: {error_msg}")
 
     def _parse_output(self, output: str) -> Tuple[str, str]:
         lines = output.split("\n")
         session_id = ""
         response_lines = []
+        in_hermes_box = False
+        box_lines: list[str] = []
 
         for line in lines:
             cleaned = self._clean_line(line)
             if cleaned.startswith("session_id:"):
                 session_id = cleaned.split(":", 1)[1].strip()
-            elif cleaned:
-                response_lines.append(cleaned)
+                continue
 
-        response = "\n".join(response_lines).strip()
+            if not cleaned:
+                continue
+
+            if self._is_box_line(cleaned) and "Hermes" in cleaned:
+                if in_hermes_box and box_lines:
+                    text = "\n".join(box_lines).strip()
+                    if text and self._should_emit_box(text):
+                        response_lines.append(text)
+                    box_lines.clear()
+                in_hermes_box = True
+                continue
+
+            if in_hermes_box:
+                if self._is_box_line(cleaned):
+                    text = self._strip_box_edges(cleaned)
+                    if text and "Hermes" not in text:
+                        box_lines.append(text)
+                    elif box_lines:
+                        text = "\n".join(box_lines).strip()
+                        if text and self._should_emit_box(text):
+                            response_lines.append(text)
+                        box_lines.clear()
+                        in_hermes_box = False
+                elif cleaned:
+                    box_lines.append(cleaned)
+
+        if in_hermes_box and box_lines:
+            text = "\n".join(box_lines).strip()
+            if text and self._should_emit_box(text):
+                response_lines.append(text)
+
+        response = "\n\n".join(line for line in response_lines if line).strip()
         return session_id, response
 
     async def list_toolsets(self) -> list[str]:

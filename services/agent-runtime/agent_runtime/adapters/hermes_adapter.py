@@ -162,6 +162,7 @@ class HermesAdapter(AgentRuntimeAdapter):
                 status="completed",
                 timestamp=now_iso(),
             ),
+            output="Hermes agent run completed successfully.",
         )
 
     async def stream_response(
@@ -171,12 +172,16 @@ class HermesAdapter(AgentRuntimeAdapter):
         toolsets = self._get_toolsets_for_skill(input_data.skill_key)
         skills = self._get_skills_for_skill(input_data.skill_key)
 
-        async for chunk in self.cli.ask_stream(
+        async for response in self.cli.ask_stream(
             question=input_data.content,
             toolsets=toolsets,
             skills=skills,
         ):
-            yield chunk
+            if response:
+                yield response
+
+    def get_last_artifact_paths(self) -> list[str]:
+        return list(self.cli.last_artifact_paths)
 
     def _get_toolsets_for_skill(self, skill_key: Optional[str]) -> Optional[str]:
         toolsets_map = {

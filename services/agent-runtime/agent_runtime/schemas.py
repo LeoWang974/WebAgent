@@ -52,9 +52,11 @@ class AgentRunEvent:
         progress: int,
         completed_at: Optional[str] = None,
         step: Optional[AgentRunStep] = None,
+        output: Optional[str] = None,
     ):
         self.run_id = run_id
         self.status = status
         self.progress = progress
         self.completed_at = completed_at
         self.step = step
+        self.output = output

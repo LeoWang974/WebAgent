@@ -7,5 +7,7 @@ export interface Message {
   content: string;
   createdAt: string;
   artifactIds?: string[];
+  isPending?: boolean;
+  pendingLabel?: string;
+  waitStartedAt?: string;
 }
-

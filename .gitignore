@@ -38,3 +38,10 @@ Thumbs.db
 uploads/
 outputs/
 storage/
+artifacts/
+services/api/deep-research-reports/
+services/api/uploads/
+services/api/outputs/
+services/api/storage/
+services/api/work-*.log
+work-*.log

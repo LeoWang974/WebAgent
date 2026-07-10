@@ -1,12 +1,19 @@
 import json
+import logging
+from datetime import datetime
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app import schemas
+from app.services.artifact_discovery import (
+    create_artifacts_from_paths,
+    discover_artifacts_since,
+)
 from app.services import mock_store
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def sse(event: str, data: dict) -> str:
@@ -145,6 +152,8 @@ async def stream_session_message(
 
     async def event_stream():
         created_at = mock_store.now_iso()
+        run_started_at = datetime.fromisoformat(created_at)
+
         user_message = schemas.Message(
             id=mock_store.new_id("message_user"),
             session_id=session_id,
@@ -221,17 +230,54 @@ async def stream_session_message(
                     },
                 )
 
+            explicit_artifact_paths = (
+                adapter.get_last_artifact_paths()
+                if hasattr(adapter, "get_last_artifact_paths")
+                else []
+            )
+            discovered_artifacts = create_artifacts_from_paths(
+                session_id,
+                explicit_artifact_paths,
+            )
+            if not discovered_artifacts:
+                discovered_artifacts = discover_artifacts_since(session_id, run_started_at)
+            if discovered_artifacts:
+                mock_store.artifacts.extend(discovered_artifacts)
+
             if assistant_messages:
                 assistant_message = assistant_messages[-1]
+                if discovered_artifacts:
+                    assistant_message = assistant_message.model_copy(
+                        update={"artifact_ids": [artifact.id for artifact in discovered_artifacts]}
+                    )
+                    mock_store.messages[:] = [
+                        assistant_message if item.id == assistant_message.id else item
+                        for item in mock_store.messages
+                    ]
             else:
                 assistant_message = schemas.Message(
                     id=mock_store.new_id("message_assistant"),
                     session_id=session_id,
                     role="assistant",
-                    content="Hermes completed without emitting a visible status update.",
+                    content=(
+                        "Hermes completed and generated artifacts."
+                        if discovered_artifacts
+                        else "Hermes completed without emitting a visible status update."
+                    ),
                     created_at=mock_store.now_iso(),
+                    artifact_ids=[artifact.id for artifact in discovered_artifacts] or None,
                 )
                 mock_store.messages.append(assistant_message)
+
+            for artifact in discovered_artifacts:
+                yield sse(
+                    "artifact_created",
+                    {
+                        "artifact": artifact.model_dump(by_alias=True),
+                        "messageId": assistant_message.id,
+                        "sessionId": session_id,
+                    },
+                )
 
             updated_session = session.model_copy(
                 update={"updated_at": mock_store.now_iso(), "status": "active"}

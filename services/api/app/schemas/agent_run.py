@@ -26,6 +26,7 @@ class AgentRun(ApiModel):
     started_at: str
     completed_at: str | None = None
     error: str | None = None
+    output: str | None = None
 
 
 class AgentRunCreate(ApiModel):
@@ -42,4 +43,5 @@ class AgentRunEvent(ApiModel):
     step: AgentRunStep
     completed_at: str | None = None
     error: str | None = None
+    output: str | None = None
 

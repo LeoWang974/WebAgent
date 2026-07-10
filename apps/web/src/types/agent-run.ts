@@ -24,6 +24,7 @@ export interface AgentRun {
   startedAt: string;
   completedAt?: string;
   error?: string;
+  output?: string;
 }
 
 export interface AgentRunEvent {
@@ -33,5 +34,6 @@ export interface AgentRunEvent {
   step: AgentRunStep;
   completedAt?: string;
   error?: string;
+  output?: string;
 }
 

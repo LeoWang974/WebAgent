@@ -17,6 +17,7 @@ export function MessageList() {
   const artifacts = useChatStore((state) => state.artifacts);
   const agentFeedback = useChatStore((state) => state.agentFeedback);
   const agentRuns = useChatStore((state) => state.agentRuns);
+  const activeAgentRunId = useChatStore((state) => state.activeAgentRunId);
   const selectArtifact = useChatStore((state) => state.selectArtifact);
   const openArtifactDrawer = useUiStore((state) => state.openArtifactDrawer);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -28,9 +29,12 @@ export function MessageList() {
   const currentRun = agentRuns.find((run) => run.sessionId === currentSessionId);
   const currentFeedback =
     agentFeedback?.sessionId === currentSessionId ? agentFeedback : undefined;
+  const lastMessageId = messages.at(-1)?.id;
 
   function scrollToBottom(behavior: ScrollBehavior = "smooth") {
-    bottomRef.current?.scrollIntoView({ behavior, block: "end" });
+    window.requestAnimationFrame(() => {
+      bottomRef.current?.scrollIntoView({ behavior, block: "end" });
+    });
   }
 
   useEffect(() => {
@@ -39,14 +43,16 @@ export function MessageList() {
   }, [currentSessionId]);
 
   useEffect(() => {
-    if (nearBottom) {
-      scrollToBottom();
+    if (activeAgentRunId || nearBottom) {
+      scrollToBottom(activeAgentRunId ? "auto" : "smooth");
     }
   }, [
-    messages.length,
+    activeAgentRunId,
     currentRun?.progress,
     currentRun?.status,
+    currentFeedback?.detail,
     currentFeedback?.stage,
+    lastMessageId,
     nearBottom,
   ]);
 
@@ -71,6 +77,12 @@ export function MessageList() {
           <EmptyConversation />
         ) : null}
         {messages.map((message) => {
+          const messageIndex = messages.findIndex((item) => item.id === message.id);
+          const previousMessage = messageIndex > 0 ? messages[messageIndex - 1] : undefined;
+          const waitDurationMs = previousMessage
+            ? new Date(message.createdAt).getTime() -
+              new Date(previousMessage.createdAt).getTime()
+            : undefined;
           const messageArtifacts = artifacts.filter((artifact) =>
             message.artifactIds?.includes(artifact.id),
           );
@@ -78,9 +90,19 @@ export function MessageList() {
           return (
             <div className="space-y-2" key={message.id}>
               {message.role === "user" ? (
-                <UserMessage content={message.content} />
+                <UserMessage
+                  content={message.content}
+                  createdAt={message.createdAt}
+                />
               ) : (
-                <AssistantMessage content={message.content} />
+                <AssistantMessage
+                  content={message.content}
+                  createdAt={message.createdAt}
+                  isPending={message.isPending}
+                  pendingLabel={message.pendingLabel}
+                  waitDurationMs={waitDurationMs}
+                  waitStartedAt={message.waitStartedAt}
+                />
               )}
               {messageArtifacts.map((artifact) => (
                 <ArtifactCard
@@ -101,6 +123,7 @@ export function MessageList() {
           <AgentFeedbackMessage
             detail={currentFeedback.detail}
             modelName={currentFeedback.modelName}
+            startedAt={currentFeedback.startedAt}
             stage={currentFeedback.stage}
           />
         ) : null}
