@@ -1,12 +1,18 @@
 import asyncio
+import logging
+import os
 import re
 import shlex
+from datetime import datetime
+from pathlib import Path
 from typing import AsyncGenerator, Optional, Tuple
 
 
+logger = logging.getLogger(__name__)
+
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 ARTIFACT_PATH_RE = re.compile(
-    r"(?P<path>(?:[A-Za-z]:\\|/mnt/[a-zA-Z]/|/home/|/tmp/)[^\s\"'<>|]+?\.(?:md|pptx|png|jpe?g|csv|xlsx))",
+    r"(?P<path>(?:[A-Za-z]:\\|/mnt/[a-zA-Z]/|/home/|/tmp/)[^\"'<>|`\r\n]+?\.(?:md|pptx|png|jpe?g|csv|xlsx))",
     re.IGNORECASE,
 )
 BOX_CODEPOINTS = {
@@ -67,6 +73,12 @@ class HermesCliWrapper:
             command = f"script -q -e -c {shlex.quote(command)} /dev/null"
         return f"wsl -d {shlex.quote(self.wsl_distribution)} -- bash -lc {shlex.quote(command)}"
 
+    def _raw_log_path(self) -> Path:
+        log_dir = Path(__file__).resolve().parents[4] / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        return log_dir / f"hermes-raw-{timestamp}.log"
+
     @staticmethod
     def _clean_line(line: str) -> str:
         return ANSI_RE.sub("", line).replace("\r", "").strip()
@@ -114,6 +126,22 @@ class HermesCliWrapper:
             path = self._normalize_artifact_path(match.group("path"))
             if path not in self.last_artifact_paths:
                 self.last_artifact_paths.append(path)
+
+    @staticmethod
+    def _is_completion_signal(text: str) -> bool:
+        normalized = re.sub(r"\s+", "", text.lower())
+        completion_markers = [
+            "报告已完成",
+            "报告已生成",
+            "任务已完成",
+            "任务完成",
+            "最终报告已完成",
+            "最终报告已生成",
+            "已生成最终报告",
+            "finalreportcompleted",
+            "reportcompleted",
+        ]
+        return any(marker in normalized for marker in completion_markers)
 
     @staticmethod
     def _should_emit_box(text: str) -> bool:
@@ -218,6 +246,26 @@ class HermesCliWrapper:
         if model:
             args.extend(["-m", model])
 
+        logger.info(
+            "Starting Hermes stream: question_chars=%s session_id=%s toolsets=%s skills=%s model=%s",
+            len(question),
+            session_id or "",
+            toolsets or "",
+            skills or "",
+            model or "",
+        )
+        raw_log_path = self._raw_log_path()
+        raw_log_path.write_text(
+            (
+                "Hermes raw stream log\n"
+                f"started_at={datetime.now().isoformat()}\n"
+                f"question_chars={len(question)} session_id={session_id or ''} "
+                f"toolsets={toolsets or ''} skills={skills or ''} model={model or ''}\n\n"
+            ),
+            encoding="utf-8",
+        )
+        logger.info("Hermes raw output log: %s", raw_log_path)
+
         process = await asyncio.create_subprocess_shell(
             self._build_wsl_command(args, quiet=False, use_pty=True),
             stdin=asyncio.subprocess.DEVNULL,
@@ -234,6 +282,32 @@ class HermesCliWrapper:
         stderr_tail = ""
         stderr_chunks: list[str] = []
         line_queue: asyncio.Queue[str | None] = asyncio.Queue()
+        completion_detected = False
+
+        async def stop_after_completion() -> None:
+            if process.returncode is not None:
+                return
+            logger.info(
+                "Hermes completion signal received; stopping CLI after grace period."
+            )
+            if os.name == "nt":
+                killer = await asyncio.create_subprocess_exec(
+                    "taskkill",
+                    "/PID",
+                    str(process.pid),
+                    "/T",
+                    "/F",
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                await killer.communicate()
+            else:
+                process.terminate()
+            try:
+                await asyncio.wait_for(process.wait(), timeout=5)
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.wait()
 
         async def flush_box() -> str | None:
             text = "\n".join(line for line in box_lines if line).strip()
@@ -260,7 +334,7 @@ class HermesCliWrapper:
             return False, False, cleaned
 
         async def read_stream(stream: asyncio.StreamReader | None, is_stderr: bool) -> None:
-            nonlocal stderr_tail, stdout_tail
+            nonlocal completion_detected, stderr_tail, stdout_tail
 
             if stream is None:
                 await line_queue.put(None)
@@ -273,7 +347,11 @@ class HermesCliWrapper:
                     break
 
                 decoded = chunk.decode("utf-8", errors="replace")
+                with raw_log_path.open("a", encoding="utf-8", errors="replace") as raw_log:
+                    raw_log.write(("STDERR " if is_stderr else "STDOUT ") + decoded)
                 self._remember_artifact_paths(decoded)
+                if self._is_completion_signal(decoded):
+                    completion_detected = True
                 if is_stderr:
                     stderr_tail = (stderr_tail + decoded)[-4000:]
                 else:
@@ -299,7 +377,15 @@ class HermesCliWrapper:
         finished_streams = 0
 
         while finished_streams < len(stream_tasks):
-            raw_line = await line_queue.get()
+            try:
+                raw_line = await asyncio.wait_for(
+                    line_queue.get(),
+                    timeout=8 if completion_detected else None,
+                )
+            except asyncio.TimeoutError:
+                await stop_after_completion()
+                break
+
             if raw_line is None:
                 finished_streams += 1
                 continue
@@ -312,7 +398,9 @@ class HermesCliWrapper:
                     if flushed and flushed != last_emitted:
                         emitted_output = True
                         last_emitted = flushed
+                        logger.info("Hermes stage emitted: %s", flushed[:500])
                         yield flushed
+                        completion_detected = self._is_completion_signal(flushed)
                 in_hermes_box = True
                 continue
 
@@ -325,7 +413,9 @@ class HermesCliWrapper:
                 if flushed and flushed != last_emitted:
                     emitted_output = True
                     last_emitted = flushed
+                    logger.info("Hermes stage emitted: %s", flushed[:500])
                     yield flushed
+                    completion_detected = self._is_completion_signal(flushed)
                 in_hermes_box = False
                 continue
 
@@ -336,14 +426,28 @@ class HermesCliWrapper:
             flushed = await flush_box()
             if flushed and flushed != last_emitted:
                 emitted_output = True
+                logger.info("Hermes stage emitted: %s", flushed[:500])
                 yield flushed
+                completion_detected = self._is_completion_signal(flushed)
+
+        if completion_detected:
+            await stop_after_completion()
 
         await process.wait()
         await asyncio.gather(*stream_tasks)
+        logger.info("Hermes stream process exited: returncode=%s", process.returncode)
 
         if process.returncode != 0:
             stderr_str = "".join(stderr_chunks).strip()
+            if completion_detected and emitted_output:
+                logger.warning(
+                    "Hermes process was stopped after a completion signal; treating as completed."
+                )
+                return
             if process.returncode == 134 and (emitted_output or self.last_artifact_paths):
+                logger.warning(
+                    "Hermes exited with code 134 after emitting output; treating as completed."
+                )
                 return
 
             diagnostic_tail = (stderr_tail or stdout_tail).strip()

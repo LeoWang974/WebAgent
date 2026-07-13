@@ -4,8 +4,9 @@
   "version": "0.1.0",
   "scripts": {
     "dev": "pnpm --filter web dev",
+    "dev:clean": "pnpm --filter web dev:clean",
     "build": "pnpm --filter web build",
+    "clean": "pnpm --filter web clean",
     "lint": "pnpm --filter web lint"
   }
 }
-

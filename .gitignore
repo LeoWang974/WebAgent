@@ -39,9 +39,14 @@ uploads/
 outputs/
 storage/
 artifacts/
+runtime/
 services/api/deep-research-reports/
 services/api/uploads/
 services/api/outputs/
 services/api/storage/
 services/api/work-*.log
 work-*.log
+
+# Local handoff / launch helpers
+docs/TRAE.md
+start.ps1

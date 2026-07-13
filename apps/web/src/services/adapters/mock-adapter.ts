@@ -273,7 +273,22 @@ export const mockAdapter: WebAgentApiAdapter = {
 
     const updatedSession: Session = {
       ...session,
-      ...input,
+      pinned: input.pinned ?? session.pinned,
+      title: input.title ?? session.title,
+      visibility: input.visibility ?? session.visibility,
+      sharedWith: input.shareWithEmail
+        ? [
+            ...(session.sharedWith ?? []),
+            {
+              email: input.shareWithEmail,
+              id: createId("shared_user"),
+              nickname: input.shareWithEmail.split("@")[0],
+              role: "viewer",
+            },
+          ]
+        : input.unshareUserId
+          ? session.sharedWith?.filter((share) => share.id !== input.unshareUserId)
+          : session.sharedWith,
       updatedAt: new Date().toISOString(),
     };
 

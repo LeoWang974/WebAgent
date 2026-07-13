@@ -10,6 +10,7 @@ import type {
   SkillKey,
   User,
 } from "@/types";
+import type { SessionVisibility } from "@/types/session";
 
 export interface CreateSessionInput {
   skillKey?: SkillKey;
@@ -47,17 +48,20 @@ export type SendMessageStreamEvent =
   | {
       content: string;
       messageId: string;
+      runId?: string;
       sessionId: string;
       type: "assistant_delta";
     }
   | {
       message: Message;
+      runId?: string;
       session: Session;
       type: "assistant_done";
     }
   | {
       artifact: Artifact;
       messageId: string;
+      runId?: string;
       sessionId: string;
       type: "artifact_created";
     };
@@ -66,7 +70,10 @@ export type SendMessageStreamHandler = (event: SendMessageStreamEvent) => void;
 
 export interface UpdateSessionInput {
   pinned?: boolean;
+  shareWithEmail?: string;
   title?: string;
+  unshareUserId?: string;
+  visibility?: SessionVisibility;
 }
 
 export interface CreateAgentRunInput {

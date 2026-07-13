@@ -1,8 +1,12 @@
 import base64
 import csv
 import hashlib
+import json
+import re
+import shutil
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from app import schemas
 from app.schemas.artifact import ArtifactType
@@ -11,6 +15,29 @@ from app.services import mock_store
 
 SUPPORTED_SUFFIXES = {".md", ".pptx", ".png", ".jpg", ".jpeg", ".csv", ".xlsx"}
 IGNORED_PARTS = {".git", ".next", ".venv", "__pycache__", "node_modules"}
+IGNORED_FILENAMES = {"request.md"}
+OUTPUT_PATH_MARKERS = {
+    "/deep-research-reports/",
+    "/reports/",
+    "/outputs/",
+    "/artifacts/",
+    "/ppt_decks/",
+    "\\deep-research-reports\\",
+    "\\reports\\",
+    "\\outputs\\",
+    "\\artifacts\\",
+    "\\ppt_decks\\",
+}
+NON_ARTIFACT_MARKERS = {
+    "/.hermes/skills/",
+    "\\.hermes\\skills\\",
+    "/node_modules/",
+    "\\node_modules\\",
+}
+ARTIFACT_PATH_RE = re.compile(
+    r"(?P<path>(?:[A-Za-z]:\\|/mnt/[a-zA-Z]/|/home/|/tmp/)[^\"'<>|`\r\n]+?\.(?:md|pptx|png|jpe?g|csv|xlsx))",
+    re.IGNORECASE,
+)
 
 
 def _repo_root() -> Path:
@@ -19,16 +46,64 @@ def _repo_root() -> Path:
 
 def _candidate_roots() -> list[Path]:
     repo_root = _repo_root()
-    return [
+    user_home = Path.home()
+    roots = [
         repo_root / "services" / "api" / "deep-research-reports",
         repo_root / "artifacts",
         repo_root / "outputs",
-        Path.home() / "ppt_decks",
+        user_home / "Desktop",
+        user_home / "Documents" / "WebAgent",
+        user_home / "Documents" / "deep-research-reports",
+        user_home / "Downloads" / "WebAgent",
+        user_home / "deep-research-reports",
+        user_home / "ppt_decks",
+        Path(r"\\wsl.localhost\Ubuntu\home\zhuchangbiaozhu_xyl\.hermes\reports"),
+        Path(r"\\wsl$\Ubuntu\home\zhuchangbiaozhu_xyl\.hermes\reports"),
+        Path(
+            r"\\wsl.localhost\Ubuntu\home\zhuchangbiaozhu_xyl\hermes-aws-ai-agent\deep-research-reports"
+        ),
+        Path(
+            r"\\wsl$\Ubuntu\home\zhuchangbiaozhu_xyl\hermes-aws-ai-agent\deep-research-reports"
+        ),
     ]
+    deduped: list[Path] = []
+    seen_suffixes: set[str] = set()
+    for root in roots:
+        suffix = str(root).replace("\\\\wsl$\\Ubuntu", "").replace(
+            "\\\\wsl.localhost\\Ubuntu", ""
+        )
+        if suffix in seen_suffixes:
+            continue
+        if root.exists():
+            seen_suffixes.add(suffix)
+        deduped.append(root)
+    return deduped
+
+
+def _hermes_session_roots() -> list[Path]:
+    return [
+        Path(r"\\wsl.localhost\Ubuntu\home\zhuchangbiaozhu_xyl\.hermes\sessions"),
+        Path(r"\\wsl$\Ubuntu\home\zhuchangbiaozhu_xyl\.hermes\sessions"),
+    ]
+
+
+def _runtime_artifacts_dir(run_id: str | None) -> Path:
+    repo_root = _repo_root()
+    run_part = run_id or "unbound"
+    path = repo_root / "runtime" / "hermes-runs" / run_part / "artifacts"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def _is_ignored(path: Path) -> bool:
     return any(part in IGNORED_PARTS for part in path.parts)
+
+
+def _is_likely_output_path(path: str) -> bool:
+    normalized = path.replace("\\", "/").lower()
+    if any(marker.replace("\\", "/") in normalized for marker in NON_ARTIFACT_MARKERS):
+        return False
+    return any(marker.replace("\\", "/") in normalized for marker in OUTPUT_PATH_MARKERS)
 
 
 def _artifact_id(path: Path) -> str:
@@ -95,13 +170,20 @@ def _image_metadata(path: Path) -> dict:
     }
 
 
-def _metadata(path: Path, artifact_type: ArtifactType) -> dict:
+def _metadata(
+    path: Path,
+    artifact_type: ArtifactType,
+    *,
+    original_path: str | None = None,
+) -> dict:
     base = {
         "filename": path.name,
         "path": str(path),
         "size": path.stat().st_size,
         "updatedAt": datetime.fromtimestamp(path.stat().st_mtime).isoformat(),
     }
+    if original_path and original_path != str(path):
+        base["originalPath"] = original_path
 
     if artifact_type == "data_table" and path.suffix.lower() == ".csv":
         base.update(_csv_metadata(path))
@@ -127,8 +209,15 @@ def _existing_artifact_keys() -> tuple[set[str], set[str]]:
     return existing_paths, existing_ids
 
 
-def _artifact_from_path(session_id: str, path: Path) -> schemas.Artifact | None:
+def _artifact_from_path(
+    session_id: str,
+    path: Path,
+    *,
+    original_path: str | None = None,
+) -> schemas.Artifact | None:
     if not path.exists() or not path.is_file() or _is_ignored(path):
+        return None
+    if path.name.lower() in IGNORED_FILENAMES:
         return None
     if path.suffix.lower() not in SUPPORTED_SUFFIXES:
         return None
@@ -141,20 +230,113 @@ def _artifact_from_path(session_id: str, path: Path) -> schemas.Artifact | None:
         title=path.stem,
         status="ready",
         content=_content(path, artifact_type),
-        metadata=_metadata(path, artifact_type),
+        metadata=_metadata(path, artifact_type, original_path=original_path),
     )
+
+
+def _normalize_path(raw_path: str) -> Path:
+    match = raw_path.strip().strip(".,;:)]}\"'").replace("\\", "/")
+    if match.startswith("/mnt/") and len(match) > 6 and match[6] == "/":
+        drive = match[5].upper()
+        rest = match[7:].replace("/", "\\")
+        return Path(f"{drive}:\\{rest}")
+    if match.startswith("/home/"):
+        return Path(r"\\wsl.localhost\Ubuntu") / match.lstrip("/").replace("/", "\\")
+    return Path(raw_path.strip().strip(".,;:)]}\"'"))
+
+
+def _archive_artifact_path(path: Path, run_id: str | None) -> Path:
+    if not run_id:
+        return path
+    if not path.exists() or not path.is_file():
+        return path
+
+    artifact_dir = _runtime_artifacts_dir(run_id)
+    digest = hashlib.sha1(str(path).encode("utf-8", errors="ignore")).hexdigest()[:10]
+    destination = artifact_dir / f"{path.stem}-{digest}{path.suffix.lower()}"
+    if not destination.exists() or destination.stat().st_mtime < path.stat().st_mtime:
+        shutil.copy2(path, destination)
+    return destination
+
+
+def _extract_path_strings(value: Any) -> list[str]:
+    paths: list[str] = []
+    if isinstance(value, str):
+        for match in ARTIFACT_PATH_RE.finditer(value):
+            paths.append(match.group("path"))
+        return paths
+    if isinstance(value, dict):
+        for item in value.values():
+            paths.extend(_extract_path_strings(item))
+        return paths
+    if isinstance(value, list):
+        for item in value:
+            paths.extend(_extract_path_strings(item))
+    return paths
+
+
+def _as_local_naive(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value
+    return value.astimezone().replace(tzinfo=None)
+
+
+def discover_artifact_paths_from_hermes_sessions(since: datetime) -> list[str]:
+    since = _as_local_naive(since)
+    paths: list[str] = []
+    seen: set[str] = set()
+
+    for root in _hermes_session_roots():
+        if not root.exists():
+            continue
+        for session_file in root.glob("session_*.json"):
+            try:
+                updated_at = datetime.fromtimestamp(session_file.stat().st_mtime)
+            except OSError:
+                continue
+            if updated_at < since:
+                continue
+            try:
+                data = json.loads(session_file.read_text(encoding="utf-8", errors="replace"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            for raw_path in _extract_path_strings(data):
+                normalized_path = _normalize_path(raw_path)
+                normalized = str(normalized_path)
+                if not _is_likely_output_path(raw_path) and not _is_likely_output_path(normalized):
+                    continue
+                if normalized_path.name.lower() in IGNORED_FILENAMES:
+                    continue
+                try:
+                    file_updated_at = datetime.fromtimestamp(normalized_path.stat().st_mtime)
+                except OSError:
+                    continue
+                if file_updated_at < since:
+                    continue
+                if normalized in seen:
+                    continue
+                seen.add(normalized)
+                paths.append(raw_path)
+
+    return paths
 
 
 def create_artifacts_from_paths(
     session_id: str,
     paths: list[str],
+    run_id: str | None = None,
 ) -> list[schemas.Artifact]:
     existing_paths, existing_ids = _existing_artifact_keys()
     artifacts: list[schemas.Artifact] = []
 
     for raw_path in paths:
-        path = Path(raw_path)
-        artifact = _artifact_from_path(session_id, path)
+        path = _normalize_path(raw_path)
+        archived_path = _archive_artifact_path(path, run_id)
+        artifact = _artifact_from_path(
+            session_id,
+            archived_path,
+            original_path=str(path),
+        )
         if artifact is None:
             continue
         if artifact.id in existing_ids or str(path) in existing_paths:
@@ -171,7 +353,12 @@ def create_artifacts_from_paths(
     return artifacts
 
 
-def discover_artifacts_since(session_id: str, since: datetime) -> list[schemas.Artifact]:
+def discover_artifacts_since(
+    session_id: str,
+    since: datetime,
+    run_id: str | None = None,
+) -> list[schemas.Artifact]:
+    since = _as_local_naive(since)
     existing_paths, existing_ids = _existing_artifact_keys()
     discovered: list[schemas.Artifact] = []
 
@@ -186,7 +373,7 @@ def discover_artifacts_since(session_id: str, since: datetime) -> list[schemas.A
                 continue
 
             try:
-                updated_at = datetime.fromtimestamp(path.stat().st_mtime, tz=since.tzinfo)
+                updated_at = datetime.fromtimestamp(path.stat().st_mtime)
             except OSError:
                 continue
 
@@ -195,7 +382,12 @@ def discover_artifacts_since(session_id: str, since: datetime) -> list[schemas.A
             if str(path) in existing_paths:
                 continue
 
-            artifact = _artifact_from_path(session_id, path)
+            archived_path = _archive_artifact_path(path, run_id)
+            artifact = _artifact_from_path(
+                session_id,
+                archived_path,
+                original_path=str(path),
+            )
             if artifact is None:
                 continue
             if artifact.id in existing_ids:

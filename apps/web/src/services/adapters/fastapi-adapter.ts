@@ -160,6 +160,9 @@ export const fastApiAdapter: WebAgentApiAdapter = {
         }),
         headers: {
           "Content-Type": "application/json",
+          ...(typeof window !== "undefined" && window.localStorage.getItem("webagent_access_token")
+            ? { Authorization: `Bearer ${window.localStorage.getItem("webagent_access_token")}` }
+            : {}),
         },
         method: "POST",
         signal: input.signal,
@@ -229,7 +232,13 @@ export const fastApiAdapter: WebAgentApiAdapter = {
   },
   updateSession(sessionId: string, input: UpdateSessionInput) {
     return apiClient<Session>(`/api/sessions/${sessionId}`, {
-      body: JSON.stringify(input),
+      body: JSON.stringify({
+        pinned: input.pinned,
+        share_with_email: input.shareWithEmail,
+        title: input.title,
+        unshare_user_id: input.unshareUserId,
+        visibility: input.visibility,
+      }),
       method: "PATCH",
     });
   },

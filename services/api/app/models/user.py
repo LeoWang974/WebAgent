@@ -14,4 +14,4 @@ class User(IdMixin, TimestampMixin, Base):
     avatar_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
 
     conversations = relationship("Conversation", back_populates="user")
-
+    conversation_shares = relationship("ConversationShare", back_populates="user")

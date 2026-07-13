@@ -4,7 +4,9 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "clean": "node -e \"require('fs').rmSync('.next', { recursive: true, force: true })\"",
     "dev": "next dev",
+    "dev:clean": "pnpm clean && next dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint"

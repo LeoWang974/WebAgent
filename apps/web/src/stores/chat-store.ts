@@ -34,6 +34,7 @@ interface ChatState {
   models: ModelConfig[];
   selectedArtifactId?: string;
   selectedModelId?: string;
+  sharingSessionId?: string;
   sessions: Session[];
   skills: Skill[];
   switchingSessionId?: string;
@@ -50,6 +51,8 @@ interface ChatState {
   selectArtifact: (artifactId: string) => void;
   selectModel: (modelId: string) => void;
   selectSession: (sessionId: string) => void;
+  setSessionVisibility: (sessionId: string, visibility: Session["visibility"]) => Promise<void>;
+  shareSession: (sessionId: string, email: string) => Promise<void>;
   sendMessage: (content: string, skillKey?: SkillKey) => Promise<void>;
   setDefaultModel: (modelId: string) => Promise<void>;
   setDefaultSkill: (skillKey: SkillKey) => Promise<void>;
@@ -57,6 +60,7 @@ interface ChatState {
   testModelConnection: (modelId: string) => Promise<void>;
   toggleSessionPinned: (sessionId: string) => void;
   toggleSkillEnabled: (skillKey: SkillKey) => Promise<void>;
+  unshareSession: (sessionId: string, userId: string) => Promise<void>;
   updateModel: (modelId: string, input: Partial<ModelConfig>) => Promise<void>;
   updateSkillVersion: (skillKey: SkillKey, direction: "update" | "rollback") => Promise<void>;
 }
@@ -73,13 +77,22 @@ function clearFeedbackTimers() {
   feedbackTimers = [];
 }
 
-function detectRequestedSkill(content: string, explicitSkillKey?: SkillKey) {
+function detectRequestedSkill(content: string, explicitSkillKey?: SkillKey): SkillKey | undefined {
   if (explicitSkillKey) {
     return explicitSkillKey;
   }
 
-  const match = content.match(/\b(sn-[a-z0-9-]+)\b/i);
-  return match?.[1];
+  const normalized = content.toLowerCase();
+  const skillAliases: Array<[SkillKey, string[]]> = [
+    ["deep_research", ["sn-deep-research", "deep research", "深度调研", "调研", "研究报告"]],
+    ["data_analysis", ["sn-da", "data analysis", "数据分析", "分析数据", "表格分析"]],
+    ["ppt_generation", ["sn-ppt", "ppt", "幻灯片", "演示文稿"]],
+    ["u1_image", ["u1", "生图", "生成图片", "图片生成"]],
+  ];
+
+  return skillAliases.find(([, aliases]) =>
+    aliases.some((alias) => normalized.includes(alias.toLowerCase())),
+  )?.[0];
 }
 
 function setSwitchingState(
@@ -94,6 +107,25 @@ function setSwitchingState(
       set({ switchingSessionId: undefined });
     }
   }, 260);
+}
+
+function bindBackendRunId(
+  set: (partial: Partial<ChatState> | ((state: ChatState) => Partial<ChatState>)) => void,
+  localRunId: string,
+  backendRunId?: string,
+) {
+  if (!backendRunId || backendRunId === localRunId) {
+    return localRunId;
+  }
+
+  set((state) => ({
+    activeAgentRunId:
+      state.activeAgentRunId === localRunId ? backendRunId : state.activeAgentRunId,
+    agentRuns: state.agentRuns.map((run) =>
+      run.id === localRunId ? { ...run, id: backendRunId } : run,
+    ),
+  }));
+  return backendRunId;
 }
 
 function createPendingAssistantMessage(
@@ -130,6 +162,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   models: [],
   selectedArtifactId: undefined,
   selectedModelId: undefined,
+  sharingSessionId: undefined,
   sessions: [],
   skills: [],
   switchingSessionId: undefined,
@@ -194,6 +227,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
   deleteArtifact: (artifactId) => {
+    void webAgentApi.deleteArtifact(artifactId).catch((error) => {
+      set({ error: error instanceof Error ? error.message : "Failed to delete artifact." });
+    });
+
     set((state) => {
       const artifacts = state.artifacts.filter((artifact) => artifact.id !== artifactId);
       const selectedArtifactId =
@@ -234,6 +271,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
   deleteSession: (sessionId) => {
+    void webAgentApi.deleteSession(sessionId).catch((error) => {
+      set({ error: error instanceof Error ? error.message : "Failed to delete session." });
+    });
+
     set((state) => {
       const sessions = state.sessions.filter((session) => session.id !== sessionId);
       const currentSessionId =
@@ -312,6 +353,48 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ currentSessionId: sessionId, selectedArtifactId: artifact?.id });
     setSwitchingState(set, get, sessionId);
   },
+  setSessionVisibility: async (sessionId, visibility) => {
+    if (!visibility) {
+      return;
+    }
+
+    set({ sharingSessionId: sessionId });
+    try {
+      const session = await webAgentApi.updateSession(sessionId, { visibility });
+      set((state) => ({
+        sessions: state.sessions.map((item) => (item.id === sessionId ? session : item)),
+        sharingSessionId: undefined,
+      }));
+    } catch (error) {
+      set({
+        error: error instanceof Error ? error.message : "Failed to update session access.",
+        sharingSessionId: undefined,
+      });
+    }
+  },
+  shareSession: async (sessionId, email) => {
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      return;
+    }
+
+    set({ sharingSessionId: sessionId });
+    try {
+      const session = await webAgentApi.updateSession(sessionId, {
+        shareWithEmail: trimmedEmail,
+        visibility: "shared",
+      });
+      set((state) => ({
+        sessions: state.sessions.map((item) => (item.id === sessionId ? session : item)),
+        sharingSessionId: undefined,
+      }));
+    } catch (error) {
+      set({
+        error: error instanceof Error ? error.message : "Failed to share session.",
+        sharingSessionId: undefined,
+      });
+    }
+  },
   sendMessage: async (content, skillKey) => {
     const trimmed = content.trim();
     if (!trimmed) {
@@ -328,6 +411,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     const now = new Date().toISOString();
     const runId = createId("run");
+    let currentRunId = runId;
     const optimisticUserMessage: Message = {
       id: createId("message_user"),
       sessionId,
@@ -372,9 +456,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
           modelId,
           signal: activeRequestAbortController.signal,
           sessionId,
-          skillKey,
+          skillKey: requestedSkill,
         },
         (event) => {
+          currentRunId = bindBackendRunId(
+            set,
+            currentRunId,
+            "runId" in event ? event.runId : undefined,
+          );
+
           if (event.type === "assistant_delta") {
             const chunk = event.content.trim();
             if (!chunk) {
@@ -498,11 +588,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
               return {
                 activeAgentRunId:
-                  state.activeAgentRunId === runId ? undefined : state.activeAgentRunId,
+                  state.activeAgentRunId === currentRunId ? undefined : state.activeAgentRunId,
                 agentFeedback:
-                  state.activeAgentRunId === runId ? undefined : state.agentFeedback,
+                  state.activeAgentRunId === currentRunId ? undefined : state.agentFeedback,
                 agentRuns: state.agentRuns.map((runItem) =>
-                  runItem.id === runId
+                  runItem.id === currentRunId
                     ? {
                         ...runItem,
                         completedAt: new Date().toISOString(),
@@ -526,7 +616,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         activeAgentRunId: undefined,
         agentFeedback: undefined,
         agentRuns: get().agentRuns.map((runItem) =>
-          runItem.id === runId
+          runItem.id === currentRunId
             ? {
                 ...runItem,
                 completedAt: new Date().toISOString(),
@@ -555,7 +645,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
     } finally {
       clearFeedbackTimers();
-      if (get().activeAgentRunId !== runId) {
+      if (get().activeAgentRunId !== currentRunId) {
         activeRequestAbortController = undefined;
       }
     }
@@ -623,6 +713,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
   toggleSessionPinned: (sessionId) => {
+    const session = get().sessions.find((item) => item.id === sessionId);
+    if (session) {
+      void webAgentApi.updateSession(sessionId, { pinned: !session.pinned }).catch((error) => {
+        set({ error: error instanceof Error ? error.message : "Failed to update session." });
+      });
+    }
+
     set((state) => ({
       sessions: state.sessions.map((session) =>
         session.id === sessionId ? { ...session, pinned: !session.pinned } : session,
@@ -635,6 +732,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set({ skills });
     } catch (error) {
       set({ error: error instanceof Error ? error.message : "Failed to update skill." });
+    }
+  },
+  unshareSession: async (sessionId, userId) => {
+    set({ sharingSessionId: sessionId });
+    try {
+      const session = await webAgentApi.updateSession(sessionId, {
+        unshareUserId: userId,
+      });
+      set((state) => ({
+        sessions: state.sessions.map((item) => (item.id === sessionId ? session : item)),
+        sharingSessionId: undefined,
+      }));
+    } catch (error) {
+      set({
+        error: error instanceof Error ? error.message : "Failed to update sharing.",
+        sharingSessionId: undefined,
+      });
     }
   },
   updateModel: async (modelId, input) => {

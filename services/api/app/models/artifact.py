@@ -1,5 +1,5 @@
 from sqlalchemy import ForeignKey, JSON, BigInteger, String, Text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 from app.models.mixins import IdMixin, TimestampMixin
@@ -16,6 +16,8 @@ class Artifact(IdMixin, TimestampMixin, Base):
     content: Mapped[str | None] = mapped_column(Text, nullable=True)
     artifact_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
+    conversation = relationship("Conversation")
+
 
 class FileAsset(IdMixin, TimestampMixin, Base):
     __tablename__ = "files"
@@ -26,4 +28,3 @@ class FileAsset(IdMixin, TimestampMixin, Base):
     size: Mapped[int] = mapped_column(BigInteger)
     storage_key: Mapped[str] = mapped_column(String(1024))
     file_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-

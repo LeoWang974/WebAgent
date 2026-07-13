@@ -1,115 +1,398 @@
-from fastapi import APIRouter, HTTPException
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import schemas
-from app.services import mock_store
+from app.db.session import get_db
+from app.models import ModelConfig, SkillConfig, SkillVersion, User, UserSettings
+from app.services.persistence import get_current_user
 
 router = APIRouter()
 
+DEFAULT_DATA_CONTEXT = {
+    "auto_summarize_context": True,
+    "context_retention_days": 30,
+    "max_context_messages": 40,
+    "save_conversation_history": True,
+    "save_uploaded_files": True,
+}
+
+DEFAULT_MODELS = [
+    {
+        "name": "SenseNova default model",
+        "provider": "sensenova",
+        "base_url": None,
+        "encrypted_api_key": None,
+        "is_default": False,
+        "is_available": True,
+    },
+    {
+        "name": "OpenClaw Agent",
+        "provider": "openai_compatible",
+        "base_url": "http://localhost:8643",
+        "encrypted_api_key": None,
+        "is_default": False,
+        "is_available": True,
+    },
+    {
+        "name": "Hermes Agent",
+        "provider": "openai_compatible",
+        "base_url": "http://localhost:8642",
+        "encrypted_api_key": None,
+        "is_default": True,
+        "is_available": True,
+    },
+]
+
+DEFAULT_SKILLS = [
+    {
+        "key": "data_analysis",
+        "name": "Data analysis",
+        "description": "Upload datasets and analyze trends, charts, and summaries.",
+        "enabled": True,
+        "is_default": False,
+        "current_version": "0.1.0",
+    },
+    {
+        "key": "deep_research",
+        "name": "Deep research",
+        "description": "Turn a topic into a structured research report.",
+        "enabled": True,
+        "is_default": True,
+        "current_version": "0.1.0",
+    },
+    {
+        "key": "ppt_generation",
+        "name": "PPT generation",
+        "description": "Generate slide structures and preview presentation drafts.",
+        "enabled": True,
+        "is_default": False,
+        "current_version": "0.1.0",
+    },
+    {
+        "key": "u1_image",
+        "name": "u1 image",
+        "description": "Generate image concepts from prompts.",
+        "enabled": True,
+        "is_default": False,
+        "current_version": "0.1.0",
+    },
+]
+
+
+def mask_api_key(value: str | None) -> str | None:
+    if not value:
+        return None
+    if len(value) <= 8:
+        return "****"
+    return f"{value[:4]}****{value[-4:]}"
+
+
+def get_input_value(input_data: dict[str, Any], camel_key: str, snake_key: str, default=None):
+    if camel_key in input_data:
+        return input_data[camel_key]
+    if snake_key in input_data:
+        return input_data[snake_key]
+    return default
+
+
+def to_user_schema(user: User) -> schemas.User:
+    return schemas.User(
+        id=user.id,
+        nickname=user.nickname,
+        email=user.email,
+        avatar_url=user.avatar_url,
+    )
+
+
+def to_model_schema(model: ModelConfig) -> schemas.ModelConfig:
+    return schemas.ModelConfig(
+        id=model.id,
+        name=model.name,
+        provider=model.provider,
+        base_url=model.base_url,
+        is_default=model.is_default,
+        is_available=model.is_available,
+        masked_api_key=mask_api_key(model.encrypted_api_key),
+    )
+
+
+def to_skill_schema(skill: SkillConfig) -> schemas.Skill:
+    return schemas.Skill(
+        key=skill.key,
+        name=skill.name,
+        description=skill.description,
+        version=skill.current_version,
+        enabled=skill.enabled,
+        is_default=skill.is_default,
+        last_updated_at=skill.updated_at.isoformat() if skill.updated_at else None,
+    )
+
+
+def to_data_context_schema(settings: UserSettings) -> schemas.DataContextSettings:
+    data = {**DEFAULT_DATA_CONTEXT, **(settings.data_context or {})}
+    return schemas.DataContextSettings(**data)
+
+
+async def ensure_default_models(db: AsyncSession, user: User) -> None:
+    result = await db.execute(select(ModelConfig).where(ModelConfig.user_id == user.id))
+    if result.scalars().first() is not None:
+        return
+
+    for item in DEFAULT_MODELS:
+        db.add(ModelConfig(user_id=user.id, **item))
+    await db.commit()
+
+
+async def list_user_models(db: AsyncSession, user: User) -> list[ModelConfig]:
+    await ensure_default_models(db, user)
+    result = await db.execute(
+        select(ModelConfig)
+        .where(ModelConfig.user_id == user.id)
+        .order_by(ModelConfig.is_default.desc(), ModelConfig.created_at.asc())
+    )
+    return list(result.scalars().all())
+
+
+async def get_user_model(db: AsyncSession, user: User, model_id: str) -> ModelConfig:
+    result = await db.execute(
+        select(ModelConfig).where(
+            ModelConfig.id == model_id,
+            ModelConfig.user_id == user.id,
+        )
+    )
+    model = result.scalar_one_or_none()
+    if model is None:
+        raise HTTPException(status_code=404, detail="Model not found")
+    return model
+
+
+async def ensure_user_settings(db: AsyncSession, user: User) -> UserSettings:
+    result = await db.execute(select(UserSettings).where(UserSettings.user_id == user.id))
+    settings = result.scalar_one_or_none()
+    if settings is not None:
+        return settings
+
+    settings = UserSettings(user_id=user.id, data_context=DEFAULT_DATA_CONTEXT, interface={})
+    db.add(settings)
+    await db.commit()
+    await db.refresh(settings)
+    return settings
+
+
+async def ensure_default_skills(db: AsyncSession) -> None:
+    result = await db.execute(select(SkillConfig))
+    existing_keys = {item.key for item in result.scalars().all()}
+    changed = False
+
+    for item in DEFAULT_SKILLS:
+        if item["key"] in existing_keys:
+            continue
+        db.add(SkillConfig(**item))
+        changed = True
+
+    if changed:
+        await db.commit()
+
+
+async def list_skill_configs(db: AsyncSession) -> list[SkillConfig]:
+    await ensure_default_skills(db)
+    result = await db.execute(select(SkillConfig).order_by(SkillConfig.created_at.asc()))
+    return list(result.scalars().all())
+
+
+async def get_skill_config(db: AsyncSession, skill_key: str) -> SkillConfig:
+    await ensure_default_skills(db)
+    result = await db.execute(select(SkillConfig).where(SkillConfig.key == skill_key))
+    skill = result.scalar_one_or_none()
+    if skill is None:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    return skill
+
 
 @router.put("/profile", response_model=schemas.User)
-async def update_profile(input_data: schemas.ProfileUpdate) -> schemas.User:
-    mock_store.user.nickname = input_data.nickname
-    mock_store.user.email = input_data.email
-    mock_store.user.avatar_url = input_data.avatar_url
-    return mock_store.user
+async def update_profile(
+    input_data: schemas.ProfileUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> schemas.User:
+    current_user.nickname = input_data.nickname
+    current_user.email = input_data.email
+    current_user.avatar_url = input_data.avatar_url
+    try:
+        await db.commit()
+    except IntegrityError as error:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Email is already in use") from error
+    await db.refresh(current_user)
+    return to_user_schema(current_user)
 
 
 @router.get("/data-context", response_model=schemas.DataContextSettings)
-async def get_data_context_settings() -> schemas.DataContextSettings:
-    return mock_store.data_context_settings
+async def get_data_context_settings(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> schemas.DataContextSettings:
+    settings = await ensure_user_settings(db, current_user)
+    return to_data_context_schema(settings)
 
 
 @router.put("/data-context", response_model=schemas.DataContextSettings)
 async def update_data_context_settings(
     input_data: schemas.DataContextSettings,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> schemas.DataContextSettings:
-    mock_store.data_context_settings = input_data
-    return mock_store.data_context_settings
+    settings = await ensure_user_settings(db, current_user)
+    settings.data_context = input_data.model_dump()
+    await db.commit()
+    await db.refresh(settings)
+    return to_data_context_schema(settings)
 
 
 @router.post("/models", response_model=schemas.ModelConfig)
-async def add_model(input_data: dict) -> schemas.ModelConfig:
-    model = schemas.ModelConfig(
-        base_url=input_data.get("baseUrl") or input_data.get("base_url"),
-        id=mock_store.new_id("model"),
+async def add_model(
+    input_data: dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> schemas.ModelConfig:
+    await ensure_default_models(db, current_user)
+    api_key = get_input_value(input_data, "apiKey", "api_key")
+    model = ModelConfig(
+        user_id=current_user.id,
+        base_url=get_input_value(input_data, "baseUrl", "base_url"),
+        encrypted_api_key=api_key,
         is_available=True,
         name=input_data.get("name", "Custom model"),
         provider=input_data.get("provider", "custom"),
         is_default=False,
-        masked_api_key="sk-****" if input_data.get("apiKey") or input_data.get("api_key") else None,
     )
-    mock_store.models.insert(0, model)
-    return model
+    db.add(model)
+    await db.commit()
+    await db.refresh(model)
+    return to_model_schema(model)
 
 
 @router.put("/models/{model_id}", response_model=schemas.ModelConfig)
-async def update_model(model_id: str, input_data: dict) -> schemas.ModelConfig:
-    existing = next((item for item in mock_store.models if item.id == model_id), None)
-    if existing is None:
-        raise HTTPException(status_code=404, detail="Model not found")
-    update_data = {
-        "base_url": input_data.get("baseUrl", input_data.get("base_url", existing.base_url)),
-        "name": input_data.get("name", existing.name),
-        "provider": input_data.get("provider", existing.provider),
-        "masked_api_key": "sk-****"
-        if input_data.get("apiKey") or input_data.get("api_key")
-        else existing.masked_api_key,
-    }
-    updated = existing.model_copy(update=update_data)
-    mock_store.models[:] = [updated if item.id == model_id else item for item in mock_store.models]
-    return updated
+async def update_model(
+    model_id: str,
+    input_data: dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> schemas.ModelConfig:
+    model = await get_user_model(db, current_user, model_id)
+    model.name = input_data.get("name", model.name)
+    model.provider = input_data.get("provider", model.provider)
+    model.base_url = get_input_value(input_data, "baseUrl", "base_url", model.base_url)
+    api_key = get_input_value(input_data, "apiKey", "api_key")
+    if api_key:
+        model.encrypted_api_key = api_key
+    await db.commit()
+    await db.refresh(model)
+    return to_model_schema(model)
 
 
 @router.delete("/models/{model_id}", status_code=204)
-async def delete_model(model_id: str) -> None:
-    mock_store.models[:] = [item for item in mock_store.models if item.id != model_id]
+async def delete_model(
+    model_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> None:
+    model = await get_user_model(db, current_user, model_id)
+    was_default = model.is_default
+    await db.delete(model)
+    await db.commit()
+
+    if was_default:
+        models = await list_user_models(db, current_user)
+        if models:
+            models[0].is_default = True
+            await db.commit()
     return None
 
 
 @router.post("/models/default", response_model=list[schemas.ModelConfig])
-async def set_default_model(payload: dict[str, str]) -> list[schemas.ModelConfig]:
+async def set_default_model(
+    payload: dict[str, str],
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[schemas.ModelConfig]:
     model_id = payload.get("modelId") or payload.get("model_id")
-    mock_store.models[:] = [
-        item.model_copy(update={"is_default": item.id == model_id}) for item in mock_store.models
-    ]
-    return mock_store.models
+    if not model_id:
+        raise HTTPException(status_code=400, detail="model_id is required")
+    await get_user_model(db, current_user, model_id)
+
+    models = await list_user_models(db, current_user)
+    for model in models:
+        model.is_default = model.id == model_id
+    await db.commit()
+    models = await list_user_models(db, current_user)
+    return [to_model_schema(item) for item in models]
 
 
 @router.post("/models/{model_id}/test", response_model=schemas.ModelConfig)
-async def test_model_connection(model_id: str) -> schemas.ModelConfig:
-    model = next((item for item in mock_store.models if item.id == model_id), None)
-    if model is None:
-        raise HTTPException(status_code=404, detail="Model not found")
-    updated = model.model_copy(update={"is_available": True})
-    mock_store.models[:] = [updated if item.id == model_id else item for item in mock_store.models]
-    return updated
+async def test_model_connection(
+    model_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> schemas.ModelConfig:
+    model = await get_user_model(db, current_user, model_id)
+    model.is_available = True
+    await db.commit()
+    await db.refresh(model)
+    return to_model_schema(model)
 
 
 @router.post("/skills/default", response_model=list[schemas.Skill])
-async def set_default_skill(payload: dict[str, str]) -> list[schemas.Skill]:
+async def set_default_skill(
+    payload: dict[str, str],
+    db: AsyncSession = Depends(get_db),
+) -> list[schemas.Skill]:
     skill_key = payload.get("skillKey") or payload.get("skill_key")
-    mock_store.skills[:] = [
-        item.model_copy(update={"is_default": item.key == skill_key}) for item in mock_store.skills
-    ]
-    return mock_store.skills
+    if not skill_key:
+        raise HTTPException(status_code=400, detail="skill_key is required")
+    await get_skill_config(db, skill_key)
+
+    skills = await list_skill_configs(db)
+    for skill in skills:
+        skill.is_default = skill.key == skill_key
+    await db.commit()
+    skills = await list_skill_configs(db)
+    return [to_skill_schema(item) for item in skills]
 
 
 @router.post("/skills/{skill_key}/toggle", response_model=list[schemas.Skill])
-async def toggle_skill_enabled(skill_key: str) -> list[schemas.Skill]:
-    mock_store.skills[:] = [
-        item.model_copy(update={"enabled": not item.enabled}) if item.key == skill_key else item
-        for item in mock_store.skills
-    ]
-    return mock_store.skills
+async def toggle_skill_enabled(
+    skill_key: str,
+    db: AsyncSession = Depends(get_db),
+) -> list[schemas.Skill]:
+    skill = await get_skill_config(db, skill_key)
+    skill.enabled = not skill.enabled
+    await db.commit()
+    skills = await list_skill_configs(db)
+    return [to_skill_schema(item) for item in skills]
 
 
 @router.post("/skills/{skill_key}/version", response_model=list[schemas.Skill])
-async def update_skill_version(skill_key: str, payload: dict[str, str]) -> list[schemas.Skill]:
-    direction = payload.get("direction", "upgrade")
-    mock_store.skills[:] = [
-        item.model_copy(update={"version": "0.1.1" if direction == "upgrade" else "0.1.0"})
-        if item.key == skill_key
-        else item
-        for item in mock_store.skills
-    ]
-    return mock_store.skills
+async def update_skill_version(
+    skill_key: str,
+    payload: dict[str, str],
+    db: AsyncSession = Depends(get_db),
+) -> list[schemas.Skill]:
+    skill = await get_skill_config(db, skill_key)
+    direction = payload.get("direction", "update")
+    skill.current_version = "0.1.1" if direction == "update" else "0.1.0"
+    db.add(
+        SkillVersion(
+            skill_key=skill.key,
+            version=skill.current_version,
+            changelog=f"{direction} via settings API",
+            status="published",
+        )
+    )
+    await db.commit()
+    skills = await list_skill_configs(db)
+    return [to_skill_schema(item) for item in skills]
