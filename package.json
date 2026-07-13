@@ -3,10 +3,10 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
-    "dev": "pnpm --filter web dev",
-    "dev:clean": "pnpm --filter web dev:clean",
-    "build": "pnpm --filter web build",
-    "clean": "pnpm --filter web clean",
-    "lint": "pnpm --filter web lint"
+    "dev": "pnpm --filter web run dev",
+    "dev:clean": "pnpm --filter web run dev:clean",
+    "build": "pnpm --filter web run build",
+    "clean": "pnpm --filter web run clean",
+    "lint": "pnpm --filter web run lint"
   }
 }

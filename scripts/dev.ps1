@@ -1,2 +1,1 @@
-pnpm dev
-
+& (Join-Path $PSScriptRoot "dev-all.ps1")
