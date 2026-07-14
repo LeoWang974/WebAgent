@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useI18n } from "@/lib/i18n";
 
 interface PreviewImage {
@@ -20,9 +20,35 @@ export function ImageViewer({ images, title }: ImageViewerProps) {
   const [selectedId, setSelectedId] = useState(images[0]?.id);
   const selectedImage = images.find((image) => image.id === selectedId) ?? images[0];
 
+  useEffect(() => {
+    setSelectedId(images[0]?.id);
+  }, [images]);
+
   if (!selectedImage) {
     return null;
   }
+
+  const renderImage = (image: PreviewImage, className: string) => {
+    if (image.url) {
+      return (
+        <img
+          alt={image.prompt || title}
+          className={`${className} bg-[#f7f7f5] object-contain`}
+          loading="lazy"
+          src={image.url}
+        />
+      );
+    }
+
+    return (
+      <div
+        className={className}
+        style={{
+          background: image.gradient ?? "#f7f7f5",
+        }}
+      />
+    );
+  };
 
   return (
     <div className="space-y-4">
@@ -33,14 +59,12 @@ export function ImageViewer({ images, title }: ImageViewerProps) {
             {t("generatedImagePreview")}
           </p>
         </div>
-        <div
-          className="aspect-square rounded-xl border shadow-inner"
-          style={{
-            background:
-              selectedImage.gradient ??
-              `center / cover no-repeat url(${selectedImage.url})`,
-          }}
-        />
+        <div className="flex max-h-[70vh] min-h-[260px] items-center justify-center overflow-auto rounded-xl border bg-[#f7f7f5] p-2 shadow-inner">
+          {renderImage(
+            selectedImage,
+            "max-h-[calc(70vh-24px)] max-w-full rounded-lg",
+          )}
+        </div>
         <p className="mt-3 rounded-md border bg-[#f7f7f5] p-3 text-xs leading-5 text-muted-foreground">
           {selectedImage.prompt}
         </p>
@@ -56,13 +80,9 @@ export function ImageViewer({ images, title }: ImageViewerProps) {
             onClick={() => setSelectedId(image.id)}
             type="button"
           >
-            <div
-              className="aspect-square rounded-md border"
-              style={{
-                background:
-                  image.gradient ?? `center / cover no-repeat url(${image.url})`,
-              }}
-            />
+            <div className="flex aspect-square items-center justify-center overflow-hidden rounded-md border bg-[#f7f7f5] p-1">
+              {renderImage(image, "max-h-full max-w-full rounded-sm")}
+            </div>
             <div className="mt-2 line-clamp-2 text-left text-xs text-muted-foreground">
               {image.prompt}
             </div>

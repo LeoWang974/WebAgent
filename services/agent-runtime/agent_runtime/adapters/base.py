@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator
 
 from ..schemas import AgentRun, AgentRunCreate, AgentRunEvent
 

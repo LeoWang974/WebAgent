@@ -369,7 +369,6 @@ class HermesCliWrapper:
         if run_id:
             self.active_processes[run_id] = process
 
-        pending = ""
         in_hermes_box = False
         box_lines: list[str] = []
         emitted_output = False

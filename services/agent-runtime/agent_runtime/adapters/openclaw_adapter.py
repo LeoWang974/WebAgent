@@ -1,5 +1,5 @@
 import asyncio
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator
 
 import httpx
 
