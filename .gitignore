@@ -36,11 +36,11 @@ Thumbs.db
 .idea/
 
 # Generated files
-uploads/
-outputs/
-storage/
-artifacts/
-runtime/
+/uploads/
+/outputs/
+/storage/
+/artifacts/
+/runtime/
 services/api/deep-research-reports/
 services/api/uploads/
 services/api/outputs/

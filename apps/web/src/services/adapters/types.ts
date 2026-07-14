@@ -46,6 +46,13 @@ export type SendMessageStreamEvent =
       type: "user_message";
     }
   | {
+      progress: number;
+      runId: string;
+      sessionId: string;
+      status: AgentRun["status"];
+      type: "run_started";
+    }
+  | {
       content: string;
       messageId: string;
       runId?: string;

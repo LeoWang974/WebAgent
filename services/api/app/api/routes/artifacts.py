@@ -1,4 +1,8 @@
+from pathlib import Path
+from urllib.parse import quote
+
 from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi.responses import FileResponse
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -8,6 +12,46 @@ from app.models import Artifact, Conversation, ConversationShare, User
 from app.services.persistence import get_current_user, get_conversation_or_404, require_owner, to_artifact
 
 router = APIRouter()
+
+MEDIA_TYPES = {
+    ".csv": "text/csv; charset=utf-8",
+    ".htm": "text/html; charset=utf-8",
+    ".html": "text/html; charset=utf-8",
+    ".jpeg": "image/jpeg",
+    ".jpg": "image/jpeg",
+    ".md": "text/markdown; charset=utf-8",
+    ".png": "image/png",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+}
+
+
+def artifact_download_name(artifact: Artifact) -> str:
+    metadata = artifact.artifact_metadata or {}
+    filename = str(metadata.get("filename") or "").strip()
+    if filename:
+        return filename
+    suffix_by_type = {
+        "chart": ".csv",
+        "data_table": ".csv",
+        "html_page": ".html",
+        "image_result": ".png",
+        "markdown_report": ".md",
+        "ppt_deck": ".pptx",
+    }
+    return f"{artifact.title or artifact.id}{suffix_by_type.get(artifact.type, '.txt')}"
+
+
+def artifact_file_path(artifact: Artifact) -> Path | None:
+    metadata = artifact.artifact_metadata or {}
+    for key in ("path", "originalPath"):
+        raw_path = metadata.get(key)
+        if not isinstance(raw_path, str) or not raw_path:
+            continue
+        path = Path(raw_path)
+        if path.exists() and path.is_file():
+            return path
+    return None
 
 
 @router.get("", response_model=list[schemas.Artifact])
@@ -74,8 +118,18 @@ async def download_artifact(
     if artifact is None:
         raise HTTPException(status_code=404, detail="Artifact not found")
     await get_conversation_or_404(db, artifact.conversation_id, current_user)
+    path = artifact_file_path(artifact)
+    if path is not None:
+        return FileResponse(
+            path,
+            media_type=MEDIA_TYPES.get(path.suffix.lower(), "application/octet-stream"),
+            filename=artifact_download_name(artifact),
+        )
+
+    filename = artifact_download_name(artifact)
+    suffix = Path(filename).suffix.lower()
     return Response(
         content=artifact.content or artifact.title,
-        media_type="text/plain; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{artifact.id}.txt"'},
+        media_type=MEDIA_TYPES.get(suffix, "text/plain; charset=utf-8"),
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
     )

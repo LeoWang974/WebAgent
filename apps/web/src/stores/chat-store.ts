@@ -48,6 +48,7 @@ interface ChatState {
   deleteSession: (sessionId: string) => void;
   hydrate: () => Promise<void>;
   retryHydrate: () => Promise<void>;
+  refreshAgentRun: (runId: string) => Promise<AgentRun | undefined>;
   selectArtifact: (artifactId: string) => void;
   selectModel: (modelId: string) => void;
   selectSession: (sessionId: string) => void;
@@ -346,6 +347,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ hydrated: false, loading: false });
     await get().hydrate();
   },
+  refreshAgentRun: async (runId) => {
+    try {
+      const run = await webAgentApi.getAgentRun(runId);
+      set((state) => ({
+        agentRuns: state.agentRuns.some((item) => item.id === run.id)
+          ? state.agentRuns.map((item) => (item.id === run.id ? run : item))
+          : [run, ...state.agentRuns],
+      }));
+      return run;
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : "Failed to load run details." });
+      return undefined;
+    }
+  },
   selectArtifact: (artifactId) => set({ selectedArtifactId: artifactId }),
   selectModel: (modelId) => set({ selectedModelId: modelId }),
   selectSession: (sessionId) => {
@@ -465,6 +480,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
             "runId" in event ? event.runId : undefined,
           );
 
+          if (event.type === "run_started") {
+            set((state) => ({
+              activeAgentRunId:
+                state.activeAgentRunId === currentRunId ? event.runId : state.activeAgentRunId,
+              agentRuns: state.agentRuns.map((runItem) =>
+                runItem.id === event.runId
+                  ? {
+                      ...runItem,
+                      progress: event.progress,
+                      status: event.status,
+                    }
+                  : runItem,
+              ),
+            }));
+            return;
+          }
+
           if (event.type === "assistant_delta") {
             const chunk = event.content.trim();
             if (!chunk) {
@@ -475,6 +507,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
             set((state) => {
               const now = new Date().toISOString();
+              const currentRun = state.agentRuns.find((runItem) => runItem.id === currentRunId);
+              const nextProgress = Math.min(90, (currentRun?.progress ?? 5) + 8);
               const pendingIndex = state.messages.findIndex(
                 (message) =>
                   message.sessionId === sessionId &&
@@ -501,6 +535,28 @@ export const useChatStore = create<ChatState>((set, get) => ({
               if (pendingIndex >= 0) {
                 return {
                   agentFeedback: undefined,
+                  agentRuns: state.agentRuns.map((runItem) =>
+                    runItem.id === currentRunId
+                      ? {
+                          ...runItem,
+                          progress: nextProgress,
+                          status: "running",
+                          steps: [
+                            ...runItem.steps.map((step) =>
+                              step.status === "running"
+                                ? { ...step, status: "completed" as const }
+                                : step,
+                            ),
+                            {
+                              id: event.messageId,
+                              label: chunk,
+                              status: "completed",
+                              timestamp: now,
+                            },
+                          ],
+                        }
+                      : runItem,
+                  ),
                   messages: [
                     ...state.messages.slice(0, pendingIndex),
                     completedMessage,
@@ -512,6 +568,28 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
               return {
                 agentFeedback: undefined,
+                agentRuns: state.agentRuns.map((runItem) =>
+                  runItem.id === currentRunId
+                    ? {
+                        ...runItem,
+                        progress: nextProgress,
+                        status: "running",
+                        steps: [
+                          ...runItem.steps.map((step) =>
+                            step.status === "running"
+                              ? { ...step, status: "completed" as const }
+                              : step,
+                          ),
+                          {
+                            id: event.messageId,
+                            label: chunk,
+                            status: "completed",
+                            timestamp: now,
+                          },
+                        ],
+                      }
+                    : runItem,
+                ),
                 messages: [...state.messages, completedMessage, nextPendingMessage],
               };
             });
@@ -672,8 +750,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return;
     }
 
-    activeRequestAbortController?.abort();
-    activeRequestAbortController = undefined;
+    void webAgentApi
+      .cancelAgentRun(runId)
+      .then((run) => {
+        set((state) => ({
+          agentRuns: state.agentRuns.map((item) => (item.id === run.id ? run : item)),
+        }));
+      })
+      .catch((error) => {
+        set({ error: error instanceof Error ? error.message : "Failed to cancel run." });
+      })
+      .finally(() => {
+        activeRequestAbortController?.abort();
+        activeRequestAbortController = undefined;
+      });
     clearFeedbackTimers();
 
     set((state) => ({

@@ -77,6 +77,7 @@ class HermesAdapter(AgentRuntimeAdapter):
         )
 
     async def cancel_run(self, run_id: str) -> AgentRun:
+        await self.cli.cancel_run(run_id)
         return AgentRun(
             id=run_id,
             session_id="",
@@ -174,6 +175,7 @@ class HermesAdapter(AgentRuntimeAdapter):
 
         async for response in self.cli.ask_stream(
             question=input_data.content,
+            run_id=input_data.run_id,
             toolsets=toolsets,
             skills=skills,
         ):

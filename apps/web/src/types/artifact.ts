@@ -1,5 +1,6 @@
 export type ArtifactType =
   | "markdown_report"
+  | "html_page"
   | "ppt_deck"
   | "image_result"
   | "data_table"

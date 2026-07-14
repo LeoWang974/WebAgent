@@ -43,7 +43,7 @@ export function ArtifactDrawer() {
               disabled={!artifact}
               onClick={() => {
                 if (artifact) {
-                  downloadArtifact(artifact);
+                  void downloadArtifact(artifact);
                 }
               }}
               title={t("download")}

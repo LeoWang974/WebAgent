@@ -39,6 +39,11 @@ from app.services.persistence import (
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+AGENT_RUN_IDLE_TIMEOUT_SECONDS = 30 * 60
+
+
+class AgentRunCancelled(Exception):
+    pass
 
 
 def sse(event: str, data: dict) -> str:
@@ -108,6 +113,11 @@ async def refresh_conversation(db: AsyncSession, session_id: str) -> Conversatio
     )
     conversation = result.scalar_one()
     return conversation
+
+
+async def is_agent_run_cancelled(db: AsyncSession, run_id: str) -> bool:
+    result = await db.execute(select(AgentRun.status).where(AgentRun.id == run_id))
+    return result.scalar_one_or_none() == "cancelled"
 
 
 async def persist_message(
@@ -428,6 +438,7 @@ async def stream_session_message(
         yield sse("user_message", to_message(user_message).model_dump(by_alias=True))
 
         assistant_messages: list[Message] = []
+        adapter = None
         run: AgentRun | None = None
         assistant_event_count = 0
 
@@ -447,6 +458,15 @@ async def stream_session_message(
                 title=resolved_skill_key or "Agent Run",
                 status="running",
                 progress=5,
+            )
+            yield sse(
+                "run_started",
+                {
+                    "runId": run.id,
+                    "sessionId": session_id,
+                    "status": run.status,
+                    "progress": run.progress,
+                },
             )
             await record_db_agent_run_event(
                 db,
@@ -473,10 +493,29 @@ async def stream_session_message(
                 session_id=session_id,
                 skill_key=resolved_skill_key,
                 model_id=input_data.model_id,
+                run_id=run.id,
             )
 
             if hasattr(adapter, "stream_response"):
-                async for chunk in adapter.stream_response(adapter_input):
+                stream = adapter.stream_response(adapter_input)
+                while True:
+                    try:
+                        chunk = await asyncio.wait_for(
+                            stream.__anext__(),
+                            timeout=AGENT_RUN_IDLE_TIMEOUT_SECONDS,
+                        )
+                    except StopAsyncIteration:
+                        break
+                    except asyncio.TimeoutError as error:
+                        if hasattr(adapter, "cancel_run"):
+                            await adapter.cancel_run(run.id)
+                        raise TimeoutError(
+                            f"Agent run timed out after {AGENT_RUN_IDLE_TIMEOUT_SECONDS} seconds without output."
+                        ) from error
+
+                    if await is_agent_run_cancelled(db, run.id):
+                        raise AgentRunCancelled()
+
                     content = chunk.strip()
                     if not content:
                         continue
@@ -508,6 +547,8 @@ async def stream_session_message(
                     )
             else:
                 runtime_run = await adapter.create_run(adapter_input)
+                if await is_agent_run_cancelled(db, run.id):
+                    raise AgentRunCancelled()
                 content = (
                     getattr(runtime_run, "output", None)
                     or runtime_run.error
@@ -536,6 +577,9 @@ async def stream_session_message(
                         "runId": run.id,
                     },
                 )
+
+            if await is_agent_run_cancelled(db, run.id):
+                raise AgentRunCancelled()
 
             explicit_artifact_paths = (
                 adapter.get_last_artifact_paths()
@@ -619,8 +663,52 @@ async def stream_session_message(
                     "runId": run.id,
                 },
             )
+        except AgentRunCancelled:
+            if run is not None:
+                from app.api.routes.agent_runs import finish_db_agent_run
+
+                await finish_db_agent_run(
+                    db,
+                    run,
+                    status="cancelled",
+                    label="Agent run cancelled",
+                )
+            conversation = await refresh_conversation(db, session_id)
+            conversation.status = "active"
+            await db.commit()
+            conversation = await refresh_conversation(db, session_id)
+            cancelled_message = await persist_message(
+                db,
+                session_id,
+                "assistant",
+                "任务已取消。",
+            )
+            yield sse(
+                "assistant_done",
+                {
+                    "message": to_message(cancelled_message).model_dump(by_alias=True),
+                    "session": to_session(conversation).model_dump(by_alias=True),
+                    "runId": run.id if run is not None else None,
+                    "status": "cancelled",
+                },
+            )
+        except asyncio.CancelledError:
+            if run is not None:
+                from app.api.routes.agent_runs import finish_db_agent_run
+
+                if adapter is not None and hasattr(adapter, "cancel_run"):
+                    await adapter.cancel_run(run.id)
+                await finish_db_agent_run(
+                    db,
+                    run,
+                    status="cancelled",
+                    label="Agent stream disconnected",
+                )
+            raise
         except Exception as error:
             logger.exception("Agent stream failed")
+            if run is not None and adapter is not None and hasattr(adapter, "cancel_run"):
+                await adapter.cancel_run(run.id)
             if run is not None:
                 from app.api.routes.agent_runs import finish_db_agent_run
 

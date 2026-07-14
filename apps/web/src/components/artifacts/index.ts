@@ -4,6 +4,8 @@ export * from "./artifact-preview-content";
 export * from "./artifact-empty-state";
 export * from "./artifact-fullscreen";
 export * from "./data-table-viewer";
+export * from "./file-artifact-viewer";
+export * from "./html-viewer";
 export * from "./markdown-preview-placeholder";
 export * from "./markdown-viewer";
 export * from "./ppt-preview-placeholder";

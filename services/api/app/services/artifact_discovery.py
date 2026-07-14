@@ -13,7 +13,7 @@ from app.schemas.artifact import ArtifactType
 from app.services import mock_store
 
 
-SUPPORTED_SUFFIXES = {".md", ".pptx", ".png", ".jpg", ".jpeg", ".csv", ".xlsx"}
+SUPPORTED_SUFFIXES = {".md", ".html", ".htm", ".pptx", ".png", ".jpg", ".jpeg", ".csv", ".xlsx"}
 IGNORED_PARTS = {".git", ".next", ".venv", "__pycache__", "node_modules"}
 IGNORED_FILENAMES = {"request.md"}
 OUTPUT_PATH_MARKERS = {
@@ -35,7 +35,7 @@ NON_ARTIFACT_MARKERS = {
     "\\node_modules\\",
 }
 ARTIFACT_PATH_RE = re.compile(
-    r"(?P<path>(?:[A-Za-z]:\\|/mnt/[a-zA-Z]/|/home/|/tmp/)[^\"'<>|`\r\n]+?\.(?:md|pptx|png|jpe?g|csv|xlsx))",
+    r"(?P<path>(?:[A-Za-z]:\\|/mnt/[a-zA-Z]/|/home/|/tmp/)[^\"'<>|`\r\n]+?\.(?:md|html?|pptx|png|jpe?g|csv|xlsx))",
     re.IGNORECASE,
 )
 
@@ -115,6 +115,8 @@ def _artifact_type(path: Path) -> ArtifactType:
     suffix = path.suffix.lower()
     if suffix == ".md":
         return "markdown_report"
+    if suffix in {".html", ".htm"}:
+        return "html_page"
     if suffix == ".pptx":
         return "ppt_deck"
     if suffix in {".png", ".jpg", ".jpeg"}:
@@ -194,7 +196,7 @@ def _metadata(
 
 
 def _content(path: Path, artifact_type: ArtifactType) -> str | None:
-    if artifact_type == "markdown_report":
+    if artifact_type in {"markdown_report", "html_page"}:
         return _read_text(path)
     return None
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { FileText } from "lucide-react";
+import { FileImage, FileSpreadsheet, FileText, Globe2, Presentation } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { getStatusLabelKey } from "@/lib/status";
 import type { ArtifactStatus, ArtifactType } from "@/types";
@@ -10,6 +10,22 @@ interface ArtifactCardProps {
   status?: ArtifactStatus;
   title: string;
   type: ArtifactType;
+}
+
+function ArtifactIcon({ type }: { type: ArtifactType }) {
+  if (type === "html_page") {
+    return <Globe2 className="size-4" />;
+  }
+  if (type === "ppt_deck") {
+    return <Presentation className="size-4" />;
+  }
+  if (type === "image_result") {
+    return <FileImage className="size-4" />;
+  }
+  if (type === "data_table" || type === "chart") {
+    return <FileSpreadsheet className="size-4" />;
+  }
+  return <FileText className="size-4" />;
 }
 
 export function ArtifactCard({
@@ -27,7 +43,7 @@ export function ArtifactCard({
       type="button"
     >
       <div className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-[#f7f7f5]">
-        <FileText className="size-4" />
+        <ArtifactIcon type={type} />
       </div>
       <div className="min-w-0 flex-1">
         <div className="truncate font-medium">{title}</div>

@@ -65,7 +65,7 @@ export function ArtifactPanel({ dragging = false, width }: ArtifactPanelProps) {
             disabled={!artifact}
             onClick={() => {
               if (artifact) {
-                downloadArtifact(artifact);
+                void downloadArtifact(artifact);
               }
             }}
             title={t("download")}

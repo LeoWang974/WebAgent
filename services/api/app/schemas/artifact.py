@@ -2,7 +2,14 @@ from typing import Any, Literal
 
 from app.schemas.base import ApiModel
 
-ArtifactType = Literal["markdown_report", "ppt_deck", "image_result", "data_table", "chart"]
+ArtifactType = Literal[
+    "markdown_report",
+    "html_page",
+    "ppt_deck",
+    "image_result",
+    "data_table",
+    "chart",
+]
 ArtifactStatus = Literal["pending", "rendering", "ready", "failed"]
 
 
@@ -25,4 +32,3 @@ class FileAsset(ApiModel):
     session_id: str | None = None
     size: int
     url: str | None = None
-

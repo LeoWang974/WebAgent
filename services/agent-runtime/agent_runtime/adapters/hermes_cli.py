@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 ARTIFACT_PATH_RE = re.compile(
-    r"(?P<path>(?:[A-Za-z]:\\|/mnt/[a-zA-Z]/|/home/|/tmp/)[^\"'<>|`\r\n]+?\.(?:md|pptx|png|jpe?g|csv|xlsx))",
+    r"(?P<path>(?:[A-Za-z]:\\|/mnt/[a-zA-Z]/|/home/|/tmp/)[^\"'<>|`\r\n]+?\.(?:md|html?|pptx|png|jpe?g|csv|xlsx))",
     re.IGNORECASE,
 )
 BOX_CODEPOINTS = {
@@ -55,6 +55,8 @@ class HermesCliWrapper:
             "HERMES_QUIET": "1",
         }
         self.last_artifact_paths: list[str] = []
+        self.active_processes: dict[str, asyncio.subprocess.Process] = {}
+        self.cancelled_run_ids: set[str] = set()
 
     def _build_wsl_command(
         self,
@@ -126,6 +128,43 @@ class HermesCliWrapper:
             path = self._normalize_artifact_path(match.group("path"))
             if path not in self.last_artifact_paths:
                 self.last_artifact_paths.append(path)
+
+    async def _terminate_process_tree(
+        self,
+        process: asyncio.subprocess.Process,
+    ) -> None:
+        if process.returncode is not None:
+            return
+
+        if os.name == "nt":
+            killer = await asyncio.create_subprocess_exec(
+                "taskkill",
+                "/PID",
+                str(process.pid),
+                "/T",
+                "/F",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await killer.communicate()
+        else:
+            process.terminate()
+
+        try:
+            await asyncio.wait_for(process.wait(), timeout=5)
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.wait()
+
+    async def cancel_run(self, run_id: str) -> bool:
+        process = self.active_processes.get(run_id)
+        if process is None:
+            return False
+
+        logger.info("Cancelling Hermes CLI process for run_id=%s", run_id)
+        self.cancelled_run_ids.add(run_id)
+        await self._terminate_process_tree(process)
+        return True
 
     @staticmethod
     def _is_completion_signal(text: str) -> bool:
@@ -233,6 +272,7 @@ class HermesCliWrapper:
         toolsets: Optional[str] = None,
         skills: Optional[str] = None,
         model: Optional[str] = None,
+        run_id: Optional[str] = None,
     ) -> AsyncGenerator[str, None]:
         self.last_artifact_paths = []
         args = [self.hermes_path, "chat", "-q", question]
@@ -272,6 +312,8 @@ class HermesCliWrapper:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
+        if run_id:
+            self.active_processes[run_id] = process
 
         pending = ""
         in_hermes_box = False
@@ -290,24 +332,7 @@ class HermesCliWrapper:
             logger.info(
                 "Hermes completion signal received; stopping CLI after grace period."
             )
-            if os.name == "nt":
-                killer = await asyncio.create_subprocess_exec(
-                    "taskkill",
-                    "/PID",
-                    str(process.pid),
-                    "/T",
-                    "/F",
-                    stdout=asyncio.subprocess.DEVNULL,
-                    stderr=asyncio.subprocess.DEVNULL,
-                )
-                await killer.communicate()
-            else:
-                process.terminate()
-            try:
-                await asyncio.wait_for(process.wait(), timeout=5)
-            except asyncio.TimeoutError:
-                process.kill()
-                await process.wait()
+            await self._terminate_process_tree(process)
 
         async def flush_box() -> str | None:
             text = "\n".join(line for line in box_lines if line).strip()
@@ -376,24 +401,40 @@ class HermesCliWrapper:
         ]
         finished_streams = 0
 
-        while finished_streams < len(stream_tasks):
-            try:
-                raw_line = await asyncio.wait_for(
-                    line_queue.get(),
-                    timeout=8 if completion_detected else None,
-                )
-            except asyncio.TimeoutError:
-                await stop_after_completion()
-                break
+        try:
+            while finished_streams < len(stream_tasks):
+                try:
+                    raw_line = await asyncio.wait_for(
+                        line_queue.get(),
+                        timeout=8 if completion_detected else None,
+                    )
+                except asyncio.TimeoutError:
+                    await stop_after_completion()
+                    break
 
-            if raw_line is None:
-                finished_streams += 1
-                continue
+                if raw_line is None:
+                    finished_streams += 1
+                    continue
 
-            is_box_line, starts_box, text = parse_box_line(raw_line)
+                is_box_line, starts_box, text = parse_box_line(raw_line)
 
-            if starts_box:
-                if in_hermes_box:
+                if starts_box:
+                    if in_hermes_box:
+                        flushed = await flush_box()
+                        if flushed and flushed != last_emitted:
+                            emitted_output = True
+                            last_emitted = flushed
+                            logger.info("Hermes stage emitted: %s", flushed[:500])
+                            yield flushed
+                            completion_detected = self._is_completion_signal(flushed)
+                    in_hermes_box = True
+                    continue
+
+                if in_hermes_box and text:
+                    box_lines.append(text)
+                    continue
+
+                if in_hermes_box and is_box_line and box_lines:
                     flushed = await flush_box()
                     if flushed and flushed != last_emitted:
                         emitted_output = True
@@ -401,26 +442,16 @@ class HermesCliWrapper:
                         logger.info("Hermes stage emitted: %s", flushed[:500])
                         yield flushed
                         completion_detected = self._is_completion_signal(flushed)
-                in_hermes_box = True
-                continue
+                    in_hermes_box = False
+                    continue
 
-            if in_hermes_box and text:
-                box_lines.append(text)
-                continue
-
-            if in_hermes_box and is_box_line and box_lines:
-                flushed = await flush_box()
-                if flushed and flushed != last_emitted:
-                    emitted_output = True
-                    last_emitted = flushed
-                    logger.info("Hermes stage emitted: %s", flushed[:500])
-                    yield flushed
-                    completion_detected = self._is_completion_signal(flushed)
-                in_hermes_box = False
-                continue
-
-            if in_hermes_box and is_box_line:
-                continue
+                if in_hermes_box and is_box_line:
+                    continue
+        except asyncio.CancelledError:
+            if run_id:
+                self.cancelled_run_ids.add(run_id)
+            await self._terminate_process_tree(process)
+            raise
 
         if in_hermes_box:
             flushed = await flush_box()
@@ -433,9 +464,17 @@ class HermesCliWrapper:
         if completion_detected:
             await stop_after_completion()
 
-        await process.wait()
-        await asyncio.gather(*stream_tasks)
-        logger.info("Hermes stream process exited: returncode=%s", process.returncode)
+        try:
+            await process.wait()
+            await asyncio.gather(*stream_tasks)
+            logger.info("Hermes stream process exited: returncode=%s", process.returncode)
+        finally:
+            if run_id and self.active_processes.get(run_id) is process:
+                self.active_processes.pop(run_id, None)
+
+        if run_id and run_id in self.cancelled_run_ids:
+            self.cancelled_run_ids.discard(run_id)
+            return
 
         if process.returncode != 0:
             stderr_str = "".join(stderr_chunks).strip()

@@ -11,11 +11,19 @@ class AgentRunStep:
 
 
 class AgentRunCreate:
-    def __init__(self, content: str, session_id: str, skill_key: Optional[str] = None, model_id: Optional[str] = None):
+    def __init__(
+        self,
+        content: str,
+        session_id: str,
+        skill_key: Optional[str] = None,
+        model_id: Optional[str] = None,
+        run_id: Optional[str] = None,
+    ):
         self.content = content
         self.session_id = session_id
         self.skill_key = skill_key
         self.model_id = model_id
+        self.run_id = run_id
 
 
 class AgentRun:

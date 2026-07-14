@@ -246,6 +246,9 @@ async def cancel_agent_run(
 ) -> schemas.AgentRun:
     run = await get_db_agent_run(db, run_id, current_user)
     await get_conversation_or_404(db, run.conversation_id, current_user, require_write=True)
+    adapter = _get_adapter(None)
+    if adapter is not None:
+        await adapter.cancel_run(run_id)
     event = await finish_db_agent_run(
         db,
         run,

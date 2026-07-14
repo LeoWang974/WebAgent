@@ -2,6 +2,7 @@
 
 import { ArtifactDrawer, ArtifactFullscreen, ArtifactPanel } from "../artifacts";
 import { ChatComposer } from "../composer";
+import { AgentStatus } from "./agent-status";
 import { ChatHeader } from "./chat-header";
 import { MessageList } from "./message-list";
 import { RouteSessionSync } from "./route-session-sync";
@@ -56,6 +57,7 @@ export function ChatWorkspace({ sessionId }: ChatWorkspaceProps) {
         <div className="min-h-0 flex-1 overflow-hidden">
           <MessageList />
         </div>
+        <AgentStatus />
         <ChatComposer />
       </section>
       {artifactPanelOpen ? (
