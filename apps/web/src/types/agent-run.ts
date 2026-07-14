@@ -5,7 +5,8 @@ export type AgentRunStatus =
   | "rendering"
   | "completed"
   | "failed"
-  | "cancelled";
+  | "cancelled"
+  | "disconnected";
 
 export interface AgentRunStep {
   id: string;
@@ -36,4 +37,3 @@ export interface AgentRunEvent {
   error?: string;
   output?: string;
 }
-

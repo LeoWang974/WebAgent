@@ -14,3 +14,7 @@ class ProfileUpdate(ApiModel):
     email: str
     nickname: str
 
+
+class PasswordUpdate(ApiModel):
+    current_password: str
+    new_password: str

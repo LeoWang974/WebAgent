@@ -190,7 +190,7 @@ class HermesAdapter(AgentRuntimeAdapter):
             "data_analysis": "file,terminal,web",
             "deep_research": "web,terminal,file",
             "ppt_generation": "file,web",
-            "u1_image": "image_gen,web",
+            "u1_image": "image_gen,web,terminal,file",
         }
         return toolsets_map.get(skill_key)
 

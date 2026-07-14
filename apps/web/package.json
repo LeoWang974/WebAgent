@@ -4,11 +4,12 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "clean": "node -e \"require('fs').rmSync('.next', { recursive: true, force: true })\"",
-    "dev": "next dev",
+    "clean": "node -e \"const fs=require('fs'); for (const dir of ['.next','.next-build']) fs.rmSync(dir, { recursive: true, force: true })\"",
+    "dev": "pnpm clean && next dev",
     "dev:clean": "pnpm clean && next dev",
     "build": "next build",
     "start": "next start",
+    "test": "node --test --experimental-strip-types \"src/**/*.node.test.ts\"",
     "lint": "next lint"
   },
   "dependencies": {

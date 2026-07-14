@@ -1,7 +1,9 @@
 "use client";
 
 import { create } from "zustand";
+import { shouldSelectCreatedArtifact } from "@/lib/artifact-selection";
 import { settingsApi, webAgentApi } from "@/services";
+import { useUiStore } from "./ui-store";
 import type {
   AgentRun,
   AgentRunEvent,
@@ -72,10 +74,20 @@ function createId(prefix: string) {
 
 let activeRequestAbortController: AbortController | undefined;
 let feedbackTimers: number[] = [];
+const TERMINAL_RUN_STATUSES: AgentRun["status"][] = [
+  "completed",
+  "failed",
+  "cancelled",
+  "disconnected",
+];
 
 function clearFeedbackTimers() {
   feedbackTimers.forEach((timer) => window.clearTimeout(timer));
   feedbackTimers = [];
+}
+
+function isTerminalRunStatus(status: AgentRun["status"]) {
+  return TERMINAL_RUN_STATUSES.includes(status);
 }
 
 function detectRequestedSkill(content: string, explicitSkillKey?: SkillKey): SkillKey | undefined {
@@ -135,6 +147,14 @@ function createPendingAssistantMessage(
   requestedSkill?: string,
 ): Message {
   const now = new Date().toISOString();
+  const language = useUiStore.getState().language;
+  const pendingLabel = requestedSkill
+    ? language === "zh-CN"
+      ? `${modelName} 正在执行 ${requestedSkill}，等待 Hermes 阶段反馈...`
+      : `${modelName} is running ${requestedSkill} and waiting for Hermes stage updates...`
+    : language === "zh-CN"
+      ? `${modelName} 正在工作，等待 Hermes 阶段反馈...`
+      : `${modelName} is working and waiting for Hermes stage updates...`;
 
   return {
     id: createId("message_assistant_pending"),
@@ -143,9 +163,7 @@ function createPendingAssistantMessage(
     content: "",
     createdAt: now,
     isPending: true,
-    pendingLabel: requestedSkill
-      ? `${modelName} 正在执行 ${requestedSkill}，等待 Hermes 阶段反馈...`
-      : `${modelName} 正在工作，等待 Hermes 阶段反馈...`,
+    pendingLabel,
     waitStartedAt: now,
   };
 }
@@ -170,11 +188,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
   testingModelId: undefined,
   updatingSkillKey: undefined,
   applyAgentRunEvent: (event) => {
-    const terminalStatuses = ["completed", "failed", "cancelled"];
-
     set((state) => ({
       activeAgentRunId:
-        terminalStatuses.includes(event.status)
+        isTerminalRunStatus(event.status)
           ? undefined
           : state.activeAgentRunId,
       agentRuns: state.agentRuns.map((run) => {
@@ -317,7 +333,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
         webAgentApi.listArtifacts(),
         webAgentApi.listModels(),
       ]);
+      const agentRuns = await webAgentApi.listAgentRuns();
       const currentSessionId = sessions[0]?.id ?? "";
+      const activeRun = agentRuns.find(
+        (run) => run.sessionId === currentSessionId && !isTerminalRunStatus(run.status),
+      );
       const selectedArtifactId =
         artifacts.find((artifact) => artifact.sessionId === currentSessionId)?.id ??
         artifacts[0]?.id;
@@ -325,6 +345,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       set({
         artifacts,
+        activeAgentRunId: activeRun?.id,
+        agentRuns,
         currentSessionId,
         hydrated: true,
         loading: false,
@@ -365,7 +387,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
   selectModel: (modelId) => set({ selectedModelId: modelId }),
   selectSession: (sessionId) => {
     const artifact = get().artifacts.find((item) => item.sessionId === sessionId);
-    set({ currentSessionId: sessionId, selectedArtifactId: artifact?.id });
+    const activeRun = get().agentRuns.find(
+      (run) => run.sessionId === sessionId && !isTerminalRunStatus(run.status),
+    );
+    set({
+      activeAgentRunId: activeRun?.id,
+      currentSessionId: sessionId,
+      selectedArtifactId: artifact?.id,
+    });
     setSwitchingState(set, get, sessionId);
   },
   setSessionVisibility: async (sessionId, visibility) => {
@@ -597,6 +626,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
           if (event.type === "artifact_created") {
             set((state) => {
+              const currentSelectedArtifact = state.artifacts.find(
+                (artifact) => artifact.id === state.selectedArtifactId,
+              );
+              const targetMessage = state.messages.find(
+                (message) => message.id === event.messageId,
+              );
+              const selectedBelongsToTargetMessage =
+                !!state.selectedArtifactId &&
+                !!targetMessage?.artifactIds?.includes(state.selectedArtifactId);
               const artifacts = state.artifacts.some(
                 (artifact) => artifact.id === event.artifact.id,
               )
@@ -604,6 +642,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     artifact.id === event.artifact.id ? event.artifact : artifact,
                   )
                 : [event.artifact, ...state.artifacts];
+
+              const shouldSelectArtifact = shouldSelectCreatedArtifact({
+                currentSelectedArtifact,
+                eventArtifact: event.artifact,
+                selectedBelongsToTargetMessage,
+              });
 
               return {
                 artifacts,
@@ -617,13 +661,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
                       }
                     : message,
                 ),
-                selectedArtifactId: event.artifact.id,
+                selectedArtifactId: shouldSelectArtifact
+                  ? event.artifact.id
+                  : state.selectedArtifactId,
               };
             });
           }
 
           if (event.type === "assistant_done") {
             set((state) => {
+              const finalStatus = event.status ?? "completed";
               const existingMessage = state.messages.find(
                 (message) => message.id === event.message.id,
               );
@@ -672,10 +719,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 agentRuns: state.agentRuns.map((runItem) =>
                   runItem.id === currentRunId
                     ? {
-                        ...runItem,
+                      ...runItem,
                         completedAt: new Date().toISOString(),
-                        progress: 100,
-                        status: "completed",
+                        progress: finalStatus === "completed" ? 100 : runItem.progress,
+                        status: finalStatus,
                       }
                     : runItem,
                 ),
@@ -688,6 +735,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }
         },
       );
+      if (
+        !currentRunId.startsWith("run_") &&
+        get().agentRuns.some(
+          (runItem) => runItem.id === currentRunId && !isTerminalRunStatus(runItem.status),
+        )
+      ) {
+        const refreshedRun = await webAgentApi.getAgentRun(currentRunId);
+        set((state) => ({
+          activeAgentRunId: isTerminalRunStatus(refreshedRun.status)
+            ? undefined
+            : state.activeAgentRunId,
+          agentRuns: state.agentRuns.map((runItem) =>
+            runItem.id === refreshedRun.id ? refreshedRun : runItem,
+          ),
+        }));
+      }
     } catch (error) {
       const aborted = error instanceof DOMException && error.name === "AbortError";
       set({

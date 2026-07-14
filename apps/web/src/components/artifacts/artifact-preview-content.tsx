@@ -7,6 +7,7 @@ import { HtmlViewer } from "./html-viewer";
 import { ImageViewer } from "./image-viewer";
 import { MarkdownPreviewPlaceholder } from "./markdown-preview-placeholder";
 import { MarkdownViewer } from "./markdown-viewer";
+import { PptArtifactViewer } from "./ppt-artifact-viewer";
 import { PptViewer } from "./ppt-viewer";
 
 interface ArtifactPreviewContentProps {
@@ -38,7 +39,7 @@ export function ArtifactPreviewContent({ artifact }: ArtifactPreviewContentProps
     return (
       <FileArtifactViewer
         artifact={artifact}
-        description="HTML 文件已生成，可以下载原文件；当前 artifact 暂无可嵌入的网页内容。"
+        description="The HTML file is ready, but no embeddable page content is available."
       />
     );
   }
@@ -57,12 +58,7 @@ export function ArtifactPreviewContent({ artifact }: ArtifactPreviewContentProps
       return <PptViewer slides={metadata.slides} title={artifact.title} />;
     }
 
-    return (
-      <FileArtifactViewer
-        artifact={artifact}
-        description="PPT 文件已生成。浏览器内幻灯片渲染服务接入前，可以直接下载原始 .pptx。"
-      />
-    );
+    return <PptArtifactViewer artifact={artifact} />;
   }
 
   if (artifact.type === "image_result") {
@@ -82,7 +78,7 @@ export function ArtifactPreviewContent({ artifact }: ArtifactPreviewContentProps
     return (
       <FileArtifactViewer
         artifact={artifact}
-        description="图片文件已生成。当前没有可嵌入的图片 URL，可以下载原图查看。"
+        description="The image file is ready, but no embeddable image URL is available."
       />
     );
   }

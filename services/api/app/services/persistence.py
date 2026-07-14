@@ -1,11 +1,13 @@
 from datetime import datetime
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app import schemas
+from app.core.config import settings
+from app.core.security import decode_access_token, hash_password
 from app.db.session import get_db
 from app.models import Artifact, Conversation, ConversationShare, Message, User
 
@@ -16,35 +18,77 @@ def now_iso() -> str:
     return datetime.utcnow().isoformat()
 
 
-def extract_dev_email(authorization: str | None) -> str:
-    if not authorization:
-        return DEFAULT_DEV_EMAIL
-
-    token = authorization.removeprefix("Bearer").strip()
-    if token.startswith("dev_token_"):
-        return token.removeprefix("dev_token_")
-    return DEFAULT_DEV_EMAIL
+def normalize_email(email: str) -> str:
+    return email.strip().lower()
 
 
-async def ensure_user(db: AsyncSession, email: str, password: str | None = None) -> User:
+async def ensure_user(
+    db: AsyncSession,
+    email: str,
+    password: str | None = None,
+    nickname: str | None = None,
+    role: str = "user",
+) -> User:
+    email = normalize_email(email)
     result = await db.execute(select(User).where(User.email == email))
     user = result.scalar_one_or_none()
     if user is not None:
         return user
 
-    nickname = email.split("@", maxsplit=1)[0] or "user"
-    user = User(email=email, hashed_password=password, nickname=nickname)
+    display_name = nickname.strip() if nickname and nickname.strip() else email.split("@", maxsplit=1)[0]
+    user = User(
+        email=email,
+        hashed_password=hash_password(password) if password else None,
+        nickname=display_name or "user",
+        role=role,
+    )
     db.add(user)
     await db.commit()
     await db.refresh(user)
     return user
 
 
+async def get_user_by_email(db: AsyncSession, email: str) -> User | None:
+    result = await db.execute(select(User).where(User.email == normalize_email(email)))
+    return result.scalar_one_or_none()
+
+
+async def get_user_by_id(db: AsyncSession, user_id: str) -> User | None:
+    result = await db.execute(select(User).where(User.id == user_id))
+    return result.scalar_one_or_none()
+
+
 async def get_current_user(
     authorization: str | None = Header(default=None),
+    access_token: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    return await ensure_user(db, extract_dev_email(authorization))
+    token = access_token
+    if authorization:
+        token = authorization.removeprefix("Bearer").strip()
+
+    if token:
+        if token.startswith("dev_token_") and settings.allow_dev_auth_fallback:
+            return await ensure_user(db, token.removeprefix("dev_token_"))
+
+        user_id = decode_access_token(token)
+        if user_id:
+            user = await get_user_by_id(db, user_id)
+            if user is not None:
+                return user
+
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired access token",
+        )
+
+    if settings.allow_dev_auth_fallback:
+        return await ensure_user(db, DEFAULT_DEV_EMAIL)
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Authentication required",
+    )
 
 
 def to_session(conversation: Conversation) -> schemas.Session:

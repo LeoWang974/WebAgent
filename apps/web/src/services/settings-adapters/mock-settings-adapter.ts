@@ -116,6 +116,10 @@ export const mockSettingsAdapter: SettingsApiAdapter = {
     user = { ...user, ...input };
     return user;
   },
+  async updatePassword() {
+    await wait();
+    return undefined;
+  },
   async updateSkillVersion(skillKey: SkillKey, direction: "rollback" | "update") {
     await wait(600);
     skills = skills.map((skill) => {

@@ -6,9 +6,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import schemas
+from app.core.security import hash_password, verify_password
 from app.db.session import get_db
 from app.models import ModelConfig, SkillConfig, SkillVersion, User, UserSettings
-from app.services.persistence import get_current_user
+from app.services.persistence import get_current_user, normalize_email
 
 router = APIRouter()
 
@@ -105,6 +106,7 @@ def to_user_schema(user: User) -> schemas.User:
         nickname=user.nickname,
         email=user.email,
         avatar_url=user.avatar_url,
+        role=user.role,
     )
 
 
@@ -220,7 +222,7 @@ async def update_profile(
     current_user: User = Depends(get_current_user),
 ) -> schemas.User:
     current_user.nickname = input_data.nickname
-    current_user.email = input_data.email
+    current_user.email = normalize_email(input_data.email)
     current_user.avatar_url = input_data.avatar_url
     try:
         await db.commit()
@@ -229,6 +231,24 @@ async def update_profile(
         raise HTTPException(status_code=409, detail="Email is already in use") from error
     await db.refresh(current_user)
     return to_user_schema(current_user)
+
+
+@router.put("/profile/password", status_code=204)
+async def update_password(
+    input_data: schemas.PasswordUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> None:
+    if len(input_data.new_password) < 6:
+        raise HTTPException(status_code=400, detail="New password must be at least 6 characters")
+
+    if not verify_password(input_data.current_password, current_user.hashed_password):
+        if current_user.hashed_password != input_data.current_password:
+            raise HTTPException(status_code=400, detail="Current password is incorrect")
+
+    current_user.hashed_password = hash_password(input_data.new_password)
+    await db.commit()
+    return None
 
 
 @router.get("/data-context", response_model=schemas.DataContextSettings)

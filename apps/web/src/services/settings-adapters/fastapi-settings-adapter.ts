@@ -2,6 +2,7 @@ import { apiClient } from "../api-client";
 import type { DataContextSettings, ModelConfig, Skill, SkillKey, User } from "@/types";
 import type {
   ModelCreateInput,
+  PasswordUpdateInput,
   ProfileUpdateInput,
   SettingsApiAdapter,
 } from "./types";
@@ -57,6 +58,12 @@ export const fastApiSettingsAdapter: SettingsApiAdapter = {
   },
   updateProfile(input: ProfileUpdateInput) {
     return apiClient<User>("/api/settings/profile", {
+      body: JSON.stringify(input),
+      method: "PUT",
+    });
+  },
+  updatePassword(input: PasswordUpdateInput) {
+    return apiClient<void>("/api/settings/profile/password", {
       body: JSON.stringify(input),
       method: "PUT",
     });

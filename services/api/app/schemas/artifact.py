@@ -23,6 +23,20 @@ class Artifact(ApiModel):
     status: ArtifactStatus
 
 
+class SlidePreview(ApiModel):
+    content: str | None = None
+    content_type: str = "text/html"
+    id: str
+    index: int
+    title: str
+
+
+class ArtifactSlides(ApiModel):
+    artifact_id: str
+    slides: list[SlidePreview]
+    source: str
+
+
 class FileAsset(ApiModel):
     content_type: str
     created_at: str

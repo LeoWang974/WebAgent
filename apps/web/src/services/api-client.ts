@@ -1,7 +1,17 @@
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
-function getAccessToken() {
+export class ApiError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+export function getAccessToken() {
   if (typeof window === "undefined") {
     return undefined;
   }
@@ -30,7 +40,16 @@ export async function apiClient<T>(
   });
 
   if (!response.ok) {
-    throw new Error(`API request failed: ${response.status}`);
+    let detail = `API request failed: ${response.status}`;
+    try {
+      const payload = await response.json();
+      if (typeof payload.detail === "string") {
+        detail = payload.detail;
+      }
+    } catch {
+      // Keep the generic status message when the backend returns a non-JSON error.
+    }
+    throw new ApiError(response.status, detail);
   }
 
   if (response.status === 204) {

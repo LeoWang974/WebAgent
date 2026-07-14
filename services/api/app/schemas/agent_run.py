@@ -4,7 +4,14 @@ from app.schemas.base import ApiModel
 from app.schemas.session import SkillKey
 
 AgentRunStatus = Literal[
-    "queued", "running", "tool_calling", "rendering", "completed", "failed", "cancelled"
+    "queued",
+    "running",
+    "tool_calling",
+    "rendering",
+    "completed",
+    "failed",
+    "cancelled",
+    "disconnected",
 ]
 AgentRunStepStatus = Literal["pending", "running", "completed", "failed"]
 
@@ -27,6 +34,7 @@ class AgentRun(ApiModel):
     completed_at: str | None = None
     error: str | None = None
     output: str | None = None
+    adapter_key: str | None = None
 
 
 class AgentRunCreate(ApiModel):
@@ -44,4 +52,3 @@ class AgentRunEvent(ApiModel):
     completed_at: str | None = None
     error: str | None = None
     output: str | None = None
-

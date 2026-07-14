@@ -1,19 +1,17 @@
 "use client";
 
-import type { AgentRun } from "@/types";
-import { useChatStore } from "@/stores";
-import { useI18n } from "@/lib/i18n";
-import { getStatusLabelKey } from "@/lib/status";
 import { useState } from "react";
 import {
   Check,
-  CircleDashed,
   ClipboardList,
   Loader2,
-  Square,
   TriangleAlert,
   X,
 } from "lucide-react";
+import { useI18n } from "@/lib/i18n";
+import { getStatusLabelKey } from "@/lib/status";
+import { useChatStore } from "@/stores";
+import { isAgentRunActive, selectAgentStatusRun } from "./agent-status-model";
 
 export function AgentStatus() {
   const { t } = useI18n();
@@ -22,14 +20,8 @@ export function AgentStatus() {
   const currentSessionId = useChatStore((state) => state.currentSessionId);
   const agentRuns = useChatStore((state) => state.agentRuns);
   const refreshAgentRun = useChatStore((state) => state.refreshAgentRun);
-  const stopActiveRun = useChatStore((state) => state.stopActiveRun);
-  const run = agentRuns.find((item) => item.sessionId === currentSessionId);
-
-  if (!run) {
-    return null;
-  }
-
-  const active = !["completed", "failed", "cancelled"].includes(run.status);
+  const run = selectAgentStatusRun(agentRuns, currentSessionId);
+  const active = isAgentRunActive(run);
 
   async function openDetails() {
     if (!run) {
@@ -40,6 +32,10 @@ export function AgentStatus() {
     setLoadingDetails(true);
     await refreshAgentRun(run.id);
     setLoadingDetails(false);
+  }
+
+  if (!run) {
+    return null;
   }
 
   return (
@@ -63,25 +59,14 @@ export function AgentStatus() {
               </div>
             </div>
           </div>
-          <div className="flex shrink-0 items-center gap-1.5">
-            <button
-              className="flex h-8 items-center gap-1.5 rounded-md border px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
-              onClick={openDetails}
-              type="button"
-            >
-              <ClipboardList className="size-3.5" />
-              详情
-            </button>
-            <button
-              className="flex h-8 items-center gap-1.5 rounded-md border px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
-              disabled={!active}
-              onClick={stopActiveRun}
-              type="button"
-            >
-              <Square className="size-3" />
-              {t("stop")}
-            </button>
-          </div>
+          <button
+            className="flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+            onClick={openDetails}
+            type="button"
+          >
+            <ClipboardList className="size-3.5" />
+            {t("agentRunShowDetails")}
+          </button>
         </div>
 
         <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted">
@@ -90,38 +75,14 @@ export function AgentStatus() {
             style={{ width: `${run.progress}%` }}
           />
         </div>
-
-        <div className="mt-3 space-y-2">
-          {run.steps.map((step) => (
-            <div className="flex items-center gap-2 text-xs" key={step.id}>
-              <span className="flex size-4 items-center justify-center rounded-full border bg-white">
-                {step.status === "completed" ? (
-                  <Check className="size-3 text-emerald-600" />
-                ) : step.status === "failed" ? (
-                  <TriangleAlert className="size-3 text-red-500" />
-                ) : (
-                  <CircleDashed className="size-3 text-muted-foreground" />
-                )}
-              </span>
-              <span
-                className={
-                  step.status === "running"
-                    ? "font-medium text-foreground"
-                    : "text-muted-foreground"
-                }
-              >
-                {step.label}
-              </span>
-            </div>
-          ))}
-        </div>
       </div>
+
       {detailsOpen ? (
         <div className="fixed inset-0 z-50 flex items-end bg-black/20 sm:items-center sm:justify-center">
           <div className="max-h-[82vh] w-full overflow-hidden rounded-t-2xl border bg-white shadow-xl sm:max-w-2xl sm:rounded-xl">
             <div className="flex items-center justify-between border-b px-4 py-3">
               <div>
-                <div className="text-sm font-semibold">Agent Run 详情</div>
+                <div className="text-sm font-semibold">{t("agentRunDetails")}</div>
                 <div className="text-xs text-muted-foreground">
                   {run.id} · {t(getStatusLabelKey(run.status))} · {run.progress}%
                 </div>
@@ -139,7 +100,7 @@ export function AgentStatus() {
               {loadingDetails ? (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Loader2 className="size-4 animate-spin" />
-                  正在读取运行事件...
+                  {t("agentRunLoadingEvents")}
                 </div>
               ) : null}
               <div className="space-y-3">
@@ -160,7 +121,7 @@ export function AgentStatus() {
                 ))}
                 {run.steps.length === 0 ? (
                   <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-                    暂无运行事件
+                    {t("agentRunEventsEmpty")}
                   </div>
                 ) : null}
               </div>

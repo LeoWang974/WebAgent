@@ -81,6 +81,65 @@ class HermesCliWrapper:
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         return log_dir / f"hermes-raw-{timestamp}.log"
 
+    def _prompt_file_path(self, question: str, run_id: Optional[str] = None) -> tuple[Path, str]:
+        prompt_dir = Path(__file__).resolve().parents[4] / "runtime" / "hermes-prompts"
+        prompt_dir.mkdir(parents=True, exist_ok=True)
+        prompt_name = run_id or datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        prompt_path = prompt_dir / f"{prompt_name}.txt"
+        prompt_path.write_text(question, encoding="utf-8")
+        drive = prompt_path.drive.rstrip(":").lower()
+        rest = prompt_path.as_posix().split(":", 1)[1].lstrip("/")
+        wsl_path = f"/mnt/{drive}/{rest}" if drive else prompt_path.as_posix()
+        return prompt_path, wsl_path
+
+    def _build_chat_command(
+        self,
+        question: str,
+        *,
+        session_id: Optional[str] = None,
+        toolsets: Optional[str] = None,
+        skills: Optional[str] = None,
+        model: Optional[str] = None,
+        quiet: bool = True,
+        quiet_query: bool = False,
+        use_pty: bool = False,
+        run_id: Optional[str] = None,
+    ) -> str:
+        prompt_path, wsl_prompt_path = self._prompt_file_path(question, run_id)
+        args = [
+            self.hermes_path,
+            "chat",
+            "-q",
+            f"$(cat {shlex.quote(wsl_prompt_path)})",
+        ]
+
+        if session_id:
+            args.extend(["--resume", session_id])
+        if toolsets:
+            args.extend(["-t", toolsets])
+        if skills:
+            args.extend(["-s", skills])
+        if model:
+            args.extend(["-m", model])
+        if quiet_query:
+            args.append("-Q")
+
+        env = dict(self._env)
+        if not quiet:
+            env.pop("HERMES_QUIET", None)
+        env_str = " ".join(f"{key}={shlex.quote(value)}" for key, value in env.items())
+        quoted_args = []
+        for index, arg in enumerate(args):
+            if index >= 3 and args[index - 1] == "-q":
+                quoted_args.append(f'"{arg}"')
+            else:
+                quoted_args.append(shlex.quote(arg))
+        command = f"{env_str} {' '.join(quoted_args)}".strip()
+        if use_pty:
+            command = f"script -q -e -c {shlex.quote(command)} /dev/null"
+        logger.info("Hermes prompt file: %s", prompt_path)
+        return f"wsl -d {shlex.quote(self.wsl_distribution)} -- bash -lc {shlex.quote(command)}"
+
     @staticmethod
     def _clean_line(line: str) -> str:
         return ANSI_RE.sub("", line).replace("\r", "").strip()
@@ -234,19 +293,15 @@ class HermesCliWrapper:
         skills: Optional[str] = None,
         model: Optional[str] = None,
     ) -> Tuple[str, str]:
-        args = [self.hermes_path, "chat", "-q", question, "-Q"]
-
-        if session_id:
-            args.extend(["--resume", session_id])
-        if toolsets:
-            args.extend(["-t", toolsets])
-        if skills:
-            args.extend(["-s", skills])
-        if model:
-            args.extend(["-m", model])
-
         process = await asyncio.create_subprocess_shell(
-            self._build_wsl_command(args),
+            self._build_chat_command(
+                question,
+                session_id=session_id,
+                toolsets=toolsets,
+                skills=skills,
+                model=model,
+                quiet_query=True,
+            ),
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -275,16 +330,6 @@ class HermesCliWrapper:
         run_id: Optional[str] = None,
     ) -> AsyncGenerator[str, None]:
         self.last_artifact_paths = []
-        args = [self.hermes_path, "chat", "-q", question]
-
-        if session_id:
-            args.extend(["--resume", session_id])
-        if toolsets:
-            args.extend(["-t", toolsets])
-        if skills:
-            args.extend(["-s", skills])
-        if model:
-            args.extend(["-m", model])
 
         logger.info(
             "Starting Hermes stream: question_chars=%s session_id=%s toolsets=%s skills=%s model=%s",
@@ -307,7 +352,16 @@ class HermesCliWrapper:
         logger.info("Hermes raw output log: %s", raw_log_path)
 
         process = await asyncio.create_subprocess_shell(
-            self._build_wsl_command(args, quiet=False, use_pty=True),
+            self._build_chat_command(
+                question,
+                session_id=session_id,
+                toolsets=toolsets,
+                skills=skills,
+                model=model,
+                quiet=False,
+                use_pty=True,
+                run_id=run_id,
+            ),
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,

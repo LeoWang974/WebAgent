@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 from urllib.parse import quote
 
@@ -54,6 +55,13 @@ def artifact_file_path(artifact: Artifact) -> Path | None:
     return None
 
 
+def slide_sort_key(artifact: Artifact) -> tuple[int, str]:
+    metadata = artifact.artifact_metadata or {}
+    filename = str(metadata.get("filename") or artifact.title or "")
+    match = re.search(r"page[_-]?(\d+)", filename, re.IGNORECASE)
+    return (int(match.group(1)) if match else 9999, filename)
+
+
 @router.get("", response_model=list[schemas.Artifact])
 async def list_artifacts(
     db: AsyncSession = Depends(get_db),
@@ -88,6 +96,61 @@ async def get_artifact(
         raise HTTPException(status_code=404, detail="Artifact not found")
     await get_conversation_or_404(db, artifact.conversation_id, current_user)
     return to_artifact(artifact)
+
+
+@router.get("/{artifact_id}/slides", response_model=schemas.ArtifactSlides)
+async def get_artifact_slides(
+    artifact_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> schemas.ArtifactSlides:
+    result = await db.execute(select(Artifact).where(Artifact.id == artifact_id))
+    artifact = result.scalar_one_or_none()
+    if artifact is None:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    await get_conversation_or_404(db, artifact.conversation_id, current_user)
+    if artifact.type != "ppt_deck":
+        raise HTTPException(status_code=400, detail="Artifact is not a PPT deck")
+
+    metadata = artifact.artifact_metadata or {}
+    metadata_slides = metadata.get("slides")
+    if isinstance(metadata_slides, list) and metadata_slides:
+        slides = [
+            schemas.SlidePreview(
+                content=None,
+                content_type="application/json",
+                id=f"{artifact.id}_{index}",
+                index=index,
+                title=str(item.get("title") if isinstance(item, dict) else f"Slide {index}"),
+            )
+            for index, item in enumerate(metadata_slides, start=1)
+        ]
+        return schemas.ArtifactSlides(artifact_id=artifact.id, slides=slides, source="metadata")
+
+    if artifact.run_id:
+        html_result = await db.execute(
+            select(Artifact).where(
+                Artifact.run_id == artifact.run_id,
+                Artifact.conversation_id == artifact.conversation_id,
+                Artifact.type == "html_page",
+            )
+        )
+        html_artifacts = sorted(html_result.scalars().all(), key=slide_sort_key)
+        slides = [
+            schemas.SlidePreview(
+                content=html_artifact.content,
+                content_type="text/html",
+                id=html_artifact.id,
+                index=index,
+                title=html_artifact.title,
+            )
+            for index, html_artifact in enumerate(html_artifacts, start=1)
+            if html_artifact.content
+        ]
+        if slides:
+            return schemas.ArtifactSlides(artifact_id=artifact.id, slides=slides, source="html_artifacts")
+
+    return schemas.ArtifactSlides(artifact_id=artifact.id, slides=[], source="unavailable")
 
 
 @router.delete("/{artifact_id}", status_code=204)

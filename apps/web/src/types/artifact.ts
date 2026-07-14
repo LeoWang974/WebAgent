@@ -18,6 +18,20 @@ export interface Artifact {
   status: ArtifactStatus;
 }
 
+export interface SlidePreview {
+  content?: string;
+  contentType: string;
+  id: string;
+  index: number;
+  title: string;
+}
+
+export interface ArtifactSlides {
+  artifactId: string;
+  slides: SlidePreview[];
+  source: string;
+}
+
 export interface FileAsset {
   contentType: string;
   createdAt: string;

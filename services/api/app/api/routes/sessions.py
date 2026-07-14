@@ -1,7 +1,9 @@
 import asyncio
+import hashlib
 import json
 import logging
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -24,18 +26,20 @@ from app.models import (
 from app.services import mock_store
 from app.services.artifact_discovery import (
     create_artifacts_from_paths,
+    create_pptx_from_html_artifacts,
     discover_artifact_paths_from_hermes_sessions,
     discover_artifacts_since,
 )
 from app.services.persistence import (
-    ensure_user,
     get_conversation_or_404,
     get_current_user,
+    get_user_by_email,
     require_owner,
     to_artifact,
     to_message,
     to_session,
 )
+from app.services.runtime_context_builder import build_runtime_content as build_skill_runtime_content
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -104,6 +108,54 @@ def is_primary_report_artifact(artifact: Artifact) -> bool:
     )
 
 
+def artifact_display_priority(artifact: Artifact) -> tuple[int, datetime]:
+    type_priority = {
+        "markdown_report": 10,
+        "data_table": 20,
+        "chart": 30,
+        "html_page": 40,
+        "ppt_deck": 80,
+        "image_result": 90,
+    }
+    return (type_priority.get(artifact.type, 0), artifact.created_at)
+
+
+def artifact_metadata_paths(metadata: dict) -> list[Path]:
+    paths = []
+    for key in ("path", "originalPath"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value:
+            paths.append(Path(value))
+    return paths
+
+
+def file_sha256(path: Path) -> str | None:
+    if not path.exists() or not path.is_file():
+        return None
+    try:
+        digest = hashlib.sha256()
+        with path.open("rb") as file:
+            for chunk in iter(lambda: file.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except OSError:
+        return None
+
+
+def artifact_content_hash(artifact: Artifact) -> str | None:
+    metadata = dict(artifact.artifact_metadata or {})
+    content_hash = metadata.get("contentHash")
+    if isinstance(content_hash, str) and content_hash:
+        return content_hash
+    for path in artifact_metadata_paths(metadata):
+        content_hash = file_sha256(path)
+        if content_hash:
+            metadata["contentHash"] = content_hash
+            artifact.artifact_metadata = metadata
+            return content_hash
+    return None
+
+
 async def refresh_conversation(db: AsyncSession, session_id: str) -> Conversation:
     result = await db.execute(
         select(Conversation)
@@ -148,25 +200,50 @@ async def persist_discovered_artifacts(
     stored_artifacts: list[Artifact] = []
 
     for artifact_schema in discovered_artifacts:
-        path = str((artifact_schema.metadata or {}).get("path", ""))
-        original_path = str((artifact_schema.metadata or {}).get("originalPath", ""))
+        metadata = artifact_schema.metadata or {}
+        path = str(metadata.get("path", ""))
+        original_path = str(metadata.get("originalPath", ""))
+        normalized_path = str(metadata.get("normalizedPath", ""))
+        original_normalized_path = str(metadata.get("originalNormalizedPath", ""))
+        content_hash = str(metadata.get("contentHash", ""))
+        candidate_paths = [
+            value
+            for value in {path, original_path, normalized_path, original_normalized_path}
+            if value
+        ]
         existing_artifact = None
-        if path:
+        if content_hash:
             result = await db.execute(
                 select(Artifact).where(
                     Artifact.conversation_id == session_id,
-                    Artifact.artifact_metadata["path"].as_string() == path,
+                    Artifact.artifact_metadata["contentHash"].as_string() == content_hash,
                 )
             )
             existing_artifact = result.scalar_one_or_none()
-        if existing_artifact is None and original_path:
+        if existing_artifact is None and candidate_paths:
             result = await db.execute(
                 select(Artifact).where(
                     Artifact.conversation_id == session_id,
-                    Artifact.artifact_metadata["originalPath"].as_string() == original_path,
+                    or_(
+                        Artifact.artifact_metadata["path"].as_string().in_(candidate_paths),
+                        Artifact.artifact_metadata["originalPath"].as_string().in_(candidate_paths),
+                        Artifact.artifact_metadata["normalizedPath"].as_string().in_(candidate_paths),
+                        Artifact.artifact_metadata["originalNormalizedPath"].as_string().in_(candidate_paths),
+                    ),
                 )
             )
             existing_artifact = result.scalar_one_or_none()
+        if existing_artifact is None and content_hash:
+            result = await db.execute(
+                select(Artifact).where(
+                    Artifact.conversation_id == session_id,
+                    Artifact.type == artifact_schema.type,
+                )
+            )
+            for candidate_artifact in result.scalars().all():
+                if artifact_content_hash(candidate_artifact) == content_hash:
+                    existing_artifact = candidate_artifact
+                    break
         if existing_artifact is not None:
             stored_artifacts.append(existing_artifact)
             continue
@@ -255,7 +332,9 @@ async def update_session(
                 await db.delete(share)
 
     if input_data.share_with_email:
-        shared_user = await ensure_user(db, input_data.share_with_email)
+        shared_user = await get_user_by_email(db, input_data.share_with_email)
+        if shared_user is None:
+            raise HTTPException(status_code=404, detail="Shared user is not registered")
         existing_share = next(
             (share for share in conversation.shares if share.user_id == shared_user.id),
             None,
@@ -331,25 +410,32 @@ async def send_session_message(
     conversation = await get_conversation_or_404(db, session_id, current_user, require_write=True)
     resolved_skill_key = resolve_skill_key(input_data.content, input_data.skill_key)
     user_message = await persist_message(db, session_id, "user", input_data.content)
+    runtime_content = await build_skill_runtime_content(
+        db,
+        session_id,
+        input_data.content,
+        resolved_skill_key,
+    )
 
     assistant_content = "Agent runtime did not return a response."
     run = None
 
     try:
         from app.api.routes.agent_runs import (
-            _get_adapter,
+            _resolve_adapter,
             create_db_agent_run,
             finish_db_agent_run,
             record_db_agent_run_event,
         )
 
-        adapter = _get_adapter(input_data.model_id)
+        adapter_key, adapter = _resolve_adapter(model_id=input_data.model_id)
         run = await create_db_agent_run(
             db,
             session_id,
             title=resolved_skill_key or "Agent Run",
             status="running",
             progress=5,
+            adapter_key=adapter_key,
         )
         await record_db_agent_run_event(
             db,
@@ -362,6 +448,7 @@ async def send_session_message(
                 "content": input_data.content,
                 "modelId": input_data.model_id,
                 "skillKey": resolved_skill_key,
+                "adapterKey": adapter_key,
             },
         )
 
@@ -381,7 +468,7 @@ async def send_session_message(
 
             runtime_run = await adapter.create_run(
                 AdapterAgentRunCreate(
-                    content=input_data.content,
+                    content=runtime_content,
                     session_id=session_id,
                     skill_key=resolved_skill_key,
                     model_id=input_data.model_id,
@@ -435,6 +522,12 @@ async def stream_session_message(
     async def event_stream():
         run_started_at = datetime.now()
         user_message = await persist_message(db, session_id, "user", input_data.content)
+        runtime_content = await build_skill_runtime_content(
+            db,
+            session_id,
+            input_data.content,
+            resolved_skill_key,
+        )
         yield sse("user_message", to_message(user_message).model_dump(by_alias=True))
 
         assistant_messages: list[Message] = []
@@ -444,13 +537,13 @@ async def stream_session_message(
 
         try:
             from app.api.routes.agent_runs import (
-                _get_adapter,
+                _resolve_adapter,
                 create_db_agent_run,
                 finish_db_agent_run,
                 record_db_agent_run_event,
             )
 
-            adapter = _get_adapter(input_data.model_id)
+            adapter_key, adapter = _resolve_adapter(model_id=input_data.model_id)
 
             run = await create_db_agent_run(
                 db,
@@ -458,6 +551,7 @@ async def stream_session_message(
                 title=resolved_skill_key or "Agent Run",
                 status="running",
                 progress=5,
+                adapter_key=adapter_key,
             )
             yield sse(
                 "run_started",
@@ -480,6 +574,7 @@ async def stream_session_message(
                     "content": input_data.content,
                     "modelId": input_data.model_id,
                     "skillKey": resolved_skill_key,
+                    "adapterKey": adapter_key,
                 },
             )
 
@@ -489,7 +584,7 @@ async def stream_session_message(
             from agent_runtime.schemas import AgentRunCreate as AdapterAgentRunCreate
 
             adapter_input = AdapterAgentRunCreate(
-                content=input_data.content,
+                content=runtime_content,
                 session_id=session_id,
                 skill_key=resolved_skill_key,
                 model_id=input_data.model_id,
@@ -592,6 +687,18 @@ async def stream_session_message(
                 explicit_artifact_paths,
                 run.id,
             )
+            if (
+                resolved_skill_key == "ppt_generation"
+                and any(artifact.type == "html_page" for artifact in discovered_artifacts)
+                and not any(artifact.type == "ppt_deck" for artifact in discovered_artifacts)
+            ):
+                pptx_artifact = create_pptx_from_html_artifacts(
+                    session_id,
+                    discovered_artifacts,
+                    run.id,
+                )
+                if pptx_artifact is not None:
+                    discovered_artifacts.append(pptx_artifact)
 
             stored_artifacts = await persist_discovered_artifacts(
                 db,
@@ -599,11 +706,28 @@ async def stream_session_message(
                 discovered_artifacts,
                 run.id,
             )
+            current_run_artifacts = [
+                artifact for artifact in stored_artifacts if artifact.run_id == run.id
+            ]
+            response_artifacts = current_run_artifacts or sorted(
+                stored_artifacts,
+                key=artifact_display_priority,
+            )[-1:]
+            if (
+                resolved_skill_key == "ppt_generation"
+                and any(artifact.type == "html_page" for artifact in current_run_artifacts)
+                and not any(artifact.type == "ppt_deck" for artifact in current_run_artifacts)
+            ):
+                raise RuntimeError(
+                    "PPTX export did not produce a .pptx file. HTML pages were preserved as fallback artifacts."
+                )
 
             if assistant_messages:
                 assistant_message = assistant_messages[-1]
-                if stored_artifacts:
-                    assistant_message.artifact_ids = [artifact.id for artifact in stored_artifacts]
+                if response_artifacts:
+                    assistant_message.artifact_ids = [
+                        artifact.id for artifact in response_artifacts
+                    ]
                     await db.commit()
                     await db.refresh(assistant_message)
             else:
@@ -613,13 +737,13 @@ async def stream_session_message(
                     "assistant",
                     (
                         "Hermes completed and generated artifacts."
-                        if stored_artifacts
+                        if response_artifacts
                         else "Hermes completed without emitting a visible status update."
                     ),
-                    [artifact.id for artifact in stored_artifacts] or None,
+                    [artifact.id for artifact in response_artifacts] or None,
                 )
 
-            ordered_artifacts = sorted(stored_artifacts, key=is_primary_report_artifact)
+            ordered_artifacts = sorted(response_artifacts, key=artifact_display_priority)
             for artifact in ordered_artifacts:
                 await record_db_agent_run_event(
                     db,
@@ -701,8 +825,9 @@ async def stream_session_message(
                 await finish_db_agent_run(
                     db,
                     run,
-                    status="cancelled",
+                    status="disconnected",
                     label="Agent stream disconnected",
+                    error="Agent stream disconnected before completion.",
                 )
             raise
         except Exception as error:
@@ -735,6 +860,7 @@ async def stream_session_message(
                     "message": to_message(error_message).model_dump(by_alias=True),
                     "session": to_session(conversation).model_dump(by_alias=True),
                     "runId": run.id if run is not None else None,
+                    "status": "failed",
                 },
             )
 

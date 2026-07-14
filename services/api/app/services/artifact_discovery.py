@@ -2,13 +2,17 @@ import base64
 import csv
 import hashlib
 import json
+import os
 import re
 import shutil
+import shlex
+import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from app import schemas
+from app.core.config import settings
 from app.schemas.artifact import ArtifactType
 from app.services import mock_store
 
@@ -21,11 +25,13 @@ OUTPUT_PATH_MARKERS = {
     "/reports/",
     "/outputs/",
     "/artifacts/",
+    "/images/",
     "/ppt_decks/",
     "\\deep-research-reports\\",
     "\\reports\\",
     "\\outputs\\",
     "\\artifacts\\",
+    "\\images\\",
     "\\ppt_decks\\",
 }
 NON_ARTIFACT_MARKERS = {
@@ -57,8 +63,11 @@ def _candidate_roots() -> list[Path]:
         user_home / "Downloads" / "WebAgent",
         user_home / "deep-research-reports",
         user_home / "ppt_decks",
+        user_home / ".hermes" / "images",
         Path(r"\\wsl.localhost\Ubuntu\home\zhuchangbiaozhu_xyl\.hermes\reports"),
+        Path(r"\\wsl.localhost\Ubuntu\home\zhuchangbiaozhu_xyl\.hermes\images"),
         Path(r"\\wsl$\Ubuntu\home\zhuchangbiaozhu_xyl\.hermes\reports"),
+        Path(r"\\wsl$\Ubuntu\home\zhuchangbiaozhu_xyl\.hermes\images"),
         Path(
             r"\\wsl.localhost\Ubuntu\home\zhuchangbiaozhu_xyl\hermes-aws-ai-agent\deep-research-reports"
         ),
@@ -95,6 +104,10 @@ def _runtime_artifacts_dir(run_id: str | None) -> Path:
     return path
 
 
+def _runtime_run_dir(run_id: str | None) -> Path:
+    return _runtime_artifacts_dir(run_id).parent
+
+
 def _is_ignored(path: Path) -> bool:
     return any(part in IGNORED_PARTS for part in path.parts)
 
@@ -109,6 +122,30 @@ def _is_likely_output_path(path: str) -> bool:
 def _artifact_id(path: Path) -> str:
     digest = hashlib.sha1(str(path).encode("utf-8", errors="ignore")).hexdigest()[:12]
     return f"artifact_{digest}"
+
+
+def _file_sha256(path: Path) -> str | None:
+    try:
+        digest = hashlib.sha256()
+        with path.open("rb") as file:
+            for chunk in iter(lambda: file.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except OSError:
+        return None
+
+
+def _normalized_path_key(path: str | Path) -> str:
+    value = str(path).strip().strip(".,;:)]}\"'").replace("\\", "/")
+    lower_value = value.lower()
+    if lower_value.startswith("//wsl.localhost/ubuntu/"):
+        return "/" + value.split("/Ubuntu/", maxsplit=1)[1].lower()
+    if lower_value.startswith("//wsl$/ubuntu/"):
+        return "/" + value.split("/Ubuntu/", maxsplit=1)[1].lower()
+    match = re.match(r"^([a-zA-Z]):/(.*)$", value)
+    if match:
+        return f"/mnt/{match.group(1).lower()}/{match.group(2).lower()}"
+    return lower_value
 
 
 def _artifact_type(path: Path) -> ArtifactType:
@@ -179,13 +216,16 @@ def _metadata(
     original_path: str | None = None,
 ) -> dict:
     base = {
+        "contentHash": _file_sha256(path),
         "filename": path.name,
+        "normalizedPath": _normalized_path_key(path),
         "path": str(path),
         "size": path.stat().st_size,
         "updatedAt": datetime.fromtimestamp(path.stat().st_mtime).isoformat(),
     }
     if original_path and original_path != str(path):
         base["originalPath"] = original_path
+        base["originalNormalizedPath"] = _normalized_path_key(original_path)
 
     if artifact_type == "data_table" and path.suffix.lower() == ".csv":
         base.update(_csv_metadata(path))
@@ -261,6 +301,68 @@ def _archive_artifact_path(path: Path, run_id: str | None) -> Path:
     return destination
 
 
+def _path_to_wsl(path: Path) -> str:
+    resolved = path.resolve()
+    drive = resolved.drive.rstrip(":").lower()
+    rest = resolved.as_posix().split(":", 1)[1].lstrip("/")
+    return f"/mnt/{drive}/{rest}" if drive else resolved.as_posix()
+
+
+def _run_pptx_export(deck_dir: Path, output_dir: Path, output_filename: str) -> Path | None:
+    script_path = f"{settings.hermes_home.rstrip('/')}/skills/sn-ppt-standard/scripts/export_pptx/html_to_pptx.mjs"
+    if os.name == "nt":
+        command = (
+            f"node {shlex.quote(script_path)} "
+            f"--deck-dir {shlex.quote(_path_to_wsl(deck_dir))} "
+            f"--output {shlex.quote(output_filename)} "
+            f"--output-dir {shlex.quote(_path_to_wsl(output_dir))} "
+            "--force"
+        )
+        result = subprocess.run(
+            [
+                "wsl",
+                "-d",
+                settings.hermes_wsl_distribution,
+                "--",
+                "bash",
+                "-lc",
+                command,
+            ],
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            text=True,
+            timeout=180,
+            check=False,
+        )
+    else:
+        result = subprocess.run(
+            [
+                "node",
+                script_path,
+                "--deck-dir",
+                str(deck_dir),
+                "--output",
+                output_filename,
+                "--output-dir",
+                str(output_dir),
+                "--force",
+            ],
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            text=True,
+            timeout=180,
+            check=False,
+        )
+
+    if result.returncode != 0:
+        return None
+
+    output_path = output_dir / output_filename
+    return output_path if output_path.exists() and output_path.stat().st_size > 0 else None
+
+
 def _extract_path_strings(value: Any) -> list[str]:
     paths: list[str] = []
     if isinstance(value, str):
@@ -329,6 +431,7 @@ def create_artifacts_from_paths(
     run_id: str | None = None,
 ) -> list[schemas.Artifact]:
     existing_paths, existing_ids = _existing_artifact_keys()
+    existing_hashes: set[str] = set()
     artifacts: list[schemas.Artifact] = []
 
     for raw_path in paths:
@@ -341,18 +444,76 @@ def create_artifacts_from_paths(
         )
         if artifact is None:
             continue
-        if artifact.id in existing_ids or str(path) in existing_paths:
+        metadata = artifact.metadata or {}
+        content_hash = str(metadata.get("contentHash") or "")
+        normalized_path = str(metadata.get("originalNormalizedPath") or metadata.get("normalizedPath") or "")
+        if (
+            artifact.id in existing_ids
+            or str(path) in existing_paths
+            or (normalized_path and normalized_path in existing_paths)
+            or (content_hash and content_hash in existing_hashes)
+        ):
             continue
 
         artifacts.append(artifact)
         existing_ids.add(artifact.id)
         existing_paths.add(str(path))
+        if normalized_path:
+            existing_paths.add(normalized_path)
+        if content_hash:
+            existing_hashes.add(content_hash)
 
     artifacts.sort(
         key=lambda artifact: str((artifact.metadata or {}).get("updatedAt", "")),
         reverse=True,
     )
     return artifacts
+
+
+def create_pptx_from_html_artifacts(
+    session_id: str,
+    html_artifacts: list[schemas.Artifact],
+    run_id: str | None,
+) -> schemas.Artifact | None:
+    html_paths: list[Path] = []
+    for artifact in html_artifacts:
+        if artifact.type != "html_page":
+            continue
+        metadata = artifact.metadata or {}
+        raw_path = str(metadata.get("path") or metadata.get("originalPath") or "")
+        if not raw_path:
+            continue
+        path = Path(raw_path)
+        if path.exists() and path.is_file():
+            html_paths.append(path)
+
+    if not html_paths:
+        return None
+
+    def sort_key(path: Path) -> tuple[int, str]:
+        match = re.search(r"page[_-]?(\d+)", path.stem, re.IGNORECASE)
+        return (int(match.group(1)) if match else 9999, path.name)
+
+    html_paths = sorted(html_paths, key=sort_key)
+    run_dir = _runtime_run_dir(run_id)
+    deck_dir = run_dir / "pptx-fallback"
+    pages_dir = deck_dir / "pages"
+    output_dir = _runtime_artifacts_dir(run_id)
+    pages_dir.mkdir(parents=True, exist_ok=True)
+
+    for index, source in enumerate(html_paths, start=1):
+        shutil.copy2(source, pages_dir / f"page_{index:03d}.html")
+
+    output_filename = "agent-generated-deck.pptx"
+    output_path = _run_pptx_export(deck_dir, output_dir, output_filename)
+    if output_path is None:
+        return None
+
+    return _artifact_from_path(
+        session_id,
+        output_path,
+        original_path=str(output_path),
+    )
 
 
 def discover_artifacts_since(
@@ -362,6 +523,7 @@ def discover_artifacts_since(
 ) -> list[schemas.Artifact]:
     since = _as_local_naive(since)
     existing_paths, existing_ids = _existing_artifact_keys()
+    existing_hashes: set[str] = set()
     discovered: list[schemas.Artifact] = []
 
     for root in _candidate_roots():
@@ -392,11 +554,22 @@ def discover_artifacts_since(
             )
             if artifact is None:
                 continue
-            if artifact.id in existing_ids:
+            metadata = artifact.metadata or {}
+            content_hash = str(metadata.get("contentHash") or "")
+            normalized_path = str(metadata.get("originalNormalizedPath") or metadata.get("normalizedPath") or "")
+            if (
+                artifact.id in existing_ids
+                or (normalized_path and normalized_path in existing_paths)
+                or (content_hash and content_hash in existing_hashes)
+            ):
                 continue
             discovered.append(artifact)
             existing_ids.add(artifact.id)
             existing_paths.add(str(path))
+            if normalized_path:
+                existing_paths.add(normalized_path)
+            if content_hash:
+                existing_hashes.add(content_hash)
 
     discovered.sort(
         key=lambda artifact: str((artifact.metadata or {}).get("updatedAt", "")),

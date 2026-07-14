@@ -4,10 +4,10 @@ import { NewChatButton } from "../sidebar/new-chat-button";
 import { SessionList } from "../sidebar/session-list";
 import { SessionSearch } from "../sidebar/session-search";
 import { UserMenu } from "../sidebar/user-menu";
-import { Settings } from "lucide-react";
+import { Settings, Shield } from "lucide-react";
 import Link from "next/link";
 import { useI18n } from "@/lib/i18n";
-import { useUiStore } from "@/stores";
+import { useUiStore, useUserStore } from "@/stores";
 
 interface SidebarProps {
   variant?: "default" | "drawer";
@@ -16,6 +16,7 @@ interface SidebarProps {
 export function Sidebar({ variant = "default" }: SidebarProps) {
   const { t } = useI18n();
   const closeSidebarDrawer = useUiStore((state) => state.closeSidebarDrawer);
+  const user = useUserStore((state) => state.user);
 
   return (
     <aside className="flex h-screen w-full shrink-0 flex-col border-r border-[#deded8] bg-[#f4f4ef] md:w-[264px]">
@@ -38,6 +39,20 @@ export function Sidebar({ variant = "default" }: SidebarProps) {
         <SessionList />
       </div>
       <div className="space-y-1 border-t border-[#deded8] p-2.5">
+        {user?.role === "admin" ? (
+          <Link
+            className="flex h-8 items-center gap-2 rounded-md px-2 text-sm text-muted-foreground hover:bg-[#e9e9e2] hover:text-foreground"
+            href="/app/admin"
+            onClick={() => {
+              if (variant === "drawer") {
+                closeSidebarDrawer();
+              }
+            }}
+          >
+            <Shield className="size-4" />
+            <span>{t("admin")}</span>
+          </Link>
+        ) : null}
         <Link
           className="flex h-8 items-center gap-2 rounded-md px-2 text-sm text-muted-foreground hover:bg-[#e9e9e2] hover:text-foreground"
           href="/app/settings"

@@ -1,7 +1,9 @@
 import type {
+  AdminUserCreateInput,
   CreateAgentRunInput,
   CreateSessionInput,
   LoginInput,
+  RegisterInput,
   SendMessageInput,
   SendMessageResult,
   SendMessageStreamHandler,
@@ -9,7 +11,17 @@ import type {
   UploadFileInput,
   WebAgentApiAdapter,
 } from "./types";
-import type { AgentRun, Artifact, FileAsset, Message, Session, Skill, SkillKey } from "@/types";
+import type {
+  AgentRun,
+  Artifact,
+  ArtifactSlides,
+  FileAsset,
+  Message,
+  Session,
+  Skill,
+  SkillKey,
+  User,
+} from "@/types";
 import {
   mockArtifacts,
   mockMessages,
@@ -24,6 +36,7 @@ let messages: Message[] = [...mockMessages];
 let artifacts: Artifact[] = [...mockArtifacts];
 let files: FileAsset[] = [];
 let runs: AgentRun[] = [];
+let users: User[] = [{ ...mockUser, role: "admin" }];
 
 function createId(prefix: string) {
   return `${prefix}_${Date.now()}`;
@@ -91,6 +104,16 @@ export const mockAdapter: WebAgentApiAdapter = {
 
     return session;
   },
+  async createUser(input: AdminUserCreateInput) {
+    const user: User = {
+      email: input.email,
+      id: createId("user"),
+      nickname: input.nickname || input.email.split("@")[0],
+      role: input.role,
+    };
+    users = [user, ...users];
+    return user;
+  },
   async deleteArtifact(artifactId: string) {
     artifacts = artifacts.filter((artifact) => artifact.id !== artifactId);
   },
@@ -98,6 +121,9 @@ export const mockAdapter: WebAgentApiAdapter = {
     sessions = sessions.filter((session) => session.id !== sessionId);
     messages = messages.filter((message) => message.sessionId !== sessionId);
     artifacts = artifacts.filter((artifact) => artifact.sessionId !== sessionId);
+  },
+  async deleteUser(userId: string) {
+    users = users.filter((user) => user.id !== userId);
   },
   async downloadArtifact(artifactId: string) {
     const artifact = artifacts.find((item) => item.id === artifactId);
@@ -131,6 +157,19 @@ export const mockAdapter: WebAgentApiAdapter = {
 
     return artifact;
   },
+  async getArtifactSlides(artifactId: string): Promise<ArtifactSlides> {
+    const artifact = artifacts.find((item) => item.id === artifactId);
+    const slides = Array.isArray(artifact?.metadata?.slides)
+      ? artifact.metadata.slides.map((slide, index) => ({
+          content: `<section style="font-family: system-ui; height: 100vh; padding: 56px; box-sizing: border-box;"><h1>${String((slide as { title?: string }).title ?? `Slide ${index + 1}`)}</h1></section>`,
+          contentType: "text/html",
+          id: `${artifactId}_${index + 1}`,
+          index: index + 1,
+          title: String((slide as { title?: string }).title ?? `Slide ${index + 1}`),
+        }))
+      : [];
+    return { artifactId, slides, source: "mock" };
+  },
   async login(input: LoginInput) {
     return {
       accessToken: `mock_token_${input.email}`,
@@ -144,6 +183,9 @@ export const mockAdapter: WebAgentApiAdapter = {
     return sessionId
       ? artifacts.filter((artifact) => artifact.sessionId === sessionId)
       : artifacts;
+  },
+  async listAgentRuns(sessionId?: string) {
+    return sessionId ? runs.filter((run) => run.sessionId === sessionId) : runs;
   },
   async listFiles(sessionId?: string) {
     return sessionId
@@ -164,7 +206,10 @@ export const mockAdapter: WebAgentApiAdapter = {
   async listSkills() {
     return mockSkills;
   },
-  async register(input: LoginInput) {
+  async listUsers() {
+    return users;
+  },
+  async register(input: RegisterInput) {
     return {
       accessToken: `mock_token_${input.email}`,
       user: { ...mockUser, email: input.email },

@@ -1,8 +1,10 @@
-import { apiClient } from "../api-client";
+import { apiClient, getAccessToken } from "../api-client";
+import { parseSseEvents, parseSseJson, splitSseBuffer } from "../sse-parser";
 import type {
   AgentRun,
   AgentRunEvent,
   Artifact,
+  ArtifactSlides,
   FileAsset,
   Message,
   ModelConfig,
@@ -11,10 +13,12 @@ import type {
   User,
 } from "@/types";
 import type {
+  AdminUserCreateInput,
   AuthResult,
   CreateAgentRunInput,
   CreateSessionInput,
   LoginInput,
+  RegisterInput,
   SendMessageInput,
   SendMessageResult,
   SendMessageStreamHandler,
@@ -60,6 +64,12 @@ export const fastApiAdapter: WebAgentApiAdapter = {
       method: "POST",
     });
   },
+  createUser(input: AdminUserCreateInput) {
+    return apiClient<User>("/api/admin/users", {
+      body: JSON.stringify(input),
+      method: "POST",
+    });
+  },
   deleteArtifact(artifactId: string) {
     return apiClient<void>(`/api/artifacts/${artifactId}`, {
       method: "DELETE",
@@ -67,6 +77,11 @@ export const fastApiAdapter: WebAgentApiAdapter = {
   },
   deleteSession(sessionId: string) {
     return apiClient<void>(`/api/sessions/${sessionId}`, {
+      method: "DELETE",
+    });
+  },
+  deleteUser(userId: string) {
+    return apiClient<void>(`/api/admin/users/${userId}`, {
       method: "DELETE",
     });
   },
@@ -81,6 +96,9 @@ export const fastApiAdapter: WebAgentApiAdapter = {
   },
   getArtifact(artifactId: string) {
     return apiClient<Artifact>(`/api/artifacts/${artifactId}`);
+  },
+  getArtifactSlides(artifactId: string) {
+    return apiClient<ArtifactSlides>(`/api/artifacts/${artifactId}/slides`);
   },
   async login(input: LoginInput) {
     const result = await apiClient<AuthResult>("/api/auth/login", {
@@ -105,6 +123,12 @@ export const fastApiAdapter: WebAgentApiAdapter = {
       : "/api/artifacts";
     return apiClient<Artifact[]>(path);
   },
+  listAgentRuns(sessionId?: string) {
+    const path = sessionId
+      ? `/api/agent-runs?session_id=${encodeURIComponent(sessionId)}`
+      : "/api/agent-runs";
+    return apiClient<AgentRun[]>(path);
+  },
   listFiles(sessionId?: string) {
     const path = sessionId ? `/api/sessions/${sessionId}/files` : "/api/files";
     return apiClient<FileAsset[]>(path);
@@ -124,7 +148,10 @@ export const fastApiAdapter: WebAgentApiAdapter = {
   listSkills() {
     return apiClient<Skill[]>("/api/skills");
   },
-  async register(input: LoginInput) {
+  listUsers() {
+    return apiClient<User[]>("/api/admin/users");
+  },
+  async register(input: RegisterInput) {
     const result = await apiClient<AuthResult>("/api/auth/register", {
       body: JSON.stringify(input),
       method: "POST",
@@ -189,39 +216,49 @@ export const fastApiAdapter: WebAgentApiAdapter = {
       }
 
       buffer += decoder.decode(value, { stream: true });
-      const events = buffer.split("\n\n");
-      buffer = events.pop() ?? "";
+      const { events, remainingBuffer } = splitSseBuffer(buffer);
+      buffer = remainingBuffer;
 
-      for (const rawEvent of events) {
-        const lines = rawEvent.split("\n");
-        const type = lines
-          .find((line) => line.startsWith("event:"))
-          ?.slice("event:".length)
-          .trim();
-        const data = lines
-          .find((line) => line.startsWith("data:"))
-          ?.slice("data:".length)
-          .trim();
+      for (const event of events) {
+        onEvent({
+          ...event.data,
+          type: event.type,
+        } as Parameters<SendMessageStreamHandler>[0]);
+      }
+    }
 
-        if (!type || !data) {
-          continue;
-        }
-
-        onEvent({ ...JSON.parse(data), type });
+    if (buffer.trim()) {
+      for (const event of parseSseEvents(buffer)) {
+        onEvent({
+          ...event.data,
+          type: event.type,
+        } as Parameters<SendMessageStreamHandler>[0]);
       }
     }
   },
   subscribeAgentRun(runId, onEvent) {
+    const token = getAccessToken();
+    const searchParams = new URLSearchParams();
+    if (token) {
+      searchParams.set("access_token", token);
+    }
+    const query = searchParams.toString();
     const source = new EventSource(
-      `${API_BASE_URL}/api/agent-runs/${runId}/events`,
+      `${API_BASE_URL}/api/agent-runs/${runId}/events${query ? `?${query}` : ""}`,
     );
 
     source.onmessage = (message) => {
-      onEvent(JSON.parse(message.data) as AgentRunEvent);
+      const event = parseSseJson<AgentRunEvent>(message.data, "message");
+      if (event) {
+        onEvent(event);
+      }
     };
 
     source.addEventListener("agent_run_event", (message) => {
-      onEvent(JSON.parse(message.data) as AgentRunEvent);
+      const event = parseSseJson<AgentRunEvent>(message.data, "agent_run_event");
+      if (event) {
+        onEvent(event);
+      }
     });
 
     source.onerror = () => {

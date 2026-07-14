@@ -35,7 +35,7 @@ export function getStatusDotClass(status: UnifiedStatus) {
     return "bg-amber-500";
   }
 
-  if (status === "cancelled") {
+  if (status === "cancelled" || status === "disconnected") {
     return "bg-zinc-400";
   }
 

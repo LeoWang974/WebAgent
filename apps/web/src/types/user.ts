@@ -3,5 +3,5 @@ export interface User {
   nickname: string;
   email: string;
   avatarUrl?: string;
+  role?: "admin" | "user";
 }
-

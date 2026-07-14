@@ -1,13 +1,15 @@
 import json
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import schemas
 from app.core.config import settings
 from app.db.session import get_db
+from app.models import Conversation, ConversationShare
 from app.models import AgentRun as DBAgentRun
 from app.models import AgentRunEvent as DBAgentRunEvent
 from app.models import User
@@ -27,20 +29,31 @@ except ImportError:
     hermes_adapter = None
 
 router = APIRouter()
+ACTIVE_RUN_STATUSES = {"queued", "running", "tool_calling", "rendering"}
+TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled", "disconnected"}
+STALE_RUN_GRACE_SECONDS = 30 * 60
+
+
+def _resolve_adapter(model_id: str | None = None, adapter_key: str | None = None):
+    if adapter_key == "hermes":
+        return ("hermes", hermes_adapter) if hermes_adapter else (None, None)
+    if adapter_key == "openclaw":
+        return ("openclaw", openclaw_adapter) if openclaw_adapter else (None, None)
+    if model_id == "model_hermes" and hermes_adapter:
+        return "hermes", hermes_adapter
+    if model_id == "model_openclaw" and openclaw_adapter:
+        return "openclaw", openclaw_adapter
+    if settings.agent_runtime_default == "openclaw" and openclaw_adapter:
+        return "openclaw", openclaw_adapter
+    if hermes_adapter:
+        return "hermes", hermes_adapter
+    if openclaw_adapter:
+        return "openclaw", openclaw_adapter
+    return None, None
 
 
 def _get_adapter(model_id: str | None):
-    if model_id == "model_hermes" and hermes_adapter:
-        return hermes_adapter
-    if model_id == "model_openclaw" and openclaw_adapter:
-        return openclaw_adapter
-    if settings.agent_runtime_default == "openclaw" and openclaw_adapter:
-        return openclaw_adapter
-    if hermes_adapter:
-        return hermes_adapter
-    if openclaw_adapter:
-        return openclaw_adapter
-    return None
+    return _resolve_adapter(model_id=model_id)[1]
 
 
 def _event_to_step(event: DBAgentRunEvent) -> schemas.AgentRunStep:
@@ -60,7 +73,7 @@ def _event_to_step(event: DBAgentRunEvent) -> schemas.AgentRunStep:
 
 def to_agent_run_schema(run: DBAgentRun, events: list[DBAgentRunEvent] | None = None) -> schemas.AgentRun:
     events = events or []
-    completed_at = run.updated_at.isoformat() if run.status in {"completed", "failed", "cancelled"} else None
+    completed_at = run.updated_at.isoformat() if run.status in TERMINAL_RUN_STATUSES else None
     output = None
     for event in reversed(events):
         payload = event.payload or {}
@@ -78,6 +91,7 @@ def to_agent_run_schema(run: DBAgentRun, events: list[DBAgentRunEvent] | None = 
         completed_at=completed_at,
         error=run.error,
         output=output,
+        adapter_key=run.adapter_key,
     )
 
 
@@ -89,7 +103,7 @@ def to_agent_run_event_schema(event: DBAgentRunEvent, run: DBAgentRun) -> schema
         progress=int(payload.get("progress") or run.progress or 0),
         completed_at=(
             run.updated_at.isoformat()
-            if (payload.get("status") or run.status) in {"completed", "failed", "cancelled"}
+            if (payload.get("status") or run.status) in TERMINAL_RUN_STATUSES
             else None
         ),
         error=payload.get("error") or run.error,
@@ -107,6 +121,69 @@ async def list_run_events(db: AsyncSession, run_id: str) -> list[DBAgentRunEvent
     return list(result.scalars().all())
 
 
+def is_stale_run(run: DBAgentRun) -> bool:
+    if run.status not in ACTIVE_RUN_STATUSES:
+        return False
+    updated_at = run.updated_at or run.created_at
+    if updated_at.tzinfo is None:
+        updated_at = updated_at.replace(tzinfo=timezone.utc)
+    return updated_at < datetime.now(timezone.utc) - timedelta(seconds=STALE_RUN_GRACE_SECONDS)
+
+
+async def mark_stale_agent_runs(
+    db: AsyncSession,
+    current_user: User,
+    session_id: str | None = None,
+) -> None:
+    conversation_filter = [
+        or_(
+            Conversation.user_id == current_user.id,
+            Conversation.visibility == "public",
+            Conversation.id.in_(
+                select(ConversationShare.conversation_id).where(
+                    ConversationShare.user_id == current_user.id
+                )
+            ),
+        )
+    ]
+    if session_id:
+        conversation_filter.append(Conversation.id == session_id)
+
+    result = await db.execute(
+        select(DBAgentRun)
+        .join(Conversation, Conversation.id == DBAgentRun.conversation_id)
+        .where(
+            DBAgentRun.status.in_(ACTIVE_RUN_STATUSES),
+            *conversation_filter,
+        )
+    )
+    stale_runs = [run for run in result.scalars().all() if is_stale_run(run)]
+    if not stale_runs:
+        return
+
+    for run in stale_runs:
+        run.status = "disconnected"
+        run.error = "Agent run disconnected before a terminal status was recorded."
+        run.progress = min(run.progress or 0, 99)
+        db.add(
+            DBAgentRunEvent(
+                run_id=run.id,
+                event_type="disconnected",
+                payload={
+                    "eventType": "disconnected",
+                    "status": "disconnected",
+                    "progress": run.progress,
+                    "error": run.error,
+                    "step": {
+                        "label": "Agent run disconnected",
+                        "status": "failed",
+                    },
+                },
+            )
+        )
+    await db.commit()
+
+
 async def create_db_agent_run(
     db: AsyncSession,
     session_id: str,
@@ -114,12 +191,14 @@ async def create_db_agent_run(
     title: str,
     status: str = "running",
     progress: int = 0,
+    adapter_key: str | None = None,
 ) -> DBAgentRun:
     run = DBAgentRun(
         conversation_id=session_id,
         status=status,
         title=title,
         progress=progress,
+        adapter_key=adapter_key,
     )
     db.add(run)
     await db.commit()
@@ -193,7 +272,56 @@ async def get_db_agent_run(
     if run is None:
         raise HTTPException(status_code=404, detail="Agent run not found")
     await get_conversation_or_404(db, run.conversation_id, current_user)
+    if is_stale_run(run):
+        await mark_stale_agent_runs(db, current_user, run.conversation_id)
+        await db.refresh(run)
     return run
+
+
+@router.get("", response_model=list[schemas.AgentRun])
+async def list_agent_runs(
+    session_id: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[schemas.AgentRun]:
+    if session_id:
+        await get_conversation_or_404(db, session_id, current_user)
+    await mark_stale_agent_runs(db, current_user, session_id)
+
+    conversation_filter = [
+        or_(
+            Conversation.user_id == current_user.id,
+            Conversation.visibility == "public",
+            Conversation.id.in_(
+                select(ConversationShare.conversation_id).where(
+                    ConversationShare.user_id == current_user.id
+                )
+            ),
+        )
+    ]
+    if session_id:
+        conversation_filter.append(Conversation.id == session_id)
+
+    result = await db.execute(
+        select(DBAgentRun)
+        .join(Conversation, Conversation.id == DBAgentRun.conversation_id)
+        .where(*conversation_filter)
+        .order_by(DBAgentRun.updated_at.desc())
+        .limit(50)
+    )
+    runs = list(result.scalars().all())
+    if not runs:
+        return []
+
+    events_result = await db.execute(
+        select(DBAgentRunEvent)
+        .where(DBAgentRunEvent.run_id.in_([run.id for run in runs]))
+        .order_by(DBAgentRunEvent.created_at.asc())
+    )
+    events_by_run: dict[str, list[DBAgentRunEvent]] = {}
+    for event in events_result.scalars().all():
+        events_by_run.setdefault(event.run_id, []).append(event)
+    return [to_agent_run_schema(run, events_by_run.get(run.id, [])) for run in runs]
 
 
 @router.post("", response_model=schemas.AgentRun)
@@ -203,12 +331,14 @@ async def create_agent_run(
     current_user: User = Depends(get_current_user),
 ) -> schemas.AgentRun:
     await get_conversation_or_404(db, input_data.session_id, current_user, require_write=True)
+    adapter_key, _ = _resolve_adapter(model_id=input_data.model_id)
     run = await create_db_agent_run(
         db,
         input_data.session_id,
         title=input_data.skill_key or "Agent Run",
         status="queued",
         progress=0,
+        adapter_key=adapter_key,
     )
     event = await record_db_agent_run_event(
         db,
@@ -246,7 +376,7 @@ async def cancel_agent_run(
 ) -> schemas.AgentRun:
     run = await get_db_agent_run(db, run_id, current_user)
     await get_conversation_or_404(db, run.conversation_id, current_user, require_write=True)
-    adapter = _get_adapter(None)
+    _, adapter = _resolve_adapter(adapter_key=run.adapter_key)
     if adapter is not None:
         await adapter.cancel_run(run_id)
     event = await finish_db_agent_run(

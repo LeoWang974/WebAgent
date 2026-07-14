@@ -13,6 +13,7 @@ class AgentRun(IdMixin, TimestampMixin, Base):
     title: Mapped[str] = mapped_column(String(255))
     progress: Mapped[int] = mapped_column(Integer, default=0)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    adapter_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
 
 
 class AgentRunEvent(IdMixin, TimestampMixin, Base):
@@ -21,4 +22,3 @@ class AgentRunEvent(IdMixin, TimestampMixin, Base):
     run_id: Mapped[str] = mapped_column(ForeignKey("agent_runs.id"), index=True)
     event_type: Mapped[str] = mapped_column(String(80))
     payload: Mapped[dict] = mapped_column(JSON)
-

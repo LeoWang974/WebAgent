@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.routes import agent_runs, artifacts, auth, files, health, messages, models, sessions, settings, skills
+from app.api.routes import admin, agent_runs, artifacts, auth, files, health, messages, models, sessions, settings, skills
 
 api_router = APIRouter()
 api_router.include_router(health.router, tags=["health"])
@@ -13,4 +13,4 @@ api_router.include_router(agent_runs.router, prefix="/agent-runs", tags=["agent-
 api_router.include_router(models.router, prefix="/models", tags=["models"])
 api_router.include_router(skills.router, prefix="/skills", tags=["skills"])
 api_router.include_router(settings.router, prefix="/settings", tags=["settings"])
-
+api_router.include_router(admin.router, prefix="/admin", tags=["admin"])

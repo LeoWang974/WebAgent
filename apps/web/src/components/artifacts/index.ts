@@ -9,6 +9,7 @@ export * from "./html-viewer";
 export * from "./markdown-preview-placeholder";
 export * from "./markdown-viewer";
 export * from "./ppt-preview-placeholder";
+export * from "./ppt-artifact-viewer";
 export * from "./ppt-viewer";
 export * from "./image-preview-placeholder";
 export * from "./image-viewer";

@@ -4,6 +4,7 @@ import { Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { useI18n } from "@/lib/i18n";
 
 interface MessageItemProps {
   role: "user" | "assistant" | "system" | "tool";
@@ -15,37 +16,41 @@ interface MessageItemProps {
   waitStartedAt?: string;
 }
 
-function formatTime(value: string) {
+function formatTime(value: string, locale: string) {
   const date = new Date(value);
 
   if (Number.isNaN(date.getTime())) {
     return "";
   }
 
-  return new Intl.DateTimeFormat("zh-CN", {
+  return new Intl.DateTimeFormat(locale, {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
   }).format(date);
 }
 
-function formatDuration(durationMs?: number) {
+function formatDuration(durationMs: number | undefined, locale: string) {
+  const useChineseUnits = locale === "zh-CN";
   if (
     durationMs === undefined ||
     !Number.isFinite(durationMs) ||
     durationMs < 1000
   ) {
-    return "0 秒";
+    return useChineseUnits ? "0 秒" : "0s";
   }
 
   const totalSeconds = Math.round(durationMs / 1000);
   if (totalSeconds < 60) {
-    return `${totalSeconds} 秒`;
+    return useChineseUnits ? `${totalSeconds} 秒` : `${totalSeconds}s`;
   }
 
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
-  return seconds > 0 ? `${minutes} 分 ${seconds} 秒` : `${minutes} 分`;
+  if (useChineseUnits) {
+    return seconds > 0 ? `${minutes} 分 ${seconds} 秒` : `${minutes} 分`;
+  }
+  return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
 }
 
 function useElapsed(startedAt?: string) {
@@ -84,13 +89,14 @@ export function MessageItem({
   waitDurationMs,
   waitStartedAt,
 }: MessageItemProps) {
+  const { language, t } = useI18n();
   const isUser = role === "user";
-  const messageTime = formatTime(createdAt);
+  const messageTime = formatTime(createdAt, language);
   const pendingElapsedMs = useElapsed(isPending ? waitStartedAt ?? createdAt : undefined);
   const waitDuration = isPending
-    ? formatDuration(pendingElapsedMs)
+    ? formatDuration(pendingElapsedMs, language)
     : waitDurationMs
-      ? formatDuration(waitDurationMs)
+      ? formatDuration(waitDurationMs, language)
       : undefined;
 
   return (
@@ -117,7 +123,9 @@ export function MessageItem({
           <span className="uppercase">{role}</span>
           {messageTime ? <span>{messageTime}</span> : null}
           {!isUser && waitDuration ? (
-            <span>{isPending ? `已等待 ${waitDuration}` : `等待 ${waitDuration}`}</span>
+            <span>
+              {isPending ? t("waitElapsed") : t("waitDuration")} {waitDuration}
+            </span>
           ) : null}
         </div>
         {isUser ? (
@@ -125,7 +133,7 @@ export function MessageItem({
         ) : isPending ? (
           <div className="flex items-start gap-2 text-muted-foreground">
             <Loader2 className="mt-1 size-3.5 shrink-0 animate-spin" />
-            <span>{pendingLabel ?? "Hermes 正在工作，等待阶段反馈..."}</span>
+            <span>{pendingLabel ?? t("defaultPendingAgentLabel")}</span>
           </div>
         ) : (
           <div className="message-markdown">

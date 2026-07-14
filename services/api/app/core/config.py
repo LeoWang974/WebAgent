@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     access_token_expire_minutes: int = 60 * 24 * 7
+    allow_dev_auth_fallback: bool = True
     api_prefix: str = "/api"
     app_name: str = "WebAgent API"
     backend_cors_origins: str = "http://localhost:3000"

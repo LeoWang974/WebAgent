@@ -2,6 +2,7 @@ import type {
   AgentRun,
   AgentRunEvent,
   Artifact,
+  ArtifactSlides,
   FileAsset,
   Message,
   ModelConfig,
@@ -20,6 +21,14 @@ export interface CreateSessionInput {
 export interface LoginInput {
   email: string;
   password: string;
+}
+
+export interface RegisterInput extends LoginInput {
+  nickname?: string;
+}
+
+export interface AdminUserCreateInput extends RegisterInput {
+  role: "admin" | "user";
 }
 
 export interface AuthResult {
@@ -63,6 +72,7 @@ export type SendMessageStreamEvent =
       message: Message;
       runId?: string;
       session: Session;
+      status?: AgentRun["status"];
       type: "assistant_done";
     }
   | {
@@ -101,23 +111,28 @@ export type AgentRunUnsubscribe = () => void;
 
 export interface WebAgentApiAdapter {
   cancelAgentRun(runId: string): Promise<AgentRun>;
-  createSession(input: CreateSessionInput): Promise<Session>;
   createAgentRun(input: CreateAgentRunInput): Promise<AgentRun>;
+  createSession(input: CreateSessionInput): Promise<Session>;
+  createUser(input: AdminUserCreateInput): Promise<User>;
   deleteArtifact(artifactId: string): Promise<void>;
   deleteSession(sessionId: string): Promise<void>;
+  deleteUser(userId: string): Promise<void>;
   downloadArtifact(artifactId: string): Promise<Blob>;
   getCurrentUser(): Promise<User>;
   getArtifact(artifactId: string): Promise<Artifact>;
+  getArtifactSlides(artifactId: string): Promise<ArtifactSlides>;
   getAgentRun(runId: string): Promise<AgentRun>;
   login(input: LoginInput): Promise<AuthResult>;
   logout(): Promise<void>;
   listArtifacts(sessionId?: string): Promise<Artifact[]>;
+  listAgentRuns(sessionId?: string): Promise<AgentRun[]>;
   listFiles(sessionId?: string): Promise<FileAsset[]>;
   listMessages(sessionId?: string): Promise<Message[]>;
   listModels(): Promise<ModelConfig[]>;
   listSessions(): Promise<Session[]>;
   listSkills(): Promise<Skill[]>;
-  register(input: LoginInput): Promise<AuthResult>;
+  listUsers(): Promise<User[]>;
+  register(input: RegisterInput): Promise<AuthResult>;
   sendMessage(input: SendMessageInput): Promise<SendMessageResult>;
   sendMessageStream(
     input: SendMessageInput,

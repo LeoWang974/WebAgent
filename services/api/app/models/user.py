@@ -12,6 +12,7 @@ class User(IdMixin, TimestampMixin, Base):
     hashed_password: Mapped[str | None] = mapped_column(String(255), nullable=True)
     nickname: Mapped[str] = mapped_column(String(120))
     avatar_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    role: Mapped[str] = mapped_column(String(50), default="user")
 
     conversations = relationship("Conversation", back_populates="user")
     conversation_shares = relationship("ConversationShare", back_populates="user")

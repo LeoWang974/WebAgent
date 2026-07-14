@@ -8,6 +8,11 @@ import type {
 
 export type ProfileUpdateInput = Pick<User, "avatarUrl" | "email" | "nickname">;
 
+export interface PasswordUpdateInput {
+  currentPassword: string;
+  newPassword: string;
+}
+
 export type ModelCreateInput = Omit<
   ModelConfig,
   "id" | "isAvailable" | "isDefault"
@@ -29,6 +34,7 @@ export interface SettingsApiAdapter {
     input: Partial<ModelConfig>,
   ): Promise<ModelConfig>;
   updateProfile(input: ProfileUpdateInput): Promise<User>;
+  updatePassword(input: PasswordUpdateInput): Promise<void>;
   updateSkillVersion(
     skillKey: SkillKey,
     direction: "rollback" | "update",
