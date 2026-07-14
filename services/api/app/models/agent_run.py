@@ -1,4 +1,4 @@
-from sqlalchemy import ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import ForeignKey, Index, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -7,6 +7,9 @@ from app.models.mixins import IdMixin, TimestampMixin
 
 class AgentRun(IdMixin, TimestampMixin, Base):
     __tablename__ = "agent_runs"
+    __table_args__ = (
+        Index("ix_agent_runs_conversation_status_updated", "conversation_id", "status", "updated_at"),
+    )
 
     conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id"), index=True)
     status: Mapped[str] = mapped_column(String(50), default="queued")

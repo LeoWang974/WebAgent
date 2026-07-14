@@ -47,16 +47,26 @@ def test_normalize_runtime_path_handles_windows_and_wsl_paths():
 
 
 @pytest.mark.asyncio
-async def test_runtime_context_builder_only_injects_supported_skills():
+async def test_runtime_context_builder_injects_limited_deep_research_context():
     content = "请研究未来餐桌"
     result = await build_runtime_content(
-        FakeDb([artifact("未来餐桌报告", "markdown_report", "/home/demo/report.md")]),
+        FakeDb(
+            [
+                artifact("未来餐桌报告", "markdown_report", "/home/demo/report.md"),
+                artifact("page", "html_page", "/home/demo/page.html"),
+                artifact("table", "data_table", "/home/demo/table.csv"),
+                artifact("extra", "chart", "/home/demo/chart.csv"),
+            ]
+        ),
         "session_1",
         content,
         "deep_research",
     )
 
-    assert result == content
+    context = result.split("Available artifacts: ", maxsplit=1)[1]
+    assert "[WebAgent runtime context]" in result
+    assert context.count(" -> ") == 3
+    assert "未来餐桌报告" in context
 
 
 @pytest.mark.asyncio

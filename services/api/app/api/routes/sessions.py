@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 import hashlib
 import json
 import logging
@@ -55,6 +55,18 @@ class AgentRunTimeout(Exception):
     def __init__(self, timeout_type: str, message: str) -> None:
         self.timeout_type = timeout_type
         super().__init__(message)
+
+
+def runtime_diagnostics(adapter: object, artifact_discovery_summary: dict[str, object]) -> dict:
+    diagnostics = (
+        adapter.get_last_diagnostics()
+        if adapter is not None and hasattr(adapter, "get_last_diagnostics")
+        else {}
+    )
+    return {
+        "artifactDiscovery": artifact_discovery_summary,
+        "hermesDiagnostics": diagnostics,
+    }
 
 
 def sse(event: str, data: dict) -> str:
@@ -569,6 +581,7 @@ async def stream_session_message(
         adapter = None
         run: AgentRun | None = None
         assistant_event_count = 0
+        artifact_discovery_summary: dict[str, object] = {}
         run_started_monotonic = asyncio.get_running_loop().time()
 
         try:
@@ -627,8 +640,12 @@ async def stream_session_message(
                 run_id=run.id,
             )
 
-            if hasattr(adapter, "stream_response"):
-                stream = adapter.stream_response(adapter_input)
+            if hasattr(adapter, "stream_response_events") or hasattr(adapter, "stream_response"):
+                stream = (
+                    adapter.stream_response_events(adapter_input)
+                    if hasattr(adapter, "stream_response_events")
+                    else adapter.stream_response(adapter_input)
+                )
                 while True:
                     elapsed_seconds = asyncio.get_running_loop().time() - run_started_monotonic
                     overall_remaining = (
@@ -677,24 +694,35 @@ async def stream_session_message(
                     if await is_agent_run_cancelled(db, run.id):
                         raise AgentRunCancelled()
 
-                    content = chunk.strip()
+                    if hasattr(chunk, "step"):
+                        step = getattr(chunk, "step", None)
+                        content = str(getattr(step, "label", "") or "").strip()
+                        event_type = str(getattr(chunk, "event_type", "stage_update"))
+                        event_payload = dict(getattr(chunk, "payload", {}) or {})
+                        progress = int(getattr(chunk, "progress", 0) or 0)
+                    else:
+                        content = str(chunk).strip()
+                        event_type = "stage_update"
+                        event_payload = {}
+                        progress = 0
                     if not content:
                         continue
 
                     assistant_message = await persist_message(db, session_id, "assistant", content)
                     assistant_messages.append(assistant_message)
                     assistant_event_count += 1
-                    progress = min(90, 10 + assistant_event_count * 8)
+                    progress = progress or min(90, 10 + assistant_event_count * 8)
                     await record_db_agent_run_event(
                         db,
                         run,
-                        event_type="stage_update",
+                        event_type=event_type,
                         label=content,
                         status="running",
                         progress=progress,
                         payload={
                             "content": content,
                             "messageId": assistant_message.id,
+                            **event_payload,
                         },
                     )
                     yield sse(
@@ -747,12 +775,45 @@ async def stream_session_message(
                 if hasattr(adapter, "get_last_artifact_paths")
                 else []
             )
+            explicit_artifacts = (
+                adapter.get_last_artifacts()
+                if hasattr(adapter, "get_last_artifacts")
+                else []
+            )
+            if explicit_artifacts:
+                explicit_artifact_paths = [
+                    str(getattr(artifact, "path", ""))
+                    for artifact in explicit_artifacts
+                    if getattr(artifact, "path", "")
+                ]
+            artifact_discovery_summary = {
+                "adapter_artifact_paths": list(explicit_artifact_paths),
+                "adapter_artifacts": [
+                    {
+                        "artifact_path": getattr(artifact, "path", None),
+                        "artifact_type": getattr(artifact, "artifact_type", None),
+                        "run_id": getattr(artifact, "run_id", None),
+                        "source_dir": getattr(artifact, "source_dir", None),
+                    }
+                    for artifact in explicit_artifacts
+                ],
+            }
             discovered_artifacts = await discover_artifacts_with_retry(
                 session_id,
                 run_started_at,
                 explicit_artifact_paths,
                 run.id,
             )
+            artifact_discovery_summary["discovered_count"] = len(discovered_artifacts)
+            artifact_discovery_summary["discovered_artifacts"] = [
+                {
+                    "id": artifact.id,
+                    "title": artifact.title,
+                    "type": artifact.type,
+                    "metadata": artifact.metadata,
+                }
+                for artifact in discovered_artifacts
+            ]
             if (
                 resolved_skill_key == "ppt_generation"
                 and any(artifact.type == "html_page" for artifact in discovered_artifacts)
@@ -784,6 +845,16 @@ async def stream_session_message(
                 discovered_artifacts,
                 run.id,
             )
+            artifact_discovery_summary["stored_count"] = len(stored_artifacts)
+            artifact_discovery_summary["stored_artifacts"] = [
+                {
+                    "id": artifact.id,
+                    "run_id": artifact.run_id,
+                    "title": artifact.title,
+                    "type": artifact.type,
+                }
+                for artifact in stored_artifacts
+            ]
             current_run_artifacts = [
                 artifact for artifact in stored_artifacts if artifact.run_id == run.id
             ]
@@ -897,8 +968,18 @@ async def stream_session_message(
         except AgentRunTimeout as error:
             logger.warning("Agent stream timed out: %s", error)
             if run is not None:
-                from app.api.routes.agent_runs import finish_db_agent_run
+                from app.api.routes.agent_runs import finish_db_agent_run, record_db_agent_run_event
 
+                await record_db_agent_run_event(
+                    db,
+                    run,
+                    event_type="diagnostic",
+                    label="Hermes timeout diagnostics",
+                    status="failed",
+                    progress=run.progress,
+                    step_status="failed",
+                    payload=runtime_diagnostics(adapter, artifact_discovery_summary),
+                )
                 await finish_db_agent_run(
                     db,
                     run,
@@ -944,8 +1025,18 @@ async def stream_session_message(
             if run is not None and adapter is not None and hasattr(adapter, "cancel_run"):
                 await adapter.cancel_run(run.id)
             if run is not None:
-                from app.api.routes.agent_runs import finish_db_agent_run
+                from app.api.routes.agent_runs import finish_db_agent_run, record_db_agent_run_event
 
+                await record_db_agent_run_event(
+                    db,
+                    run,
+                    event_type="diagnostic",
+                    label="Hermes failure diagnostics",
+                    status="failed",
+                    progress=run.progress,
+                    step_status="failed",
+                    payload=runtime_diagnostics(adapter, artifact_discovery_summary),
+                )
                 await finish_db_agent_run(
                     db,
                     run,

@@ -6,8 +6,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Artifact
 
-SUPPORTED_CONTEXT_SKILLS = {"ppt_generation", "u1_image"}
+SUPPORTED_CONTEXT_SKILLS = {"data_analysis", "deep_research", "ppt_generation", "u1_image"}
 MAX_CONTEXT_ARTIFACTS = {
+    "data_analysis": 4,
+    "deep_research": 3,
     "ppt_generation": 6,
     "u1_image": 5,
 }
@@ -47,25 +49,41 @@ def artifact_path(artifact: Artifact) -> str | None:
 
 
 def skill_type_score(skill_key: str, artifact_type: str) -> int:
-    if skill_key == "u1_image":
-        return {
-            "markdown_report": 100,
-            "html_page": 75,
-            "ppt_deck": 45,
-            "image_result": 35,
-            "data_table": 15,
-            "chart": 15,
-        }.get(artifact_type, 0)
-    if skill_key == "ppt_generation":
-        return {
+    scores = {
+        "data_analysis": {
+            "data_table": 100,
+            "chart": 90,
+            "markdown_report": 45,
+            "html_page": 30,
+            "ppt_deck": 10,
+            "image_result": 5,
+        },
+        "deep_research": {
+            "markdown_report": 90,
+            "html_page": 70,
+            "data_table": 45,
+            "chart": 35,
+            "ppt_deck": 20,
+            "image_result": 10,
+        },
+        "ppt_generation": {
             "markdown_report": 100,
             "html_page": 85,
             "image_result": 60,
             "data_table": 40,
             "chart": 40,
             "ppt_deck": 20,
-        }.get(artifact_type, 0)
-    return 0
+        },
+        "u1_image": {
+            "markdown_report": 100,
+            "html_page": 75,
+            "ppt_deck": 45,
+            "image_result": 35,
+            "data_table": 15,
+            "chart": 15,
+        },
+    }
+    return scores.get(skill_key, {}).get(artifact_type, 0)
 
 
 def artifact_quality_score(artifact: Artifact, path: str) -> int:
@@ -93,7 +111,7 @@ def artifact_quality_score(artifact: Artifact, path: str) -> int:
 def title_match_score(content: str, title: str) -> int:
     normalized_content = content.lower()
     normalized_title = title.lower()
-    for focus_term in re.findall(r"[《\"']([^》\"']{2,})[》\"']", content):
+    for focus_term in re.findall(r"[《「“\"']([^》」”\"']{2,})[》」”\"']", content):
         if focus_term.lower() in normalized_title:
             return 60
     if normalized_title and normalized_title in normalized_content:
@@ -105,16 +123,26 @@ def title_match_score(content: str, title: str) -> int:
 
 
 def instruction_for_skill(skill_key: str) -> str:
-    if skill_key == "u1_image":
+    if skill_key == "data_analysis":
         return (
-            "用户提到 U1 生图时，表示调用 u1_image/sn-image-base 生图能力，"
-            "不是名为 U1 的参考图片。若用户提到已有 Markdown/HTML/PPT，"
-            "优先从下方会话产物中选择最匹配文件；直接生成图片，并在完成时输出图片文件路径。"
+            "若用户要求继续分析已有数据，请优先从下方少量相关表格、图表或报告中选择输入；"
+            "不要一次读取所有历史产物。完成时输出生成的数据表、图表或报告文件路径。"
+        )
+    if skill_key == "deep_research":
+        return (
+            "若用户要求继续调研已有主题，请优先参考下方少量相关报告、HTML 或数据表；"
+            "不要把历史产物全部展开。完成时输出最终 Markdown/HTML 报告文件路径。"
         )
     if skill_key == "ppt_generation":
         return (
             "若用户提到已有 Markdown/HTML/图片，请优先从下方会话产物中选择最匹配文件；"
             "生成 PPT 时需要明确输出最终 PPTX 或可转换的 HTML 页面路径。"
+        )
+    if skill_key == "u1_image":
+        return (
+            "用户提到 U1 生图时，表示调用 u1_image/sn-image-base 生图能力，"
+            "不是名为 U1 的参考图片。若用户提到已有 Markdown/HTML/PPT，"
+            "优先从下方会话产物中选择最匹配文件；直接生成图片，并在完成时输出图片文件路径。"
         )
     return ""
 
@@ -167,8 +195,7 @@ async def build_runtime_content(
         return content
 
     candidates.sort(key=lambda item: item.score, reverse=True)
-    limit = MAX_CONTEXT_ARTIFACTS.get(skill_key, 5)
-    selected = candidates[:limit]
+    selected = candidates[: MAX_CONTEXT_ARTIFACTS.get(skill_key, 4)]
     context = " | ".join(
         build_context_line(index, artifact)
         for index, artifact in enumerate(selected, start=1)

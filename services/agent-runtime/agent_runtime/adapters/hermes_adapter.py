@@ -2,7 +2,7 @@ import asyncio
 from datetime import UTC, datetime
 from typing import AsyncGenerator, Optional
 
-from ..schemas import AgentRun, AgentRunCreate, AgentRunEvent, AgentRunStep
+from ..schemas import AgentArtifactRef, AgentRun, AgentRunCreate, AgentRunEvent, AgentRunStep
 from .base import AgentRuntimeAdapter
 from .hermes_cli import HermesCliWrapper
 
@@ -170,20 +170,67 @@ class HermesAdapter(AgentRuntimeAdapter):
         self,
         input_data: AgentRunCreate,
     ) -> AsyncGenerator[str, None]:
+        async for event in self.stream_response_events(input_data):
+            if event.step and event.step.label:
+                yield event.step.label
+
+    async def stream_response_events(
+        self,
+        input_data: AgentRunCreate,
+    ) -> AsyncGenerator[AgentRunEvent, None]:
         toolsets = self._get_toolsets_for_skill(input_data.skill_key)
         skills = self._get_skills_for_skill(input_data.skill_key)
+        event_index = 0
 
-        async for response in self.cli.ask_stream(
+        async for event in self.cli.ask_stream_events(
             question=input_data.content,
             run_id=input_data.run_id,
             toolsets=toolsets,
             skills=skills,
         ):
-            if response:
-                yield response
+            content = str(event.get("content") or "").strip()
+            if not content:
+                continue
+            event_index += 1
+            yield AgentRunEvent(
+                run_id=input_data.run_id or input_data.session_id,
+                event_type=str(event.get("event_type") or "stage_update"),
+                status="running",
+                progress=min(90, 10 + event_index * 8),
+                payload=dict(event.get("payload") or {}),
+                step=AgentRunStep(
+                    id=f"{input_data.run_id or input_data.session_id}_stage_{event_index}",
+                    label=content,
+                    status="completed",
+                    timestamp=now_iso(),
+                ),
+            )
 
     def get_last_artifact_paths(self) -> list[str]:
         return list(self.cli.last_artifact_paths)
+
+    def get_last_artifacts(self) -> list[AgentArtifactRef]:
+        return [
+            AgentArtifactRef(
+                path=str(item.get("artifact_path") or ""),
+                artifact_type=(
+                    str(item.get("artifact_type"))
+                    if item.get("artifact_type") is not None
+                    else None
+                ),
+                run_id=str(item.get("run_id")) if item.get("run_id") is not None else None,
+                source_dir=(
+                    str(item.get("source_dir"))
+                    if item.get("source_dir") is not None
+                    else None
+                ),
+            )
+            for item in self.cli.last_artifacts
+            if item.get("artifact_path")
+        ]
+
+    def get_last_diagnostics(self) -> dict[str, object]:
+        return dict(self.cli.last_diagnostics)
 
     def _get_toolsets_for_skill(self, skill_key: Optional[str]) -> Optional[str]:
         toolsets_map = {

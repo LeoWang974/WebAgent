@@ -4,7 +4,7 @@ import os
 import re
 import shlex
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import AsyncGenerator, Optional, Tuple
 
 
@@ -55,6 +55,8 @@ class HermesCliWrapper:
             "HERMES_QUIET": "1",
         }
         self.last_artifact_paths: list[str] = []
+        self.last_artifacts: list[dict[str, str | None]] = []
+        self.last_diagnostics: dict[str, object] = {}
         self.active_processes: dict[str, asyncio.subprocess.Process] = {}
         self.cancelled_run_ids: set[str] = set()
 
@@ -181,12 +183,41 @@ class HermesCliWrapper:
             return f"{drive}:\\{rest}"
         return cleaned
 
+    @staticmethod
+    def _artifact_type_from_path(path: str) -> str:
+        suffix = Path(path).suffix.lower()
+        if suffix == ".md":
+            return "markdown_report"
+        if suffix in {".html", ".htm"}:
+            return "html_page"
+        if suffix == ".pptx":
+            return "ppt_deck"
+        if suffix in {".png", ".jpg", ".jpeg"}:
+            return "image_result"
+        if suffix in {".csv", ".xlsx"}:
+            return "data_table"
+        return "file"
+
+    @staticmethod
+    def _source_dir_from_path(path: str) -> str:
+        if re.match(r"^[A-Za-z]:\\", path):
+            return str(PureWindowsPath(path).parent)
+        return str(PurePosixPath(path.replace("\\", "/")).parent)
+
     def _remember_artifact_paths(self, text: str) -> None:
         cleaned_text = ANSI_RE.sub("", text).replace("\r", "\n")
         for match in ARTIFACT_PATH_RE.finditer(cleaned_text):
             path = self._normalize_artifact_path(match.group("path"))
             if path not in self.last_artifact_paths:
                 self.last_artifact_paths.append(path)
+                self.last_artifacts.append(
+                    {
+                        "artifact_path": path,
+                        "artifact_type": self._artifact_type_from_path(path),
+                        "run_id": None,
+                        "source_dir": self._source_dir_from_path(path),
+                    }
+                )
 
     async def _terminate_process_tree(
         self,
@@ -311,8 +342,17 @@ class HermesCliWrapper:
         stdout_str = stdout.decode("utf-8", errors="replace").strip()
         stderr_str = stderr.decode("utf-8", errors="replace").strip()
         self.last_artifact_paths = []
+        self.last_artifacts = []
         self._remember_artifact_paths(stdout_str)
         self._remember_artifact_paths(stderr_str)
+        self.last_diagnostics = {
+            "artifact_paths": list(self.last_artifact_paths),
+            "artifacts": list(self.last_artifacts),
+            "exit_code": process.returncode,
+            "last_stage": None,
+            "stderr_tail": stderr_str[-2000:],
+            "stdout_tail": stdout_str[-2000:],
+        }
 
         if process.returncode != 0:
             error_msg = stderr_str or f"Hermes exited with code {process.returncode}"
@@ -329,7 +369,38 @@ class HermesCliWrapper:
         model: Optional[str] = None,
         run_id: Optional[str] = None,
     ) -> AsyncGenerator[str, None]:
+        async for event in self.ask_stream_events(
+            question=question,
+            session_id=session_id,
+            toolsets=toolsets,
+            skills=skills,
+            model=model,
+            run_id=run_id,
+        ):
+            content = str(event.get("content") or "").strip()
+            if content:
+                yield content
+
+    async def ask_stream_events(
+        self,
+        question: str,
+        session_id: Optional[str] = None,
+        toolsets: Optional[str] = None,
+        skills: Optional[str] = None,
+        model: Optional[str] = None,
+        run_id: Optional[str] = None,
+    ) -> AsyncGenerator[dict, None]:
         self.last_artifact_paths = []
+        self.last_artifacts = []
+        self.last_diagnostics = {
+            "artifact_paths": [],
+            "artifacts": [],
+            "exit_code": None,
+            "last_stage": None,
+            "raw_log_path": None,
+            "stderr_tail": "",
+            "stdout_tail": "",
+        }
 
         logger.info(
             "Starting Hermes stream: question_chars=%s session_id=%s toolsets=%s skills=%s model=%s",
@@ -340,6 +411,7 @@ class HermesCliWrapper:
             model or "",
         )
         raw_log_path = self._raw_log_path()
+        self.last_diagnostics["raw_log_path"] = str(raw_log_path)
         raw_log_path.write_text(
             (
                 "Hermes raw stream log\n"
@@ -477,8 +549,17 @@ class HermesCliWrapper:
                         if flushed and flushed != last_emitted:
                             emitted_output = True
                             last_emitted = flushed
+                            self.last_diagnostics["last_stage"] = flushed
                             logger.info("Hermes stage emitted: %s", flushed[:500])
-                            yield flushed
+                            yield {
+                                "content": flushed,
+                                "event_type": "stage_update",
+                                "payload": {
+                                    "artifact_paths": list(self.last_artifact_paths),
+                                    "artifacts": list(self.last_artifacts),
+                                    "rawLogPath": str(raw_log_path),
+                                },
+                            }
                             completion_detected = self._is_completion_signal(flushed)
                     in_hermes_box = True
                     continue
@@ -492,8 +573,17 @@ class HermesCliWrapper:
                     if flushed and flushed != last_emitted:
                         emitted_output = True
                         last_emitted = flushed
+                        self.last_diagnostics["last_stage"] = flushed
                         logger.info("Hermes stage emitted: %s", flushed[:500])
-                        yield flushed
+                        yield {
+                            "content": flushed,
+                            "event_type": "stage_update",
+                            "payload": {
+                                "artifact_paths": list(self.last_artifact_paths),
+                                "artifacts": list(self.last_artifacts),
+                                "rawLogPath": str(raw_log_path),
+                            },
+                        }
                         completion_detected = self._is_completion_signal(flushed)
                     in_hermes_box = False
                     continue
@@ -510,8 +600,17 @@ class HermesCliWrapper:
             flushed = await flush_box()
             if flushed and flushed != last_emitted:
                 emitted_output = True
+                self.last_diagnostics["last_stage"] = flushed
                 logger.info("Hermes stage emitted: %s", flushed[:500])
-                yield flushed
+                yield {
+                    "content": flushed,
+                    "event_type": "stage_update",
+                    "payload": {
+                        "artifact_paths": list(self.last_artifact_paths),
+                        "artifacts": list(self.last_artifacts),
+                        "rawLogPath": str(raw_log_path),
+                    },
+                }
                 completion_detected = self._is_completion_signal(flushed)
 
         if completion_detected:
@@ -520,6 +619,20 @@ class HermesCliWrapper:
         try:
             await process.wait()
             await asyncio.gather(*stream_tasks)
+            for artifact in self.last_artifacts:
+                artifact["run_id"] = run_id
+            self.last_diagnostics.update(
+                {
+                    "artifact_paths": list(self.last_artifact_paths),
+                    "artifacts": list(self.last_artifacts),
+                    "completion_detected": completion_detected,
+                    "emitted_output": emitted_output,
+                    "exit_code": process.returncode,
+                    "last_stage": self.last_diagnostics.get("last_stage"),
+                    "stderr_tail": stderr_tail[-2000:],
+                    "stdout_tail": stdout_tail[-2000:],
+                }
+            )
             logger.info("Hermes stream process exited: returncode=%s", process.returncode)
         finally:
             if run_id and self.active_processes.get(run_id) is process:
