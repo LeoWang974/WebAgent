@@ -10,8 +10,10 @@ export type ArtifactStatus = "pending" | "rendering" | "ready" | "failed";
 
 export interface Artifact {
   content?: string;
+  createdAt?: string;
   id: string;
   metadata?: Record<string, unknown>;
+  runId?: string;
   sessionId: string;
   type: ArtifactType;
   title: string;

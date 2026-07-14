@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app import schemas
+from app.core.config import settings
 from app.db.session import get_db
 from app.models import (
     AgentRun,
@@ -43,11 +45,16 @@ from app.services.runtime_context_builder import build_runtime_content as build_
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-AGENT_RUN_IDLE_TIMEOUT_SECONDS = 30 * 60
 
 
 class AgentRunCancelled(Exception):
     pass
+
+
+class AgentRunTimeout(Exception):
+    def __init__(self, timeout_type: str, message: str) -> None:
+        self.timeout_type = timeout_type
+        super().__init__(message)
 
 
 def sse(event: str, data: dict) -> str:
@@ -156,6 +163,71 @@ def artifact_content_hash(artifact: Artifact) -> str | None:
     return None
 
 
+def artifact_dedupe_keys(metadata: dict) -> tuple[str, list[str]]:
+    content_hash = str(metadata.get("contentHash") or "")
+    candidate_paths = [
+        str(value)
+        for value in {
+            metadata.get("path"),
+            metadata.get("originalPath"),
+            metadata.get("normalizedPath"),
+            metadata.get("originalNormalizedPath"),
+        }
+        if isinstance(value, str) and value
+    ]
+    return content_hash, candidate_paths
+
+
+async def find_existing_artifact(
+    db: AsyncSession,
+    session_id: str,
+    artifact_type: str,
+    metadata: dict,
+) -> Artifact | None:
+    content_hash, candidate_paths = artifact_dedupe_keys(metadata)
+    if content_hash:
+        result = await db.execute(
+            select(Artifact).where(
+                Artifact.conversation_id == session_id,
+                Artifact.artifact_metadata["contentHash"].as_string() == content_hash,
+            )
+        )
+        existing_artifact = result.scalar_one_or_none()
+        if existing_artifact is not None:
+            return existing_artifact
+
+    if candidate_paths:
+        result = await db.execute(
+            select(Artifact).where(
+                Artifact.conversation_id == session_id,
+                or_(
+                    Artifact.artifact_metadata["path"].as_string().in_(candidate_paths),
+                    Artifact.artifact_metadata["originalPath"].as_string().in_(candidate_paths),
+                    Artifact.artifact_metadata["normalizedPath"].as_string().in_(candidate_paths),
+                    Artifact.artifact_metadata["originalNormalizedPath"].as_string().in_(
+                        candidate_paths
+                    ),
+                ),
+            )
+        )
+        existing_artifact = result.scalar_one_or_none()
+        if existing_artifact is not None:
+            return existing_artifact
+
+    if content_hash:
+        result = await db.execute(
+            select(Artifact).where(
+                Artifact.conversation_id == session_id,
+                Artifact.type == artifact_type,
+            )
+        )
+        for candidate_artifact in result.scalars().all():
+            if artifact_content_hash(candidate_artifact) == content_hash:
+                return candidate_artifact
+
+    return None
+
+
 async def refresh_conversation(db: AsyncSession, session_id: str) -> Conversation:
     result = await db.execute(
         select(Conversation)
@@ -201,49 +273,12 @@ async def persist_discovered_artifacts(
 
     for artifact_schema in discovered_artifacts:
         metadata = artifact_schema.metadata or {}
-        path = str(metadata.get("path", ""))
-        original_path = str(metadata.get("originalPath", ""))
-        normalized_path = str(metadata.get("normalizedPath", ""))
-        original_normalized_path = str(metadata.get("originalNormalizedPath", ""))
-        content_hash = str(metadata.get("contentHash", ""))
-        candidate_paths = [
-            value
-            for value in {path, original_path, normalized_path, original_normalized_path}
-            if value
-        ]
-        existing_artifact = None
-        if content_hash:
-            result = await db.execute(
-                select(Artifact).where(
-                    Artifact.conversation_id == session_id,
-                    Artifact.artifact_metadata["contentHash"].as_string() == content_hash,
-                )
-            )
-            existing_artifact = result.scalar_one_or_none()
-        if existing_artifact is None and candidate_paths:
-            result = await db.execute(
-                select(Artifact).where(
-                    Artifact.conversation_id == session_id,
-                    or_(
-                        Artifact.artifact_metadata["path"].as_string().in_(candidate_paths),
-                        Artifact.artifact_metadata["originalPath"].as_string().in_(candidate_paths),
-                        Artifact.artifact_metadata["normalizedPath"].as_string().in_(candidate_paths),
-                        Artifact.artifact_metadata["originalNormalizedPath"].as_string().in_(candidate_paths),
-                    ),
-                )
-            )
-            existing_artifact = result.scalar_one_or_none()
-        if existing_artifact is None and content_hash:
-            result = await db.execute(
-                select(Artifact).where(
-                    Artifact.conversation_id == session_id,
-                    Artifact.type == artifact_schema.type,
-                )
-            )
-            for candidate_artifact in result.scalars().all():
-                if artifact_content_hash(candidate_artifact) == content_hash:
-                    existing_artifact = candidate_artifact
-                    break
+        existing_artifact = await find_existing_artifact(
+            db,
+            session_id,
+            artifact_schema.type,
+            metadata,
+        )
         if existing_artifact is not None:
             stored_artifacts.append(existing_artifact)
             continue
@@ -534,6 +569,7 @@ async def stream_session_message(
         adapter = None
         run: AgentRun | None = None
         assistant_event_count = 0
+        run_started_monotonic = asyncio.get_running_loop().time()
 
         try:
             from app.api.routes.agent_runs import (
@@ -594,18 +630,48 @@ async def stream_session_message(
             if hasattr(adapter, "stream_response"):
                 stream = adapter.stream_response(adapter_input)
                 while True:
+                    elapsed_seconds = asyncio.get_running_loop().time() - run_started_monotonic
+                    overall_remaining = (
+                        settings.agent_run_overall_timeout_seconds - elapsed_seconds
+                    )
+                    if overall_remaining <= 0:
+                        if hasattr(adapter, "cancel_run"):
+                            await adapter.cancel_run(run.id)
+                        raise AgentRunTimeout(
+                            "overall_timeout",
+                            "Agent run exceeded the overall task timeout.",
+                        )
+
+                    wait_timeout = min(
+                        settings.agent_run_idle_timeout_seconds,
+                        max(1, overall_remaining),
+                    )
+                    timeout_type = (
+                        "overall_timeout"
+                        if wait_timeout < settings.agent_run_idle_timeout_seconds
+                        else "idle_timeout"
+                    )
                     try:
                         chunk = await asyncio.wait_for(
                             stream.__anext__(),
-                            timeout=AGENT_RUN_IDLE_TIMEOUT_SECONDS,
+                            timeout=wait_timeout,
                         )
                     except StopAsyncIteration:
                         break
-                    except asyncio.TimeoutError as error:
+                    except TimeoutError as error:
                         if hasattr(adapter, "cancel_run"):
                             await adapter.cancel_run(run.id)
-                        raise TimeoutError(
-                            f"Agent run timed out after {AGENT_RUN_IDLE_TIMEOUT_SECONDS} seconds without output."
+                        if timeout_type == "overall_timeout":
+                            raise AgentRunTimeout(
+                                "overall_timeout",
+                                "Agent run exceeded the overall task timeout.",
+                            ) from error
+                        raise AgentRunTimeout(
+                            "idle_timeout",
+                            (
+                                "Hermes did not emit output within "
+                                f"{settings.agent_run_idle_timeout_seconds} seconds."
+                            ),
                         ) from error
 
                     if await is_agent_run_cancelled(db, run.id):
@@ -692,13 +758,25 @@ async def stream_session_message(
                 and any(artifact.type == "html_page" for artifact in discovered_artifacts)
                 and not any(artifact.type == "ppt_deck" for artifact in discovered_artifacts)
             ):
-                pptx_artifact = create_pptx_from_html_artifacts(
-                    session_id,
-                    discovered_artifacts,
-                    run.id,
-                )
-                if pptx_artifact is not None:
-                    discovered_artifacts.append(pptx_artifact)
+                try:
+                    pptx_artifact = create_pptx_from_html_artifacts(
+                        session_id,
+                        discovered_artifacts,
+                        run.id,
+                        settings.agent_run_ppt_export_timeout_seconds,
+                    )
+                    if pptx_artifact is not None:
+                        discovered_artifacts.append(pptx_artifact)
+                except subprocess.TimeoutExpired as error:
+                    if hasattr(adapter, "cancel_run"):
+                        await adapter.cancel_run(run.id)
+                    raise AgentRunTimeout(
+                        "ppt_export_timeout",
+                        (
+                            "PPTX export exceeded "
+                            f"{settings.agent_run_ppt_export_timeout_seconds} seconds."
+                        ),
+                    ) from error
 
             stored_artifacts = await persist_discovered_artifacts(
                 db,
@@ -814,6 +892,37 @@ async def stream_session_message(
                     "session": to_session(conversation).model_dump(by_alias=True),
                     "runId": run.id if run is not None else None,
                     "status": "cancelled",
+                },
+            )
+        except AgentRunTimeout as error:
+            logger.warning("Agent stream timed out: %s", error)
+            if run is not None:
+                from app.api.routes.agent_runs import finish_db_agent_run
+
+                await finish_db_agent_run(
+                    db,
+                    run,
+                    status="failed",
+                    label=f"Agent run timeout: {error.timeout_type}",
+                    error=str(error),
+                )
+            timeout_message = await persist_message(
+                db,
+                session_id,
+                "assistant",
+                f"Agent runtime timeout: {error}",
+            )
+            conversation = await refresh_conversation(db, session_id)
+            conversation.status = "failed"
+            await db.commit()
+            conversation = await refresh_conversation(db, session_id)
+            yield sse(
+                "assistant_done",
+                {
+                    "message": to_message(timeout_message).model_dump(by_alias=True),
+                    "session": to_session(conversation).model_dump(by_alias=True),
+                    "runId": run.id if run is not None else None,
+                    "status": "failed",
                 },
             )
         except asyncio.CancelledError:

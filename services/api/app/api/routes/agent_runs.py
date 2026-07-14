@@ -1,3 +1,4 @@
+import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 
@@ -99,8 +100,10 @@ def to_agent_run_event_schema(event: DBAgentRunEvent, run: DBAgentRun) -> schema
     payload = event.payload or {}
     return schemas.AgentRunEvent(
         run_id=run.id,
+        event_type=event.event_type,
         status=payload.get("status") or run.status,
         progress=int(payload.get("progress") or run.progress or 0),
+        payload=payload,
         completed_at=(
             run.updated_at.isoformat()
             if (payload.get("status") or run.status) in TERMINAL_RUN_STATUSES
@@ -377,14 +380,28 @@ async def cancel_agent_run(
     run = await get_db_agent_run(db, run_id, current_user)
     await get_conversation_or_404(db, run.conversation_id, current_user, require_write=True)
     _, adapter = _resolve_adapter(adapter_key=run.adapter_key)
+    adapter_cancelled = False
+    adapter_error = None
     if adapter is not None:
-        await adapter.cancel_run(run_id)
+        try:
+            await adapter.cancel_run(run_id)
+            adapter_cancelled = True
+        except Exception as error:
+            adapter_error = str(error)
     event = await finish_db_agent_run(
         db,
         run,
         status="cancelled",
         label="Agent run cancelled",
     )
+    event.payload = {
+        **(event.payload or {}),
+        "adapterKey": run.adapter_key,
+        "adapterCancelled": adapter_cancelled,
+        "adapterError": adapter_error,
+    }
+    await db.commit()
+    await db.refresh(event)
     events = await list_run_events(db, run_id)
     if event not in events:
         events.append(event)
@@ -397,15 +414,25 @@ async def stream_agent_run_events(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> StreamingResponse:
-    run = await get_db_agent_run(db, run_id, current_user)
+    await get_db_agent_run(db, run_id, current_user)
 
     async def event_stream():
-        events = await list_run_events(db, run_id)
-        for event in events:
-            api_event = to_agent_run_event_schema(event, run)
-            yield (
-                "event: agent_run_event\n"
-                f"data: {json.dumps(api_event.model_dump(by_alias=True), ensure_ascii=False)}\n\n"
-            )
+        sent_event_ids: set[str] = set()
+        while True:
+            run = await get_db_agent_run(db, run_id, current_user)
+            events = await list_run_events(db, run_id)
+            for event in events:
+                if event.id in sent_event_ids:
+                    continue
+                sent_event_ids.add(event.id)
+                api_event = to_agent_run_event_schema(event, run)
+                yield (
+                    "event: agent_run_event\n"
+                    f"data: {json.dumps(api_event.model_dump(by_alias=True), ensure_ascii=False)}\n\n"
+                )
+            if run.status in TERMINAL_RUN_STATUSES:
+                break
+            yield ": heartbeat\n\n"
+            await asyncio.sleep(settings.agent_run_event_poll_interval_seconds)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")

@@ -294,6 +294,7 @@ export const mockAdapter: WebAgentApiAdapter = {
         const now = new Date().toISOString();
         onEvent({
           completedAt: step.status === "completed" ? now : undefined,
+          eventType: step.status === "completed" ? "completed" : "stage_update",
           progress: step.progress,
           runId,
           status: step.status,

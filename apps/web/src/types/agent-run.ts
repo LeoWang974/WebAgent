@@ -26,13 +26,16 @@ export interface AgentRun {
   completedAt?: string;
   error?: string;
   output?: string;
+  adapterKey?: string;
 }
 
 export interface AgentRunEvent {
   runId: string;
+  eventType: string;
   status: AgentRunStatus;
   progress: number;
   step: AgentRunStep;
+  payload?: Record<string, unknown>;
   completedAt?: string;
   error?: string;
   output?: string;

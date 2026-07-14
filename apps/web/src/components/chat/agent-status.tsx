@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import {
   Check,
   ClipboardList,
@@ -59,14 +60,23 @@ export function AgentStatus() {
               </div>
             </div>
           </div>
-          <button
-            className="flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
-            onClick={openDetails}
-            type="button"
-          >
-            <ClipboardList className="size-3.5" />
-            {t("agentRunShowDetails")}
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <Link
+              className="flex h-8 items-center gap-1.5 rounded-md border px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+              href={`/app/runs/${run.id}`}
+            >
+              <ClipboardList className="size-3.5" />
+              详情页
+            </Link>
+            <button
+              className="flex h-8 items-center gap-1.5 rounded-md border px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+              onClick={openDetails}
+              type="button"
+            >
+              <ClipboardList className="size-3.5" />
+              {t("agentRunShowDetails")}
+            </button>
+          </div>
         </div>
 
         <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted">

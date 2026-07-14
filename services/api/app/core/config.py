@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     hermes_cli_path: str = "/home/zhuchangbiaozhu_xyl/.local/bin/hermes"
     hermes_home: str = "/home/zhuchangbiaozhu_xyl/.hermes"
     hermes_wsl_distribution: str = "Ubuntu"
+    agent_run_idle_timeout_seconds: int = 30 * 60
+    agent_run_overall_timeout_seconds: int = 2 * 60 * 60
+    agent_run_ppt_export_timeout_seconds: int = 180
+    agent_run_event_poll_interval_seconds: float = 1.0
 
     @cached_property
     def cors_origins(self) -> list[str]:

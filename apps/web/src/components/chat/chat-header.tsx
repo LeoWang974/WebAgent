@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Bot, Globe2, Lock, Share2, Users, X } from "lucide-react";
+import { Bot, Check, Globe2, Lock, Pencil, Share2, Users, X } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { getStatusDotClass, getStatusLabelKey } from "@/lib/status";
 import { useChatStore } from "@/stores";
@@ -9,24 +9,36 @@ import { useChatStore } from "@/stores";
 export function ChatHeader() {
   const { t } = useI18n();
   const [accessOpen, setAccessOpen] = useState(false);
+  const [editingTitle, setEditingTitle] = useState(false);
   const [shareEmail, setShareEmail] = useState("");
+  const [titleDraft, setTitleDraft] = useState("");
   const agentRuns = useChatStore((state) => state.agentRuns);
   const currentSessionId = useChatStore((state) => state.currentSessionId);
   const sessions = useChatStore((state) => state.sessions);
+  const renameSession = useChatStore((state) => state.renameSession);
   const setSessionVisibility = useChatStore((state) => state.setSessionVisibility);
   const shareSession = useChatStore((state) => state.shareSession);
   const sharingSessionId = useChatStore((state) => state.sharingSessionId);
   const unshareSession = useChatStore((state) => state.unshareSession);
-  const currentSession = sessions.find(
-    (session) => session.id === currentSessionId,
-  );
+  const currentSession = sessions.find((session) => session.id === currentSessionId);
   const currentRun = agentRuns.find((run) => run.sessionId === currentSessionId);
   const status = currentRun?.status ?? currentSession?.status ?? "ready";
   const visibility = currentSession?.visibility ?? "private";
   const AccessIcon = visibility === "public" ? Globe2 : visibility === "shared" ? Users : Lock;
-  const accessLabel =
-    visibility === "public" ? "公开" : visibility === "shared" ? "共享" : "私有";
+  const accessLabel = visibility === "public" ? "公开" : visibility === "shared" ? "共享" : "私有";
   const isSharing = sharingSessionId === currentSessionId;
+
+  async function saveTitle() {
+    if (!currentSession) {
+      return;
+    }
+
+    const nextTitle = titleDraft.trim();
+    if (nextTitle) {
+      await renameSession(currentSession.id, nextTitle);
+    }
+    setEditingTitle(false);
+  }
 
   return (
     <div className="relative flex h-14 items-center justify-between border-b border-[#ededeb] px-5">
@@ -35,9 +47,58 @@ export function ChatHeader() {
           <Bot className="size-4" />
         </div>
         <div className="min-w-0">
-          <h1 className="truncate text-sm font-semibold">
-            {currentSession?.title ?? t("defaultConversation")}
-          </h1>
+          {editingTitle && currentSession ? (
+            <form
+              className="flex min-w-0 items-center gap-1"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void saveTitle();
+              }}
+            >
+              <input
+                autoFocus
+                className="h-7 min-w-0 max-w-[360px] rounded-md border border-[#d8d6cf] bg-white px-2 text-sm font-semibold outline-none focus:border-[#242424]"
+                onBlur={() => {
+                  void saveTitle();
+                }}
+                onChange={(event) => setTitleDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    setEditingTitle(false);
+                  }
+                }}
+                value={titleDraft}
+              />
+              <button
+                aria-label="保存会话名"
+                className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-[#f2f2ef] hover:text-foreground"
+                type="submit"
+              >
+                <Check className="size-3.5" />
+              </button>
+            </form>
+          ) : (
+            <div className="flex min-w-0 items-center gap-1.5">
+              <h1 className="truncate text-sm font-semibold">
+                {currentSession?.title ?? t("defaultConversation")}
+              </h1>
+              {currentSession ? (
+                <button
+                  aria-label="重命名会话"
+                  className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-[#f2f2ef] hover:text-foreground"
+                  onClick={() => {
+                    setTitleDraft(currentSession.title);
+                    setEditingTitle(true);
+                  }}
+                  title="重命名会话"
+                  type="button"
+                >
+                  <Pencil className="size-3.5" />
+                </button>
+              ) : null}
+            </div>
+          )}
           <p className="text-xs text-muted-foreground">
             sensenova / {currentSession?.type ?? "chat"}
           </p>

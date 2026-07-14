@@ -1,9 +1,9 @@
 "use client";
 
-import type { MouseEvent } from "react";
+import type { FormEvent, MouseEvent } from "react";
 import { useI18n } from "@/lib/i18n";
 import { getStatusDotClass, getStatusLabelKey } from "@/lib/status";
-import { Check, Pin, PinOff, Trash2, X } from "lucide-react";
+import { Check, Pencil, Pin, PinOff, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import type { SessionStatus } from "@/types";
 
@@ -12,6 +12,7 @@ interface SessionItemProps {
   href?: string;
   onClick?: () => void;
   onDelete?: () => void;
+  onRename?: (title: string) => Promise<void> | void;
   onTogglePinned?: () => void;
   pinned?: boolean;
   status?: SessionStatus;
@@ -25,6 +26,7 @@ export function SessionItem({
   href,
   onClick,
   onDelete,
+  onRename,
   onTogglePinned,
   pinned = false,
   status = "active",
@@ -34,9 +36,27 @@ export function SessionItem({
 }: SessionItemProps) {
   const { t } = useI18n();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draftTitle, setDraftTitle] = useState(title);
+  const [savingTitle, setSavingTitle] = useState(false);
   const className = `group flex w-full items-start gap-1 rounded-md hover:bg-[#e9e9e2] ${
     active ? "bg-white shadow-sm ring-1 ring-[#deded8]" : ""
   }`;
+  async function saveTitle(event?: FormEvent<HTMLFormElement>) {
+    event?.preventDefault();
+    const nextTitle = draftTitle.trim();
+    if (!nextTitle || nextTitle === title) {
+      setDraftTitle(title);
+      setEditing(false);
+      return;
+    }
+
+    setSavingTitle(true);
+    await onRename?.(nextTitle);
+    setSavingTitle(false);
+    setEditing(false);
+  }
+
   const content = (
     <span className="min-w-0 flex-1">
       <span className="flex min-w-0 items-center justify-between gap-2">
@@ -60,21 +80,64 @@ export function SessionItem({
 
   return (
     <div className={className}>
-      <button
-        className="min-w-0 flex-1 px-2 py-1.5 text-left"
-        onClick={(event: MouseEvent<HTMLButtonElement>) => {
-          event.preventDefault();
-          onClick?.();
-          if (href && window.location.pathname !== href) {
-            window.location.assign(href);
-          }
-        }}
-        type="button"
-      >
-        {content}
-      </button>
+      {editing ? (
+        <form
+          className="min-w-0 flex-1 px-2 py-1.5"
+          onSubmit={(event) => {
+            void saveTitle(event);
+          }}
+        >
+          <input
+            autoFocus
+            className="h-7 w-full rounded-md border border-[#d8d6cf] bg-white px-2 text-[13px] outline-none focus:border-[#242424]"
+            disabled={savingTitle}
+            onBlur={() => {
+              void saveTitle();
+            }}
+            onChange={(event) => setDraftTitle(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                setDraftTitle(title);
+                setEditing(false);
+              }
+            }}
+            value={draftTitle}
+          />
+        </form>
+      ) : (
+        <button
+          className="min-w-0 flex-1 px-2 py-1.5 text-left"
+          onClick={(event: MouseEvent<HTMLButtonElement>) => {
+            event.preventDefault();
+            onClick?.();
+            if (href && window.location.pathname !== href) {
+              window.location.assign(href);
+            }
+          }}
+          type="button"
+        >
+          {content}
+        </button>
+      )}
       {!confirmingDelete ? (
         <div className="mr-1 mt-1 flex shrink-0 items-center gap-1">
+          <button
+            aria-label="重命名会话"
+            className={`flex size-6 items-center justify-center rounded-md text-muted-foreground opacity-0 hover:bg-white hover:text-foreground group-hover:opacity-100 ${
+              active || editing ? "opacity-100" : ""
+            }`}
+            onClick={(event: MouseEvent<HTMLButtonElement>) => {
+              event.preventDefault();
+              event.stopPropagation();
+              setDraftTitle(title);
+              setEditing(true);
+            }}
+            title="重命名会话"
+            type="button"
+          >
+            <Pencil className="size-3.5" />
+          </button>
           <button
             aria-label={pinned ? t("unpinConversation") : t("pinConversation")}
             className={`flex size-6 items-center justify-center rounded-md text-muted-foreground opacity-0 hover:bg-white hover:text-foreground group-hover:opacity-100 ${

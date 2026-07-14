@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Download, ExternalLink } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 
 interface PreviewImage {
@@ -26,6 +27,20 @@ export function ImageViewer({ images, title }: ImageViewerProps) {
 
   if (!selectedImage) {
     return null;
+  }
+
+  async function downloadSelectedImage() {
+    if (!selectedImage?.url) {
+      return;
+    }
+    const response = await fetch(selectedImage.url);
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${selectedImage.id || "image"}.png`;
+    anchor.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 
   const renderImage = (image: PreviewImage, className: string) => {
@@ -54,10 +69,38 @@ export function ImageViewer({ images, title }: ImageViewerProps) {
     <div className="space-y-4">
       <div className="rounded-lg border bg-white p-4 shadow-sm">
         <div className="mb-3">
-          <h2 className="text-sm font-semibold">{title}</h2>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {t("generatedImagePreview")}
-          </p>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="truncate text-sm font-semibold">{title}</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {t("generatedImagePreview")} · {images.length} 张
+              </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <button
+                className="flex size-8 items-center justify-center rounded-md border text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
+                disabled={!selectedImage.url}
+                onClick={() => {
+                  if (selectedImage.url) {
+                    window.open(selectedImage.url, "_blank", "noopener,noreferrer");
+                  }
+                }}
+                title="打开原图"
+                type="button"
+              >
+                <ExternalLink className="size-4" />
+              </button>
+              <button
+                className="flex size-8 items-center justify-center rounded-md border text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
+                disabled={!selectedImage.url}
+                onClick={() => void downloadSelectedImage()}
+                title="下载当前图片"
+                type="button"
+              >
+                <Download className="size-4" />
+              </button>
+            </div>
+          </div>
         </div>
         <div className="flex max-h-[70vh] min-h-[260px] items-center justify-center overflow-auto rounded-xl border bg-[#f7f7f5] p-2 shadow-inner">
           {renderImage(
@@ -70,7 +113,7 @@ export function ImageViewer({ images, title }: ImageViewerProps) {
         </p>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
         {images.map((image) => (
           <button
             className={`rounded-lg border bg-white p-2 shadow-sm hover:bg-[#fafafa] ${

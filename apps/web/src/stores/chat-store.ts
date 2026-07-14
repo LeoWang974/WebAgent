@@ -3,6 +3,7 @@
 import { create } from "zustand";
 import { shouldSelectCreatedArtifact } from "@/lib/artifact-selection";
 import { settingsApi, webAgentApi } from "@/services";
+import type { AgentRunUnsubscribe } from "@/services/adapters/types";
 import { useUiStore } from "./ui-store";
 import type {
   AgentRun,
@@ -51,6 +52,7 @@ interface ChatState {
   hydrate: () => Promise<void>;
   retryHydrate: () => Promise<void>;
   refreshAgentRun: (runId: string) => Promise<AgentRun | undefined>;
+  renameSession: (sessionId: string, title: string) => Promise<void>;
   selectArtifact: (artifactId: string) => void;
   selectModel: (modelId: string) => void;
   selectSession: (sessionId: string) => void;
@@ -74,6 +76,7 @@ function createId(prefix: string) {
 
 let activeRequestAbortController: AbortController | undefined;
 let feedbackTimers: number[] = [];
+const agentRunUnsubscribers = new Map<string, AgentRunUnsubscribe>();
 const TERMINAL_RUN_STATUSES: AgentRun["status"][] = [
   "completed",
   "failed",
@@ -88,6 +91,29 @@ function clearFeedbackTimers() {
 
 function isTerminalRunStatus(status: AgentRun["status"]) {
   return TERMINAL_RUN_STATUSES.includes(status);
+}
+
+function unsubscribeAgentRun(runId: string) {
+  agentRunUnsubscribers.get(runId)?.();
+  agentRunUnsubscribers.delete(runId);
+}
+
+function subscribeAgentRunEvents(
+  get: () => ChatState,
+  runId: string,
+) {
+  if (agentRunUnsubscribers.has(runId)) {
+    return;
+  }
+
+  const unsubscribe = webAgentApi.subscribeAgentRun(runId, (event) => {
+    get().applyAgentRunEvent(event);
+    if (isTerminalRunStatus(event.status)) {
+      unsubscribeAgentRun(runId);
+      void get().refreshAgentRun(runId);
+    }
+  });
+  agentRunUnsubscribers.set(runId, unsubscribe);
 }
 
 function detectRequestedSkill(content: string, explicitSkillKey?: SkillKey): SkillKey | undefined {
@@ -106,6 +132,28 @@ function detectRequestedSkill(content: string, explicitSkillKey?: SkillKey): Ski
   return skillAliases.find(([, aliases]) =>
     aliases.some((alias) => normalized.includes(alias.toLowerCase())),
   )?.[0];
+}
+
+function isDefaultSessionTitle(title?: string) {
+  const normalized = (title ?? "").trim().toLowerCase();
+  return !normalized || normalized === "新对话" || normalized === "new conversation";
+}
+
+function generateSessionTitle(content: string, skillKey?: SkillKey) {
+  const skillPrefix: Record<SkillKey, string> = {
+    data_analysis: "数据分析",
+    deep_research: "深度调研",
+    ppt_generation: "PPT生成",
+    u1_image: "图像生成",
+  };
+  const cleaned = content
+    .replace(/[`*_>#\[\]{}()（）《》"“”'‘’]/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^(请|帮我|帮我一下|麻烦|使用|基于|最后|现在|接下来|生成|分析|写一份|做一份)+/i, "")
+    .trim();
+  const compact = cleaned.length > 22 ? `${cleaned.slice(0, 22)}...` : cleaned;
+  const fallback = skillKey ? skillPrefix[skillKey] : "新任务";
+  return compact ? `${skillKey ? `${skillPrefix[skillKey]}：` : ""}${compact}` : fallback;
 }
 
 function setSwitchingState(
@@ -190,7 +238,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   applyAgentRunEvent: (event) => {
     set((state) => ({
       activeAgentRunId:
-        isTerminalRunStatus(event.status)
+        state.activeAgentRunId === event.runId && isTerminalRunStatus(event.status)
           ? undefined
           : state.activeAgentRunId,
       agentRuns: state.agentRuns.map((run) => {
@@ -198,11 +246,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
           return run;
         }
 
-        const previousSteps = run.steps.map((step) =>
-          step.status === "running"
+        const hasExistingStep = run.steps.some((step) => step.id === event.step.id);
+        const previousSteps = run.steps.map((step) => {
+          if (step.id === event.step.id) {
+            return event.step;
+          }
+          return step.status === "running"
             ? { ...step, status: "completed" as const }
-            : step,
-        );
+            : step;
+        });
 
         return {
           ...run,
@@ -210,7 +262,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           error: event.error,
           progress: event.progress,
           status: event.status,
-          steps: [...previousSteps, event.step],
+          steps: hasExistingStep ? previousSteps : [...previousSteps, event.step],
         };
       }),
     }));
@@ -357,6 +409,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         sessions,
         skills,
       });
+      agentRuns
+        .filter((run) => !isTerminalRunStatus(run.status))
+        .forEach((run) => subscribeAgentRunEvents(get, run.id));
     } catch (error) {
       set({
         error: error instanceof Error ? error.message : "Failed to load workspace data.",
@@ -383,6 +438,43 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return undefined;
     }
   },
+  renameSession: async (sessionId, title) => {
+    const nextTitle = title.trim();
+    if (!nextTitle) {
+      return;
+    }
+
+    const previousSession = get().sessions.find((session) => session.id === sessionId);
+    if (previousSession?.title === nextTitle) {
+      return;
+    }
+
+    const now = new Date().toISOString();
+    set((state) => ({
+      error: undefined,
+      sessions: state.sessions.map((session) =>
+        session.id === sessionId
+          ? { ...session, title: nextTitle, updatedAt: now }
+          : session,
+      ),
+    }));
+
+    try {
+      const session = await webAgentApi.updateSession(sessionId, { title: nextTitle });
+      set((state) => ({
+        sessions: state.sessions.map((item) => (item.id === sessionId ? session : item)),
+      }));
+    } catch (error) {
+      set((state) => ({
+        error: error instanceof Error ? error.message : "Failed to rename session.",
+        sessions: previousSession
+          ? state.sessions.map((session) =>
+              session.id === sessionId ? previousSession : session,
+            )
+          : state.sessions,
+      }));
+    }
+  },
   selectArtifact: (artifactId) => set({ selectedArtifactId: artifactId }),
   selectModel: (modelId) => set({ selectedModelId: modelId }),
   selectSession: (sessionId) => {
@@ -395,6 +487,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       currentSessionId: sessionId,
       selectedArtifactId: artifact?.id,
     });
+    if (activeRun) {
+      subscribeAgentRunEvents(get, activeRun.id);
+    }
     setSwitchingState(set, get, sessionId);
   },
   setSessionVisibility: async (sessionId, visibility) => {
@@ -449,6 +544,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const modelId = get().selectedModelId;
     const modelName = get().models.find((model) => model.id === modelId)?.name ?? "Agent";
     const requestedSkill = detectRequestedSkill(trimmed, skillKey);
+    const currentSession = get().sessions.find((session) => session.id === sessionId);
+    const shouldAutoRename = isDefaultSessionTitle(currentSession?.title);
+    const autoTitle = generateSessionTitle(trimmed, requestedSkill);
     if (!sessionId) {
       return;
     }
@@ -489,9 +587,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
       error: undefined,
       messages: [...state.messages, optimisticUserMessage, pendingAssistantMessage],
       sessions: state.sessions.map((session) =>
-        session.id === sessionId ? { ...session, status: "running", updatedAt: now } : session,
+        session.id === sessionId
+          ? {
+              ...session,
+              status: "running",
+              title: shouldAutoRename ? autoTitle : session.title,
+              updatedAt: now,
+            }
+          : session,
       ),
     }));
+
+    if (shouldAutoRename) {
+      void webAgentApi.updateSession(sessionId, { title: autoTitle }).then((session) => {
+        set((state) => ({
+          sessions: state.sessions.map((item) => (item.id === sessionId ? session : item)),
+        }));
+      }).catch((error) => {
+        set({ error: error instanceof Error ? error.message : "Failed to rename session." });
+      });
+    }
 
     try {
       await webAgentApi.sendMessageStream(
@@ -824,6 +939,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         set({ error: error instanceof Error ? error.message : "Failed to cancel run." });
       })
       .finally(() => {
+        unsubscribeAgentRun(runId);
         activeRequestAbortController?.abort();
         activeRequestAbortController = undefined;
       });

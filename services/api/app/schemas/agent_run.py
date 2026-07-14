@@ -1,4 +1,5 @@
 from typing import Literal
+from typing import Any
 
 from app.schemas.base import ApiModel
 from app.schemas.session import SkillKey
@@ -46,9 +47,11 @@ class AgentRunCreate(ApiModel):
 
 class AgentRunEvent(ApiModel):
     run_id: str
+    event_type: str
     status: AgentRunStatus
     progress: int
     step: AgentRunStep
+    payload: dict[str, Any] | None = None
     completed_at: str | None = None
     error: str | None = None
     output: str | None = None

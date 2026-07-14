@@ -1,6 +1,7 @@
 "use client";
 
 import { ArtifactPreviewContent } from "./artifact-preview-content";
+import { ArtifactGroupedList } from "./artifact-grouped-list";
 import { downloadArtifact } from "@/lib/artifact-actions";
 import { useChatStore, useUiStore } from "@/stores";
 import { Download, Maximize2, X } from "lucide-react";
@@ -9,11 +10,14 @@ import { useI18n } from "@/lib/i18n";
 export function ArtifactDrawer() {
   const { t } = useI18n();
   const artifacts = useChatStore((state) => state.artifacts);
+  const currentSessionId = useChatStore((state) => state.currentSessionId);
   const selectedArtifactId = useChatStore((state) => state.selectedArtifactId);
+  const selectArtifact = useChatStore((state) => state.selectArtifact);
   const open = useUiStore((state) => state.artifactDrawerOpen);
   const close = useUiStore((state) => state.closeArtifactDrawer);
   const openFullscreen = useUiStore((state) => state.openArtifactFullscreen);
   const artifact = artifacts.find((item) => item.id === selectedArtifactId);
+  const sessionArtifacts = artifacts.filter((item) => item.sessionId === currentSessionId);
 
   if (!open) {
     return null;
@@ -70,6 +74,11 @@ export function ArtifactDrawer() {
           </div>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          <ArtifactGroupedList
+            artifacts={sessionArtifacts}
+            onSelect={selectArtifact}
+            selectedArtifactId={selectedArtifactId}
+          />
           <ArtifactPreviewContent artifact={artifact} />
         </div>
       </aside>

@@ -53,6 +53,7 @@ export function subscribeToMockAgentRun({
 
       onEvent({
         completedAt: step.status === "completed" ? now : undefined,
+        eventType: step.status === "completed" ? "completed" : "stage_update",
         progress: step.progress,
         runId,
         status: step.status,
@@ -70,4 +71,3 @@ export function subscribeToMockAgentRun({
     timers.forEach((timer) => window.clearTimeout(timer));
   };
 }
-

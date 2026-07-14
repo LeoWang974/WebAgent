@@ -130,8 +130,10 @@ def to_message(message: Message) -> schemas.Message:
 
 def to_artifact(artifact: Artifact) -> schemas.Artifact:
     return schemas.Artifact(
+        created_at=artifact.created_at.isoformat(),
         id=artifact.id,
         session_id=artifact.conversation_id,
+        run_id=artifact.run_id,
         type=artifact.type,
         title=artifact.title,
         status=artifact.status,

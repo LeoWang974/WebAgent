@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, Download, Loader2, Presentation } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, Loader2, Maximize, Minus, Plus, Presentation } from "lucide-react";
 import { downloadArtifact } from "@/lib/artifact-actions";
 import { webAgentApi } from "@/services";
 import type { Artifact, SlidePreview } from "@/types";
@@ -15,6 +15,7 @@ interface SlideFrameProps {
   className?: string;
   content: string;
   interactive?: boolean;
+  zoom?: number;
   title: string;
 }
 
@@ -25,7 +26,13 @@ function slideTitle(slide: SlidePreview) {
   return slide.title || `Slide ${slide.index}`;
 }
 
-function SlideFrame({ className = "", content, interactive = false, title }: SlideFrameProps) {
+function SlideFrame({
+  className = "",
+  content,
+  interactive = false,
+  title,
+  zoom,
+}: SlideFrameProps) {
   const frameRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
 
@@ -64,7 +71,7 @@ function SlideFrame({ className = "", content, interactive = false, title }: Sli
         srcDoc={content}
         style={{
           height: SLIDE_HEIGHT,
-          transform: `scale(${scale})`,
+          transform: `scale(${zoom ?? scale})`,
           transformOrigin: "top left",
           width: SLIDE_WIDTH,
         }}
@@ -80,6 +87,7 @@ export function PptArtifactViewer({ artifact }: PptArtifactViewerProps) {
   const [loading, setLoading] = useState(true);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [slides, setSlides] = useState<SlidePreview[]>([]);
+  const [zoom, setZoom] = useState<number | undefined>();
 
   useEffect(() => {
     let cancelled = false;
@@ -118,6 +126,7 @@ export function PptArtifactViewer({ artifact }: PptArtifactViewerProps) {
     }
     return `${selectedIndex + 1} / ${slides.length}`;
   }, [selectedIndex, slides.length]);
+  const zoomLabel = zoom ? `${Math.round(zoom * 100)}%` : "适配";
 
   if (loading) {
     return (
@@ -158,6 +167,38 @@ export function PptArtifactViewer({ artifact }: PptArtifactViewerProps) {
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
             <button
+              className="flex size-8 items-center justify-center rounded-md border text-muted-foreground hover:bg-muted hover:text-foreground"
+              onClick={() => setZoom((value) => Math.max(0.5, (value ?? 1) - 0.1))}
+              title="缩小"
+              type="button"
+            >
+              <Minus className="size-4" />
+            </button>
+            <button
+              className="h-8 min-w-12 rounded-md border px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+              onClick={() => setZoom(undefined)}
+              title="适配宽高"
+              type="button"
+            >
+              {zoomLabel}
+            </button>
+            <button
+              className="flex size-8 items-center justify-center rounded-md border text-muted-foreground hover:bg-muted hover:text-foreground"
+              onClick={() => setZoom((value) => Math.min(1.5, (value ?? 1) + 0.1))}
+              title="放大"
+              type="button"
+            >
+              <Plus className="size-4" />
+            </button>
+            <button
+              className="flex size-8 items-center justify-center rounded-md border text-muted-foreground hover:bg-muted hover:text-foreground"
+              onClick={() => setZoom(undefined)}
+              title="适配宽高"
+              type="button"
+            >
+              <Maximize className="size-4" />
+            </button>
+            <button
               className="flex size-8 items-center justify-center rounded-md border text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
               disabled={selectedIndex === 0}
               onClick={() => setSelectedIndex((value) => Math.max(0, value - 1))}
@@ -176,19 +217,23 @@ export function PptArtifactViewer({ artifact }: PptArtifactViewerProps) {
             <button
               className="flex size-8 items-center justify-center rounded-md border text-muted-foreground hover:bg-muted hover:text-foreground"
               onClick={() => void downloadArtifact(artifact)}
-              title="Download PPTX"
+              title="下载 PPTX"
               type="button"
             >
               <Download className="size-4" />
             </button>
           </div>
         </div>
+        <div className="border-b bg-[#fbfbfa] px-3 py-2 text-xs text-muted-foreground">
+          预览来自浏览器内 HTML 渲染；下载按钮获取 PPTX 原文件。
+        </div>
         <div className="bg-[#eeeeea] p-3">
           <SlideFrame
-            className="shadow-inner"
+            className={zoom ? "overflow-auto shadow-inner" : "shadow-inner"}
             content={selectedSlide.content ?? ""}
             interactive
             title={slideTitle(selectedSlide)}
+            zoom={zoom}
           />
         </div>
       </div>

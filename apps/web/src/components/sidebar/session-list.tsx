@@ -56,6 +56,7 @@ export function SessionList() {
   const deleteSession = useChatStore((state) => state.deleteSession);
   const switchingSessionId = useChatStore((state) => state.switchingSessionId);
   const selectSession = useChatStore((state) => state.selectSession);
+  const renameSession = useChatStore((state) => state.renameSession);
   const toggleSessionPinned = useChatStore((state) => state.toggleSessionPinned);
   const query = useUiStore((state) => state.sessionSearchQuery);
   const closeArtifactDrawer = useUiStore((state) => state.closeArtifactDrawer);
@@ -135,6 +136,7 @@ export function SessionList() {
                     }
                   }}
                   onTogglePinned={() => toggleSessionPinned(session.id)}
+                  onRename={(title) => renameSession(session.id, title)}
                   pinned={session.pinned}
                   status={session.status}
                   switching={session.id === switchingSessionId}

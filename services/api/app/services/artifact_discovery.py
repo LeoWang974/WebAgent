@@ -308,7 +308,12 @@ def _path_to_wsl(path: Path) -> str:
     return f"/mnt/{drive}/{rest}" if drive else resolved.as_posix()
 
 
-def _run_pptx_export(deck_dir: Path, output_dir: Path, output_filename: str) -> Path | None:
+def _run_pptx_export(
+    deck_dir: Path,
+    output_dir: Path,
+    output_filename: str,
+    timeout_seconds: int,
+) -> Path | None:
     script_path = f"{settings.hermes_home.rstrip('/')}/skills/sn-ppt-standard/scripts/export_pptx/html_to_pptx.mjs"
     if os.name == "nt":
         command = (
@@ -332,7 +337,7 @@ def _run_pptx_export(deck_dir: Path, output_dir: Path, output_filename: str) -> 
             encoding="utf-8",
             errors="replace",
             text=True,
-            timeout=180,
+            timeout=timeout_seconds,
             check=False,
         )
     else:
@@ -352,7 +357,7 @@ def _run_pptx_export(deck_dir: Path, output_dir: Path, output_filename: str) -> 
             encoding="utf-8",
             errors="replace",
             text=True,
-            timeout=180,
+            timeout=timeout_seconds,
             check=False,
         )
 
@@ -474,6 +479,7 @@ def create_pptx_from_html_artifacts(
     session_id: str,
     html_artifacts: list[schemas.Artifact],
     run_id: str | None,
+    timeout_seconds: int | None = None,
 ) -> schemas.Artifact | None:
     html_paths: list[Path] = []
     for artifact in html_artifacts:
@@ -505,7 +511,12 @@ def create_pptx_from_html_artifacts(
         shutil.copy2(source, pages_dir / f"page_{index:03d}.html")
 
     output_filename = "agent-generated-deck.pptx"
-    output_path = _run_pptx_export(deck_dir, output_dir, output_filename)
+    output_path = _run_pptx_export(
+        deck_dir,
+        output_dir,
+        output_filename,
+        timeout_seconds or settings.agent_run_ppt_export_timeout_seconds,
+    )
     if output_path is None:
         return None
 

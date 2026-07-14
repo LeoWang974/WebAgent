@@ -1,6 +1,7 @@
 "use client";
 
 import { ArtifactPreviewContent } from "./artifact-preview-content";
+import { ArtifactGroupedList } from "./artifact-grouped-list";
 import { downloadArtifact } from "@/lib/artifact-actions";
 import { useChatStore, useUiStore } from "@/stores";
 import { Check, Download, Maximize2, MoreHorizontal, Trash2 } from "lucide-react";
@@ -33,11 +34,14 @@ export function ArtifactPanel({ dragging = false, width }: ArtifactPanelProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const artifacts = useChatStore((state) => state.artifacts);
+  const currentSessionId = useChatStore((state) => state.currentSessionId);
   const selectedArtifactId = useChatStore((state) => state.selectedArtifactId);
+  const selectArtifact = useChatStore((state) => state.selectArtifact);
   const deleteArtifact = useChatStore((state) => state.deleteArtifact);
   const panelOpen = useUiStore((state) => state.artifactPanelOpen);
   const openFullscreen = useUiStore((state) => state.openArtifactFullscreen);
   const artifact = artifacts.find((item) => item.id === selectedArtifactId);
+  const sessionArtifacts = artifacts.filter((item) => item.sessionId === currentSessionId);
 
   if (!panelOpen) {
     return null;
@@ -126,6 +130,11 @@ export function ArtifactPanel({ dragging = false, width }: ArtifactPanelProps) {
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
+        <ArtifactGroupedList
+          artifacts={sessionArtifacts}
+          onSelect={selectArtifact}
+          selectedArtifactId={selectedArtifactId}
+        />
         <ArtifactPreviewContent artifact={artifact} />
       </div>
     </aside>
