@@ -1,4 +1,4 @@
-from sqlalchemy import ForeignKey, Index, JSON, String, Text, UniqueConstraint
+from sqlalchemy import JSON, ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -17,14 +17,14 @@ class Conversation(IdMixin, TimestampMixin, Base):
 
     user = relationship("User", back_populates="conversations")
     messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan")
-    shares = relationship("ConversationShare", back_populates="conversation", cascade="all, delete-orphan")
+    shares = relationship(
+        "ConversationShare", back_populates="conversation", cascade="all, delete-orphan"
+    )
 
 
 class Message(IdMixin, TimestampMixin, Base):
     __tablename__ = "messages"
-    __table_args__ = (
-        Index("ix_messages_conversation_created", "conversation_id", "created_at"),
-    )
+    __table_args__ = (Index("ix_messages_conversation_created", "conversation_id", "created_at"),)
 
     conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id"), index=True)
     role: Mapped[str] = mapped_column(String(50))

@@ -1,3 +1,5 @@
+from typing import Annotated
+
 from fastapi import APIRouter, File, Form, UploadFile
 
 from app import schemas
@@ -13,7 +15,8 @@ async def list_files() -> list[schemas.FileAsset]:
 
 @router.post("", response_model=schemas.FileAsset)
 async def upload_file(
-    file: UploadFile = File(...), session_id: str | None = Form(default=None)
+    file: Annotated[UploadFile, File()],
+    session_id: Annotated[str | None, Form()] = None,
 ) -> schemas.FileAsset:
     content = await file.read()
     file_asset = schemas.FileAsset(
@@ -26,4 +29,3 @@ async def upload_file(
     )
     mock_store.files.insert(0, file_asset)
     return file_asset
-

@@ -1,14 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, HTTPException, status
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import schemas
+from app.api.dependencies import CurrentUser, DbSession
 from app.core.security import create_access_token, hash_password, verify_password
-from app.db.session import get_db
 from app.models import User
 from app.services.persistence import (
     ensure_user,
-    get_current_user,
     get_user_by_email,
     get_user_by_identifier,
     get_user_by_username,
@@ -37,14 +35,16 @@ def login_identifier(input_data: schemas.LoginInput) -> str:
 @router.post("/login", response_model=schemas.AuthResult)
 async def login(
     input_data: schemas.LoginInput,
-    db: AsyncSession = Depends(get_db),
+    db: DbSession,
 ) -> schemas.AuthResult:
     if len(input_data.password) < 4:
         raise HTTPException(status_code=400, detail="Password must be at least 4 characters")
 
     user = await get_user_by_identifier(db, login_identifier(input_data))
     if user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username/email or password")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username/email or password"
+        )
 
     password_matches = verify_password(input_data.password, user.hashed_password)
     if not password_matches and user.hashed_password == input_data.password:
@@ -54,7 +54,9 @@ async def login(
         password_matches = True
 
     if not password_matches:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password"
+        )
 
     return schemas.AuthResult(access_token=create_access_token(user.id), user=to_user_schema(user))
 
@@ -62,7 +64,7 @@ async def login(
 @router.post("/register", response_model=schemas.AuthResult)
 async def register(
     input_data: schemas.RegisterInput,
-    db: AsyncSession = Depends(get_db),
+    db: DbSession,
 ) -> schemas.AuthResult:
     if len(input_data.password) < 4:
         raise HTTPException(status_code=400, detail="Password must be at least 4 characters")
@@ -94,5 +96,5 @@ async def logout() -> None:
 
 
 @router.get("/me", response_model=schemas.User)
-async def me(current_user: User = Depends(get_current_user)) -> schemas.User:
+async def me(current_user: CurrentUser) -> schemas.User:
     return to_user_schema(current_user)

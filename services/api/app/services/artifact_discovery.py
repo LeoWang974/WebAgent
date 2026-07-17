@@ -4,8 +4,8 @@ import hashlib
 import json
 import os
 import re
-import shutil
 import shlex
+import shutil
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -15,7 +15,6 @@ from app import schemas
 from app.core.config import settings
 from app.schemas.artifact import ArtifactType
 from app.services import mock_store
-
 
 SUPPORTED_SUFFIXES = {".md", ".html", ".htm", ".pptx", ".png", ".jpg", ".jpeg", ".csv", ".xlsx"}
 IGNORED_PARTS = {".git", ".next", ".venv", "__pycache__", "node_modules"}
@@ -71,16 +70,12 @@ def _candidate_roots() -> list[Path]:
         Path(
             r"\\wsl.localhost\Ubuntu\home\zhuchangbiaozhu_xyl\hermes-aws-ai-agent\deep-research-reports"
         ),
-        Path(
-            r"\\wsl$\Ubuntu\home\zhuchangbiaozhu_xyl\hermes-aws-ai-agent\deep-research-reports"
-        ),
+        Path(r"\\wsl$\Ubuntu\home\zhuchangbiaozhu_xyl\hermes-aws-ai-agent\deep-research-reports"),
     ]
     deduped: list[Path] = []
     seen_suffixes: set[str] = set()
     for root in roots:
-        suffix = str(root).replace("\\\\wsl$\\Ubuntu", "").replace(
-            "\\\\wsl.localhost\\Ubuntu", ""
-        )
+        suffix = str(root).replace("\\\\wsl$\\Ubuntu", "").replace("\\\\wsl.localhost\\Ubuntu", "")
         if suffix in seen_suffixes:
             continue
         if root.exists():
@@ -314,7 +309,10 @@ def _run_pptx_export(
     output_filename: str,
     timeout_seconds: int,
 ) -> Path | None:
-    script_path = f"{settings.hermes_home.rstrip('/')}/skills/sn-ppt-standard/scripts/export_pptx/html_to_pptx.mjs"
+    script_path = (
+        f"{settings.hermes_home.rstrip('/')}"
+        "/skills/sn-ppt-standard/scripts/export_pptx/html_to_pptx.mjs"
+    )
     if os.name == "nt":
         command = (
             f"node {shlex.quote(script_path)} "
@@ -451,7 +449,9 @@ def create_artifacts_from_paths(
             continue
         metadata = artifact.metadata or {}
         content_hash = str(metadata.get("contentHash") or "")
-        normalized_path = str(metadata.get("originalNormalizedPath") or metadata.get("normalizedPath") or "")
+        normalized_path = str(
+            metadata.get("originalNormalizedPath") or metadata.get("normalizedPath") or ""
+        )
         if (
             artifact.id in existing_ids
             or str(path) in existing_paths
@@ -567,7 +567,9 @@ def discover_artifacts_since(
                 continue
             metadata = artifact.metadata or {}
             content_hash = str(metadata.get("contentHash") or "")
-            normalized_path = str(metadata.get("originalNormalizedPath") or metadata.get("normalizedPath") or "")
+            normalized_path = str(
+                metadata.get("originalNormalizedPath") or metadata.get("normalizedPath") or ""
+            )
             if (
                 artifact.id in existing_ids
                 or (normalized_path and normalized_path in existing_paths)

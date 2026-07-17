@@ -23,4 +23,3 @@ class SkillVersion(IdMixin, TimestampMixin, Base):
     version: Mapped[str] = mapped_column(String(40))
     changelog: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(50), default="published")
-

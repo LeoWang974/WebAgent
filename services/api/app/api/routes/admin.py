@@ -1,13 +1,12 @@
 from dataclasses import asdict
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import schemas
+from app.api.dependencies import CurrentUser, DbSession
 from app.core.security import hash_password
-from app.db.session import get_db
 from app.models import (
     AgentRun,
     AgentRunEvent,
@@ -20,14 +19,13 @@ from app.models import (
     User,
     UserSettings,
 )
+from app.services.cleanup_scheduler import run_configured_data_cleanup
 from app.services.persistence import (
-    get_current_user,
     get_user_by_email,
     get_user_by_username,
     normalize_email,
     normalize_username,
 )
-from app.services.cleanup_scheduler import run_configured_data_cleanup
 
 router = APIRouter()
 
@@ -56,8 +54,8 @@ def require_admin(current_user: User) -> None:
 
 @router.get("/users", response_model=list[schemas.AdminUser])
 async def list_users(
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> list[schemas.AdminUser]:
     require_admin(current_user)
     result = await db.execute(select(User).order_by(User.created_at.desc()))
@@ -71,17 +69,14 @@ async def list_users(
         .group_by(Conversation.user_id)
     )
     conversation_counts = {user_id: count for user_id, count in count_result.all()}
-    return [
-        to_user_schema(user, int(conversation_counts.get(user.id, 0)))
-        for user in users
-    ]
+    return [to_user_schema(user, int(conversation_counts.get(user.id, 0))) for user in users]
 
 
 @router.post("/users", response_model=schemas.AdminUser)
 async def create_user(
     input_data: schemas.AdminUserCreate,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> schemas.AdminUser:
     require_admin(current_user)
     email = normalize_email(input_data.email)
@@ -95,7 +90,11 @@ async def create_user(
     if username and await get_user_by_username(db, username) is not None:
         raise HTTPException(status_code=409, detail="Username is already registered")
 
-    nickname = input_data.nickname.strip() if input_data.nickname and input_data.nickname.strip() else email.split("@", 1)[0]
+    nickname = (
+        input_data.nickname.strip()
+        if input_data.nickname and input_data.nickname.strip()
+        else email.split("@", 1)[0]
+    )
     user = User(
         email=email,
         hashed_password=hash_password(input_data.password),
@@ -117,8 +116,8 @@ async def create_user(
 async def reset_user_password(
     user_id: str,
     input_data: schemas.AdminPasswordReset,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> schemas.AdminUser:
     require_admin(current_user)
     if len(input_data.new_password) < 4:
@@ -140,8 +139,8 @@ async def reset_user_password(
 @router.delete("/users/{user_id}", status_code=204)
 async def delete_user(
     user_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> None:
     require_admin(current_user)
     if user_id == current_user.id:
@@ -165,7 +164,9 @@ async def delete_user(
         await db.execute(delete(Artifact).where(Artifact.conversation_id.in_(conversation_ids)))
         await db.execute(delete(FileAsset).where(FileAsset.conversation_id.in_(conversation_ids)))
         await db.execute(delete(Message).where(Message.conversation_id.in_(conversation_ids)))
-        await db.execute(delete(ConversationShare).where(ConversationShare.conversation_id.in_(conversation_ids)))
+        await db.execute(
+            delete(ConversationShare).where(ConversationShare.conversation_id.in_(conversation_ids))
+        )
         await db.execute(delete(AgentRun).where(AgentRun.conversation_id.in_(conversation_ids)))
         await db.execute(delete(Conversation).where(Conversation.id.in_(conversation_ids)))
 
@@ -179,7 +180,7 @@ async def delete_user(
 
 @router.post("/cleanup")
 async def run_cleanup(
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser,
 ) -> dict[str, int]:
     require_admin(current_user)
     result = await run_configured_data_cleanup()

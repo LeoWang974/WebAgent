@@ -1,5 +1,4 @@
-from typing import Literal
-from typing import Any
+from typing import Any, Literal
 
 from app.schemas.base import ApiModel
 from app.schemas.session import SkillKey

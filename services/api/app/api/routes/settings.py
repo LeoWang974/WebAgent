@@ -1,15 +1,19 @@
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import schemas
+from app.api.dependencies import CurrentUser, DbSession
 from app.core.security import create_access_token, hash_password, verify_password
-from app.db.session import get_db
 from app.models import ModelConfig, SkillConfig, SkillVersion, User, UserSettings
-from app.services.persistence import get_current_user, get_user_by_username, normalize_email, normalize_username
+from app.services.persistence import (
+    get_user_by_username,
+    normalize_email,
+    normalize_username,
+)
 
 router = APIRouter()
 
@@ -219,8 +223,8 @@ async def get_skill_config(db: AsyncSession, skill_key: str) -> SkillConfig:
 @router.put("/profile", response_model=schemas.User)
 async def update_profile(
     input_data: schemas.ProfileUpdate,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> schemas.User:
     current_user.nickname = input_data.nickname
     current_user.email = normalize_email(input_data.email)
@@ -243,8 +247,8 @@ async def update_profile(
 @router.put("/profile/password", response_model=schemas.AuthResult | None)
 async def update_password(
     input_data: schemas.PasswordUpdate,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> schemas.AuthResult | None:
     if len(input_data.new_password) < 4:
         raise HTTPException(status_code=400, detail="New password must be at least 4 characters")
@@ -268,8 +272,8 @@ async def update_password(
 
 @router.get("/data-context", response_model=schemas.DataContextSettings)
 async def get_data_context_settings(
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> schemas.DataContextSettings:
     settings = await ensure_user_settings(db, current_user)
     return to_data_context_schema(settings)
@@ -278,8 +282,8 @@ async def get_data_context_settings(
 @router.put("/data-context", response_model=schemas.DataContextSettings)
 async def update_data_context_settings(
     input_data: schemas.DataContextSettings,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> schemas.DataContextSettings:
     settings = await ensure_user_settings(db, current_user)
     settings.data_context = input_data.model_dump()
@@ -291,8 +295,8 @@ async def update_data_context_settings(
 @router.post("/models", response_model=schemas.ModelConfig)
 async def add_model(
     input_data: dict[str, Any],
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> schemas.ModelConfig:
     await ensure_default_models(db, current_user)
     api_key = get_input_value(input_data, "apiKey", "api_key")
@@ -315,8 +319,8 @@ async def add_model(
 async def update_model(
     model_id: str,
     input_data: dict[str, Any],
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> schemas.ModelConfig:
     model = await get_user_model(db, current_user, model_id)
     model.name = input_data.get("name", model.name)
@@ -333,8 +337,8 @@ async def update_model(
 @router.delete("/models/{model_id}", status_code=204)
 async def delete_model(
     model_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> None:
     model = await get_user_model(db, current_user, model_id)
     was_default = model.is_default
@@ -352,8 +356,8 @@ async def delete_model(
 @router.post("/models/default", response_model=list[schemas.ModelConfig])
 async def set_default_model(
     payload: dict[str, str],
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> list[schemas.ModelConfig]:
     model_id = payload.get("modelId") or payload.get("model_id")
     if not model_id:
@@ -371,8 +375,8 @@ async def set_default_model(
 @router.post("/models/{model_id}/test", response_model=schemas.ModelConfig)
 async def test_model_connection(
     model_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> schemas.ModelConfig:
     model = await get_user_model(db, current_user, model_id)
     model.is_available = True
@@ -384,7 +388,7 @@ async def test_model_connection(
 @router.post("/skills/default", response_model=list[schemas.Skill])
 async def set_default_skill(
     payload: dict[str, str],
-    db: AsyncSession = Depends(get_db),
+    db: DbSession,
 ) -> list[schemas.Skill]:
     skill_key = payload.get("skillKey") or payload.get("skill_key")
     if not skill_key:
@@ -402,7 +406,7 @@ async def set_default_skill(
 @router.post("/skills/{skill_key}/toggle", response_model=list[schemas.Skill])
 async def toggle_skill_enabled(
     skill_key: str,
-    db: AsyncSession = Depends(get_db),
+    db: DbSession,
 ) -> list[schemas.Skill]:
     skill = await get_skill_config(db, skill_key)
     skill.enabled = not skill.enabled
@@ -415,7 +419,7 @@ async def toggle_skill_enabled(
 async def update_skill_version(
     skill_key: str,
     payload: dict[str, str],
-    db: AsyncSession = Depends(get_db),
+    db: DbSession,
 ) -> list[schemas.Skill]:
     skill = await get_skill_config(db, skill_key)
     direction = payload.get("direction", "update")

@@ -1,20 +1,19 @@
 import asyncio
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import schemas
+from app.api.dependencies import CurrentUser, DbSession
 from app.core.config import settings
-from app.db.session import get_db
-from app.models import Conversation, ConversationShare
 from app.models import AgentRun as DBAgentRun
 from app.models import AgentRunEvent as DBAgentRunEvent
-from app.models import User
-from app.services.persistence import get_conversation_or_404, get_current_user
+from app.models import Conversation, ConversationShare, User
+from app.services.persistence import get_conversation_or_404
 
 try:
     from agent_runtime.adapters import HermesAdapter, OpenClawAdapter
@@ -60,7 +59,12 @@ def _get_adapter(model_id: str | None):
 def _event_to_step(event: DBAgentRunEvent) -> schemas.AgentRunStep:
     payload = event.payload or {}
     step_payload = payload.get("step") if isinstance(payload.get("step"), dict) else {}
-    label = step_payload.get("label") or payload.get("content") or payload.get("eventType") or "Agent event"
+    label = (
+        step_payload.get("label")
+        or payload.get("content")
+        or payload.get("eventType")
+        or "Agent event"
+    )
     status = step_payload.get("status") or payload.get("stepStatus") or "completed"
     if status not in {"pending", "running", "completed", "failed"}:
         status = "completed"
@@ -72,7 +76,9 @@ def _event_to_step(event: DBAgentRunEvent) -> schemas.AgentRunStep:
     )
 
 
-def to_agent_run_schema(run: DBAgentRun, events: list[DBAgentRunEvent] | None = None) -> schemas.AgentRun:
+def to_agent_run_schema(
+    run: DBAgentRun, events: list[DBAgentRunEvent] | None = None
+) -> schemas.AgentRun:
     events = events or []
     completed_at = run.updated_at.isoformat() if run.status in TERMINAL_RUN_STATUSES else None
     output = None
@@ -129,8 +135,8 @@ def is_stale_run(run: DBAgentRun) -> bool:
         return False
     updated_at = run.updated_at or run.created_at
     if updated_at.tzinfo is None:
-        updated_at = updated_at.replace(tzinfo=timezone.utc)
-    return updated_at < datetime.now(timezone.utc) - timedelta(seconds=STALE_RUN_GRACE_SECONDS)
+        updated_at = updated_at.replace(tzinfo=UTC)
+    return updated_at < datetime.now(UTC) - timedelta(seconds=STALE_RUN_GRACE_SECONDS)
 
 
 async def mark_stale_agent_runs(
@@ -283,9 +289,9 @@ async def get_db_agent_run(
 
 @router.get("", response_model=list[schemas.AgentRun])
 async def list_agent_runs(
+    db: DbSession,
+    current_user: CurrentUser,
     session_id: str | None = None,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
 ) -> list[schemas.AgentRun]:
     if session_id:
         await get_conversation_or_404(db, session_id, current_user)
@@ -330,8 +336,8 @@ async def list_agent_runs(
 @router.post("", response_model=schemas.AgentRun)
 async def create_agent_run(
     input_data: schemas.AgentRunCreate,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> schemas.AgentRun:
     await get_conversation_or_404(db, input_data.session_id, current_user, require_write=True)
     adapter_key, _ = _resolve_adapter(model_id=input_data.model_id)
@@ -363,8 +369,8 @@ async def create_agent_run(
 @router.get("/{run_id}", response_model=schemas.AgentRun)
 async def get_agent_run(
     run_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> schemas.AgentRun:
     run = await get_db_agent_run(db, run_id, current_user)
     events = await list_run_events(db, run_id)
@@ -374,8 +380,8 @@ async def get_agent_run(
 @router.post("/{run_id}/cancel", response_model=schemas.AgentRun)
 async def cancel_agent_run(
     run_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> schemas.AgentRun:
     run = await get_db_agent_run(db, run_id, current_user)
     await get_conversation_or_404(db, run.conversation_id, current_user, require_write=True)
@@ -411,8 +417,8 @@ async def cancel_agent_run(
 @router.get("/{run_id}/events")
 async def stream_agent_run_events(
     run_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> StreamingResponse:
     await get_db_agent_run(db, run_id, current_user)
 
@@ -426,9 +432,13 @@ async def stream_agent_run_events(
                     continue
                 sent_event_ids.add(event.id)
                 api_event = to_agent_run_event_schema(event, run)
+                event_data = json.dumps(
+                    api_event.model_dump(by_alias=True),
+                    ensure_ascii=False,
+                )
                 yield (
                     "event: agent_run_event\n"
-                    f"data: {json.dumps(api_event.model_dump(by_alias=True), ensure_ascii=False)}\n\n"
+                    f"data: {event_data}\n\n"
                 )
             if run.status in TERMINAL_RUN_STATUSES:
                 break

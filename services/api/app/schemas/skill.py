@@ -10,4 +10,3 @@ class Skill(ApiModel):
     enabled: bool
     is_default: bool | None = None
     last_updated_at: str | None = None
-

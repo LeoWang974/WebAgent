@@ -15,4 +15,3 @@ class ModelConfig(IdMixin, TimestampMixin, Base):
     encrypted_api_key: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     is_default: Mapped[bool] = mapped_column(default=False)
     is_available: Mapped[bool] = mapped_column(default=True)
-

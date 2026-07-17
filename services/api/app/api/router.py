@@ -1,6 +1,18 @@
 from fastapi import APIRouter
 
-from app.api.routes import admin, agent_runs, artifacts, auth, files, health, messages, models, sessions, settings, skills
+from app.api.routes import (
+    admin,
+    agent_runs,
+    artifacts,
+    auth,
+    files,
+    health,
+    messages,
+    models,
+    sessions,
+    settings,
+    skills,
+)
 
 api_router = APIRouter()
 api_router.include_router(health.router, tags=["health"])

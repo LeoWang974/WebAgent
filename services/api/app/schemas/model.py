@@ -13,4 +13,3 @@ class ModelConfig(ApiModel):
     provider: ModelProvider
     is_default: bool
     masked_api_key: str | None = None
-

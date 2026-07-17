@@ -2,15 +2,18 @@ import re
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, HTTPException, Response
 from fastapi.responses import FileResponse
 from sqlalchemy import or_, select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import schemas
-from app.db.session import get_db
-from app.models import Artifact, Conversation, ConversationShare, User
-from app.services.persistence import get_current_user, get_conversation_or_404, require_owner, to_artifact
+from app.api.dependencies import CurrentUser, DbSession
+from app.models import Artifact, Conversation, ConversationShare
+from app.services.persistence import (
+    get_conversation_or_404,
+    require_owner,
+    to_artifact,
+)
 
 router = APIRouter()
 
@@ -64,8 +67,8 @@ def slide_sort_key(artifact: Artifact) -> tuple[int, str]:
 
 @router.get("", response_model=list[schemas.Artifact])
 async def list_artifacts(
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> list[schemas.Artifact]:
     result = await db.execute(
         select(Artifact)
@@ -87,8 +90,8 @@ async def list_artifacts(
 @router.get("/{artifact_id}", response_model=schemas.Artifact)
 async def get_artifact(
     artifact_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> schemas.Artifact:
     result = await db.execute(select(Artifact).where(Artifact.id == artifact_id))
     artifact = result.scalar_one_or_none()
@@ -101,8 +104,8 @@ async def get_artifact(
 @router.get("/{artifact_id}/slides", response_model=schemas.ArtifactSlides)
 async def get_artifact_slides(
     artifact_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> schemas.ArtifactSlides:
     result = await db.execute(select(Artifact).where(Artifact.id == artifact_id))
     artifact = result.scalar_one_or_none()
@@ -148,7 +151,9 @@ async def get_artifact_slides(
             if html_artifact.content
         ]
         if slides:
-            return schemas.ArtifactSlides(artifact_id=artifact.id, slides=slides, source="html_artifacts")
+            return schemas.ArtifactSlides(
+                artifact_id=artifact.id, slides=slides, source="html_artifacts"
+            )
 
     return schemas.ArtifactSlides(artifact_id=artifact.id, slides=[], source="unavailable")
 
@@ -156,8 +161,8 @@ async def get_artifact_slides(
 @router.delete("/{artifact_id}", status_code=204)
 async def delete_artifact(
     artifact_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> None:
     result = await db.execute(select(Artifact).where(Artifact.id == artifact_id))
     artifact = result.scalar_one_or_none()
@@ -173,8 +178,8 @@ async def delete_artifact(
 @router.get("/{artifact_id}/download")
 async def download_artifact(
     artifact_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> Response:
     result = await db.execute(select(Artifact).where(Artifact.id == artifact_id))
     artifact = result.scalar_one_or_none()

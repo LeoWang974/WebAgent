@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 import hashlib
 import json
 import logging
@@ -6,15 +6,15 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app import schemas
+from app.api.dependencies import CurrentUser, DbSession
 from app.core.config import settings
-from app.db.session import get_db
 from app.models import (
     AgentRun,
     AgentRunEvent,
@@ -23,7 +23,6 @@ from app.models import (
     ConversationShare,
     FileAsset,
     Message,
-    User,
 )
 from app.services import mock_store
 from app.services.artifact_discovery import (
@@ -34,14 +33,15 @@ from app.services.artifact_discovery import (
 )
 from app.services.persistence import (
     get_conversation_or_404,
-    get_current_user,
     get_user_by_email,
     require_owner,
     to_artifact,
     to_message,
     to_session,
 )
-from app.services.runtime_context_builder import build_runtime_content as build_skill_runtime_content
+from app.services.runtime_context_builder import (
+    build_runtime_content as build_skill_runtime_content,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -216,9 +216,9 @@ async def find_existing_artifact(
                     Artifact.artifact_metadata["path"].as_string().in_(candidate_paths),
                     Artifact.artifact_metadata["originalPath"].as_string().in_(candidate_paths),
                     Artifact.artifact_metadata["normalizedPath"].as_string().in_(candidate_paths),
-                    Artifact.artifact_metadata["originalNormalizedPath"].as_string().in_(
-                        candidate_paths
-                    ),
+                    Artifact.artifact_metadata["originalNormalizedPath"]
+                    .as_string()
+                    .in_(candidate_paths),
                 ),
             )
         )
@@ -317,8 +317,8 @@ async def persist_discovered_artifacts(
 
 @router.get("", response_model=list[schemas.Session])
 async def list_sessions(
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> list[schemas.Session]:
     result = await db.execute(
         select(Conversation)
@@ -342,8 +342,8 @@ async def list_sessions(
 @router.post("", response_model=schemas.Session)
 async def create_session(
     input_data: schemas.SessionCreate,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> schemas.Session:
     conversation = Conversation(
         user_id=current_user.id,
@@ -363,8 +363,8 @@ async def create_session(
 async def update_session(
     session_id: str,
     input_data: schemas.SessionUpdate,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> schemas.Session:
     conversation = await get_conversation_or_404(db, session_id, current_user, require_write=True)
     require_owner(conversation, current_user)
@@ -413,8 +413,8 @@ async def update_session(
 @router.delete("/{session_id}", status_code=204)
 async def delete_session(
     session_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> None:
     conversation = await get_conversation_or_404(db, session_id, current_user)
     require_owner(conversation, current_user)
@@ -436,8 +436,8 @@ async def delete_session(
 @router.get("/{session_id}/messages", response_model=list[schemas.Message])
 async def list_session_messages(
     session_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> list[schemas.Message]:
     await get_conversation_or_404(db, session_id, current_user)
     result = await db.execute(
@@ -452,8 +452,8 @@ async def list_session_messages(
 async def send_session_message(
     session_id: str,
     input_data: schemas.MessageCreate,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> schemas.SendMessageResult:
     conversation = await get_conversation_or_404(db, session_id, current_user, require_write=True)
     resolved_skill_key = resolve_skill_key(input_data.content, input_data.skill_key)
@@ -523,9 +523,7 @@ async def send_session_message(
                 )
             )
             assistant_content = (
-                getattr(runtime_run, "output", None)
-                or runtime_run.error
-                or assistant_content
+                getattr(runtime_run, "output", None) or runtime_run.error or assistant_content
             )
             await finish_db_agent_run(
                 db,
@@ -561,8 +559,8 @@ async def send_session_message(
 async def stream_session_message(
     session_id: str,
     input_data: schemas.MessageCreate,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> StreamingResponse:
     await get_conversation_or_404(db, session_id, current_user, require_write=True)
     resolved_skill_key = resolve_skill_key(input_data.content, input_data.skill_key)
@@ -650,9 +648,7 @@ async def stream_session_message(
                 )
                 while True:
                     elapsed_seconds = asyncio.get_running_loop().time() - run_started_monotonic
-                    overall_remaining = (
-                        settings.agent_run_overall_timeout_seconds - elapsed_seconds
-                    )
+                    overall_remaining = settings.agent_run_overall_timeout_seconds - elapsed_seconds
                     if overall_remaining <= 0:
                         if hasattr(adapter, "cancel_run"):
                             await adapter.cancel_run(run.id)
@@ -812,6 +808,7 @@ async def stream_session_message(
                     },
                 )
                 if hasattr(adapter, "cancel_run"):
+
                     async def cleanup_short_chat_run() -> None:
                         try:
                             await adapter.cancel_run(run.id)
@@ -831,9 +828,7 @@ async def stream_session_message(
                 else []
             )
             explicit_artifacts = (
-                adapter.get_last_artifacts()
-                if hasattr(adapter, "get_last_artifacts")
-                else []
+                adapter.get_last_artifacts() if hasattr(adapter, "get_last_artifacts") else []
             )
             if explicit_artifacts:
                 explicit_artifact_paths = [
@@ -913,17 +908,21 @@ async def stream_session_message(
             current_run_artifacts = [
                 artifact for artifact in stored_artifacts if artifact.run_id == run.id
             ]
-            response_artifacts = current_run_artifacts or sorted(
-                stored_artifacts,
-                key=artifact_display_priority,
-            )[-1:]
+            response_artifacts = (
+                current_run_artifacts
+                or sorted(
+                    stored_artifacts,
+                    key=artifact_display_priority,
+                )[-1:]
+            )
             if (
                 resolved_skill_key == "ppt_generation"
                 and any(artifact.type == "html_page" for artifact in current_run_artifacts)
                 and not any(artifact.type == "ppt_deck" for artifact in current_run_artifacts)
             ):
                 raise RuntimeError(
-                    "PPTX export did not produce a .pptx file. HTML pages were preserved as fallback artifacts."
+                    "PPTX export did not produce a .pptx file. "
+                    "HTML pages were preserved as fallback artifacts."
                 )
 
             if assistant_messages:
@@ -1125,8 +1124,8 @@ async def stream_session_message(
 @router.get("/{session_id}/artifacts", response_model=list[schemas.Artifact])
 async def list_session_artifacts(
     session_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> list[schemas.Artifact]:
     await get_conversation_or_404(db, session_id, current_user)
     result = await db.execute(

@@ -8,6 +8,7 @@ Create Date: 2026-07-10
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = "20260710_0001"
@@ -18,8 +19,18 @@ depends_on: str | Sequence[str] | None = None
 
 def create_timestamp_columns() -> list[sa.Column]:
     return [
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
     ]
 
 
@@ -60,7 +71,9 @@ def upgrade() -> None:
         *create_timestamp_columns(),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index(op.f("ix_skill_versions_skill_key"), "skill_versions", ["skill_key"], unique=False)
+    op.create_index(
+        op.f("ix_skill_versions_skill_key"), "skill_versions", ["skill_key"], unique=False
+    )
 
     op.create_table(
         "conversations",
@@ -117,8 +130,15 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("conversation_id", "user_id", name="uq_conversation_share_user"),
     )
-    op.create_index(op.f("ix_conversation_shares_conversation_id"), "conversation_shares", ["conversation_id"], unique=False)
-    op.create_index(op.f("ix_conversation_shares_user_id"), "conversation_shares", ["user_id"], unique=False)
+    op.create_index(
+        op.f("ix_conversation_shares_conversation_id"),
+        "conversation_shares",
+        ["conversation_id"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_conversation_shares_user_id"), "conversation_shares", ["user_id"], unique=False
+    )
 
     op.create_table(
         "messages",
@@ -131,7 +151,9 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["conversation_id"], ["conversations.id"]),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index(op.f("ix_messages_conversation_id"), "messages", ["conversation_id"], unique=False)
+    op.create_index(
+        op.f("ix_messages_conversation_id"), "messages", ["conversation_id"], unique=False
+    )
 
     op.create_table(
         "agent_runs",
@@ -145,7 +167,9 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["conversation_id"], ["conversations.id"]),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index(op.f("ix_agent_runs_conversation_id"), "agent_runs", ["conversation_id"], unique=False)
+    op.create_index(
+        op.f("ix_agent_runs_conversation_id"), "agent_runs", ["conversation_id"], unique=False
+    )
 
     op.create_table(
         "files",
@@ -171,7 +195,9 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["run_id"], ["agent_runs.id"]),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index(op.f("ix_agent_run_events_run_id"), "agent_run_events", ["run_id"], unique=False)
+    op.create_index(
+        op.f("ix_agent_run_events_run_id"), "agent_run_events", ["run_id"], unique=False
+    )
 
     op.create_table(
         "artifacts",
@@ -188,7 +214,9 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["run_id"], ["agent_runs.id"]),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index(op.f("ix_artifacts_conversation_id"), "artifacts", ["conversation_id"], unique=False)
+    op.create_index(
+        op.f("ix_artifacts_conversation_id"), "artifacts", ["conversation_id"], unique=False
+    )
 
 
 def downgrade() -> None:

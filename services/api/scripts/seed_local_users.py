@@ -46,9 +46,7 @@ async def upsert_user(
 async def move_conversations_to_user(user: User) -> int:
     async with AsyncSessionLocal() as db:
         result = await db.execute(
-            update(Conversation)
-            .where(Conversation.user_id != user.id)
-            .values(user_id=user.id)
+            update(Conversation).where(Conversation.user_id != user.id).values(user_id=user.id)
         )
         await db.commit()
         return result.rowcount or 0

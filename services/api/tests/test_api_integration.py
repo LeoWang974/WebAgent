@@ -1,19 +1,20 @@
 import asyncio
-from datetime import datetime, timedelta, timezone
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from agent_runtime.schemas import AgentArtifactRef, AgentRunEvent, AgentRunStep
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from agent_runtime.schemas import AgentArtifactRef, AgentRunEvent, AgentRunStep
+from app.api.routes.sessions import persist_discovered_artifacts
 from app.core.config import settings
 from app.core.security import create_access_token
-from app.models import AgentRun, AgentRunEvent as DBAgentRunEvent, Artifact, Conversation, User
+from app.models import AgentRun, Artifact, Conversation, User
+from app.models import AgentRunEvent as DBAgentRunEvent
 from app.services.artifact_discovery import create_artifacts_from_paths
-from app.api.routes.sessions import persist_discovered_artifacts
 
 
 def parse_sse_events(payload: str) -> list[tuple[str, dict]]:
@@ -419,10 +420,10 @@ async def test_agent_run_sse_persists_events_and_artifact(
         assert run is not None
         assert run.status == "completed"
         run_events = (
-            await db.execute(
-                select(DBAgentRunEvent).where(DBAgentRunEvent.run_id == run_id)
-            )
-        ).scalars().all()
+            (await db.execute(select(DBAgentRunEvent).where(DBAgentRunEvent.run_id == run_id)))
+            .scalars()
+            .all()
+        )
         assert {event.event_type for event in run_events} >= {
             "started",
             "stage_started",
@@ -430,8 +431,8 @@ async def test_agent_run_sse_persists_events_and_artifact(
             "artifact_created",
         }
         artifacts = (
-            await db.execute(select(Artifact).where(Artifact.run_id == run_id))
-        ).scalars().all()
+            (await db.execute(select(Artifact).where(Artifact.run_id == run_id))).scalars().all()
+        )
         assert len(artifacts) == 1
         assert artifacts[0].content == "# SSE 报告\n\n已生成。"
 
@@ -469,8 +470,10 @@ async def test_cancel_agent_run_marks_cancelled(
         assert run is not None
         assert run.status == "cancelled"
         events = (
-            await db.execute(select(DBAgentRunEvent).where(DBAgentRunEvent.run_id == run_id))
-        ).scalars().all()
+            (await db.execute(select(DBAgentRunEvent).where(DBAgentRunEvent.run_id == run_id)))
+            .scalars()
+            .all()
+        )
         assert any(event.event_type == "cancelled" for event in events)
 
 
@@ -498,7 +501,7 @@ async def test_stale_running_run_recovers_as_disconnected(
         run = await db.get(AgentRun, run_id)
         assert run is not None
         run.status = "running"
-        run.updated_at = datetime.now(timezone.utc) - timedelta(hours=2)
+        run.updated_at = datetime.now(UTC) - timedelta(hours=2)
         await db.commit()
 
     list_response = await api_client.get(
@@ -540,7 +543,11 @@ async def test_agent_run_stream_idle_timeout_records_diagnostics(
 
         response = await api_client.post(
             f"/api/sessions/{session_id}/messages/stream",
-            json={"content": "wait forever", "skillKey": "deep_research", "modelId": "model_hermes"},
+            json={
+                "content": "wait forever",
+                "skillKey": "deep_research",
+                "modelId": "model_hermes",
+            },
             headers=auth_headers["owner"],
         )
         assert response.status_code == 200
@@ -554,11 +561,15 @@ async def test_agent_run_stream_idle_timeout_records_diagnostics(
             assert run is not None
             assert run.status == "failed"
             run_events = (
-                await db.execute(select(DBAgentRunEvent).where(DBAgentRunEvent.run_id == run_id))
-            ).scalars().all()
+                (await db.execute(select(DBAgentRunEvent).where(DBAgentRunEvent.run_id == run_id)))
+                .scalars()
+                .all()
+            )
             diagnostic = next(event for event in run_events if event.event_type == "diagnostic")
             assert diagnostic.payload["hermesDiagnostics"]["adapter"] == "hanging"
-            assert diagnostic.payload["hermesDiagnostics"]["stderr_tail"] == "no output before timeout"
+            assert (
+                diagnostic.payload["hermesDiagnostics"]["stderr_tail"] == "no output before timeout"
+            )
     finally:
         settings.agent_run_idle_timeout_seconds = previous_idle_timeout
         settings.agent_run_overall_timeout_seconds = previous_overall_timeout
@@ -588,13 +599,13 @@ async def test_short_chat_fast_closes_after_first_response(
     )
     session_id = session_response.json()["id"]
 
-    started_at = datetime.now(timezone.utc)
+    started_at = datetime.now(UTC)
     response = await api_client.post(
         f"/api/sessions/{session_id}/messages/stream",
         json={"content": "你好", "modelId": "model_hermes"},
         headers=auth_headers["owner"],
     )
-    elapsed = (datetime.now(timezone.utc) - started_at).total_seconds()
+    elapsed = (datetime.now(UTC) - started_at).total_seconds()
     assert response.status_code == 200
     assert elapsed < 4
 
@@ -612,13 +623,13 @@ async def test_short_chat_fast_closes_after_first_response(
         assert run is not None
         assert run.status == "completed"
         run_events = (
-            await db.execute(select(DBAgentRunEvent).where(DBAgentRunEvent.run_id == run.id))
-        ).scalars().all()
+            (await db.execute(select(DBAgentRunEvent).where(DBAgentRunEvent.run_id == run.id)))
+            .scalars()
+            .all()
+        )
         assert not any(event.event_type == "diagnostic" for event in run_events)
         fast_close_event = next(
-            event
-            for event in run_events
-            if (event.payload or {}).get("shortChatFastClose") is True
+            event for event in run_events if (event.payload or {}).get("shortChatFastClose") is True
         )
         assert fast_close_event.payload["artifactDiscoverySkipped"] is True
 

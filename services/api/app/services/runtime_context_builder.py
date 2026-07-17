@@ -197,8 +197,7 @@ async def build_runtime_content(
     candidates.sort(key=lambda item: item.score, reverse=True)
     selected = candidates[: MAX_CONTEXT_ARTIFACTS.get(skill_key, 4)]
     context = " | ".join(
-        build_context_line(index, artifact)
-        for index, artifact in enumerate(selected, start=1)
+        build_context_line(index, artifact) for index, artifact in enumerate(selected, start=1)
     )
     instruction = instruction_for_skill(skill_key)
     return f"{content}\n\n[WebAgent runtime context]\n{instruction}\nAvailable artifacts: {context}"

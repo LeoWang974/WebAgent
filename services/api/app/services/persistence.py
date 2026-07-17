@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Annotated
 
 from fastapi import Depends, Header, HTTPException, Query, status
 from sqlalchemy import select
@@ -46,7 +47,9 @@ async def ensure_user(
             await db.refresh(user)
         return user
 
-    display_name = nickname.strip() if nickname and nickname.strip() else email.split("@", maxsplit=1)[0]
+    display_name = (
+        nickname.strip() if nickname and nickname.strip() else email.split("@", maxsplit=1)[0]
+    )
     user = User(
         email=email,
         hashed_password=hash_password(password) if password else None,
@@ -88,9 +91,9 @@ async def get_user_by_id(db: AsyncSession, user_id: str) -> User | None:
 
 
 async def get_current_user(
-    authorization: str | None = Header(default=None),
-    access_token: str | None = Query(default=None),
-    db: AsyncSession = Depends(get_db),
+    db: Annotated[AsyncSession, Depends(get_db)],
+    authorization: Annotated[str | None, Header()] = None,
+    access_token: Annotated[str | None, Query()] = None,
 ) -> User:
     token = access_token
     if authorization:
@@ -198,9 +201,8 @@ async def get_conversation_or_404(
         or conversation.visibility == "public"
         or (conversation.visibility == "shared" and share is not None)
     )
-    can_write = (
-        conversation.user_id == current_user.id
-        or (conversation.visibility == "shared" and share is not None)
+    can_write = conversation.user_id == current_user.id or (
+        conversation.visibility == "shared" and share is not None
     )
 
     if require_write and not can_write:

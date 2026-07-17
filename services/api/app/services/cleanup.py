@@ -99,9 +99,7 @@ async def cleanup_long_disconnected_runs(
     if not run_ids:
         return 0
 
-    await db.execute(
-        update(Artifact).where(Artifact.run_id.in_(run_ids)).values(run_id=None)
-    )
+    await db.execute(update(Artifact).where(Artifact.run_id.in_(run_ids)).values(run_id=None))
     await db.execute(delete(AgentRunEvent).where(AgentRunEvent.run_id.in_(run_ids)))
     result = await db.execute(delete(AgentRun).where(AgentRun.id.in_(run_ids)))
     await db.commit()

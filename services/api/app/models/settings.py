@@ -1,4 +1,4 @@
-from sqlalchemy import ForeignKey, JSON
+from sqlalchemy import JSON, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -11,4 +11,3 @@ class UserSettings(IdMixin, TimestampMixin, Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), unique=True, index=True)
     data_context: Mapped[dict] = mapped_column(JSON, default=dict)
     interface: Mapped[dict] = mapped_column(JSON, default=dict)
-

@@ -10,7 +10,6 @@ from app.api.router import api_router
 from app.core.config import settings
 from app.services.cleanup_scheduler import run_periodic_data_cleanup, stop_cleanup_task
 
-
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 
 

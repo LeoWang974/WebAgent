@@ -24,4 +24,3 @@ class MessageCreate(ApiModel):
 class SendMessageResult(ApiModel):
     messages: list[Message]
     session: Session
-

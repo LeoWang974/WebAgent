@@ -1,19 +1,18 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 from sqlalchemy import or_, select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import schemas
-from app.db.session import get_db
-from app.models import Conversation, ConversationShare, Message, User
-from app.services.persistence import get_current_user, to_message
+from app.api.dependencies import CurrentUser, DbSession
+from app.models import Conversation, ConversationShare, Message
+from app.services.persistence import to_message
 
 router = APIRouter()
 
 
 @router.get("", response_model=list[schemas.Message])
 async def list_messages(
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> list[schemas.Message]:
     result = await db.execute(
         select(Message)
