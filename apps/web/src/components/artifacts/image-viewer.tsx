@@ -46,6 +46,7 @@ export function ImageViewer({ images, title }: ImageViewerProps) {
   const renderImage = (image: PreviewImage, className: string) => {
     if (image.url) {
       return (
+        // eslint-disable-next-line @next/next/no-img-element
         <img
           alt={image.prompt || title}
           className={`${className} bg-[#f7f7f5] object-contain`}
@@ -73,7 +74,8 @@ export function ImageViewer({ images, title }: ImageViewerProps) {
             <div className="min-w-0">
               <h2 className="truncate text-sm font-semibold">{title}</h2>
               <p className="mt-1 text-xs text-muted-foreground">
-                {t("generatedImagePreview")} · {images.length} 张
+                {t("generatedImagePreview")} ·{" "}
+                {t("imageCount").replace("{count}", String(images.length))}
               </p>
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
@@ -85,7 +87,7 @@ export function ImageViewer({ images, title }: ImageViewerProps) {
                     window.open(selectedImage.url, "_blank", "noopener,noreferrer");
                   }
                 }}
-                title="打开原图"
+                title={t("openOriginalImage")}
                 type="button"
               >
                 <ExternalLink className="size-4" />
@@ -94,7 +96,7 @@ export function ImageViewer({ images, title }: ImageViewerProps) {
                 className="flex size-8 items-center justify-center rounded-md border text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
                 disabled={!selectedImage.url}
                 onClick={() => void downloadSelectedImage()}
-                title="下载当前图片"
+                title={t("downloadCurrentImage")}
                 type="button"
               >
                 <Download className="size-4" />

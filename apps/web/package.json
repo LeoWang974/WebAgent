@@ -10,7 +10,7 @@
     "build": "next build",
     "start": "next start",
     "test": "node --test --experimental-strip-types \"src/**/*.node.test.ts\"",
-    "lint": "next lint"
+    "lint": "eslint ."
   },
   "dependencies": {
     "@webagent/shared": "workspace:*",
@@ -26,6 +26,7 @@
     "zustand": "^5.0.2"
   },
   "devDependencies": {
+    "@eslint/eslintrc": "^3.3.5",
     "@types/node": "^22.10.2",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",

@@ -23,6 +23,7 @@ export function AgentStatus() {
   const refreshAgentRun = useChatStore((state) => state.refreshAgentRun);
   const run = selectAgentStatusRun(agentRuns, currentSessionId);
   const active = isAgentRunActive(run);
+  const compactPlainChat = Boolean(run?.isPlainChat && run.hasAssistantResponse && active);
 
   async function openDetails() {
     if (!run) {
@@ -37,6 +38,25 @@ export function AgentStatus() {
 
   if (!run) {
     return null;
+  }
+
+  if (compactPlainChat) {
+    return (
+      <div className="border-t border-[#ededeb] bg-[#fbfbfa] px-5 py-2">
+        <div className="mx-auto flex max-w-3xl items-center justify-between gap-3 rounded-lg border bg-white px-3 py-2 text-xs text-muted-foreground shadow-sm">
+          <div className="flex min-w-0 items-center gap-2">
+            <Loader2 className="size-3.5 shrink-0 animate-spin" />
+            <span className="truncate">{t("agentRunPlainChatConfirming")}</span>
+          </div>
+          <Link
+            className="shrink-0 rounded-md border px-2 py-1 hover:bg-muted hover:text-foreground"
+            href={`/app/runs/${run.id}`}
+          >
+            {t("agentRunShowDetails")}
+          </Link>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -66,7 +86,7 @@ export function AgentStatus() {
               href={`/app/runs/${run.id}`}
             >
               <ClipboardList className="size-3.5" />
-              详情页
+              {t("agentRunDetailsPage")}
             </Link>
             <button
               className="flex h-8 items-center gap-1.5 rounded-md border px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"

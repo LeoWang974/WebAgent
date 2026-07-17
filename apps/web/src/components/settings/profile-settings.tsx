@@ -20,6 +20,7 @@ export function ProfileSettings() {
   const [passwordError, setPasswordError] = useState<string | undefined>();
   const [passwordSaved, setPasswordSaved] = useState(false);
   const [passwordSaving, setPasswordSaving] = useState(false);
+  const [reloginAfterPasswordChange, setReloginAfterPasswordChange] = useState(true);
   const [username, setUsername] = useState("");
 
   useEffect(() => {
@@ -63,7 +64,14 @@ export function ProfileSettings() {
     setPasswordSaved(false);
     setPasswordSaving(true);
     try {
-      await settingsApi.updatePassword({ currentPassword, newPassword });
+      const result = await settingsApi.updatePassword({
+        currentPassword,
+        newPassword,
+        relogin: reloginAfterPasswordChange,
+      });
+      if (result?.user) {
+        useUserStore.setState({ hydrated: true, user: result.user });
+      }
       setCurrentPassword("");
       setNewPassword("");
       setPasswordSaved(true);
@@ -187,6 +195,16 @@ export function ProfileSettings() {
             />
           </label>
         </div>
+
+        <label className="flex items-start gap-2 rounded-md border bg-[#f7f7f5] px-3 py-2 text-xs text-muted-foreground">
+          <input
+            checked={reloginAfterPasswordChange}
+            className="mt-0.5"
+            onChange={(event) => setReloginAfterPasswordChange(event.target.checked)}
+            type="checkbox"
+          />
+          <span>{t("reloginAfterPasswordChange")}</span>
+        </label>
 
         <div className="flex items-center justify-between gap-3">
           <div className="text-xs">

@@ -3,6 +3,7 @@ import type { DataContextSettings, ModelConfig, Skill, SkillKey, User } from "@/
 import type {
   ModelCreateInput,
   PasswordUpdateInput,
+  PasswordUpdateResult,
   ProfileUpdateInput,
   SettingsApiAdapter,
 } from "./types";
@@ -62,11 +63,17 @@ export const fastApiSettingsAdapter: SettingsApiAdapter = {
       method: "PUT",
     });
   },
-  updatePassword(input: PasswordUpdateInput) {
-    return apiClient<void>("/api/settings/profile/password", {
+  async updatePassword(input: PasswordUpdateInput) {
+    const result = await apiClient<PasswordUpdateResult>("/api/settings/profile/password", {
       body: JSON.stringify(input),
       method: "PUT",
     });
+
+    if (result?.accessToken && typeof window !== "undefined") {
+      window.localStorage.setItem("webagent_access_token", result.accessToken);
+    }
+
+    return result;
   },
   updateSkillVersion(skillKey: SkillKey, direction: "rollback" | "update") {
     return apiClient<Skill[]>(`/api/settings/skills/${skillKey}/version`, {

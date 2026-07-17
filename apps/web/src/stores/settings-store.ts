@@ -11,6 +11,7 @@ interface SettingsState {
   saving: boolean;
   savedAt?: string;
   hydrate: () => Promise<void>;
+  reset: () => void;
   updateDataContextSettings: (input: DataContextSettings) => Promise<void>;
 }
 
@@ -37,6 +38,15 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         hydrated: true,
       });
     }
+  },
+  reset: () => {
+    set({
+      dataContextSettings: undefined,
+      error: undefined,
+      hydrated: false,
+      saving: false,
+      savedAt: undefined,
+    });
   },
   updateDataContextSettings: async (input) => {
     set({ error: undefined, saving: true });

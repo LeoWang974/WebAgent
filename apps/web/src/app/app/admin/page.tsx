@@ -9,7 +9,7 @@ export default function AdminPage() {
 
   return (
     <main className="h-full overflow-y-auto bg-[#fbfbfa]">
-      <div className="mx-auto max-w-5xl space-y-6 px-6 py-6">
+      <div className="mx-auto w-full max-w-[1500px] space-y-6 px-6 py-6 2xl:max-w-[1680px]">
         <header className="space-y-2">
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
             {t("admin")}
@@ -20,7 +20,7 @@ export default function AdminPage() {
           </p>
         </header>
 
-        <section className="rounded-lg border bg-white p-5 shadow-sm">
+        <section className="rounded-lg border bg-white p-4 shadow-sm">
           <UserManagement />
         </section>
 

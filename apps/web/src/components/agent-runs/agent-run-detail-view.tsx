@@ -2,7 +2,14 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Boxes, Clock3, Loader2, TriangleAlert } from "lucide-react";
+import {
+  ArrowLeft,
+  Boxes,
+  Clock3,
+  FileWarning,
+  Loader2,
+  TriangleAlert,
+} from "lucide-react";
 import { webAgentApi } from "@/services";
 import type { AgentRun, AgentRunEvent } from "@/types";
 
@@ -22,6 +29,20 @@ const terminalStatuses: AgentRun["status"][] = [
   "cancelled",
   "disconnected",
 ];
+
+const eventLabels: Record<string, string> = {
+  artifact_created: "产物创建",
+  artifact_found: "发现产物",
+  cancelled: "已取消",
+  completed: "已完成",
+  diagnostic: "诊断",
+  disconnected: "已断开",
+  failed: "失败",
+  queued: "排队",
+  stage_started: "阶段开始",
+  started: "开始",
+  tool_call: "工具调用",
+};
 
 function isTerminalStatus(status: AgentRun["status"]) {
   return terminalStatuses.includes(status);
@@ -54,6 +75,124 @@ function getArtifactSummary(event: AgentRunEvent): RunArtifactSummary | undefine
     title: typeof title === "string" ? title : id,
     type: typeof type === "string" ? type : "artifact",
   };
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function getText(value: unknown) {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function getDisplayValue(value: unknown) {
+  if (value === null || value === undefined || value === "") {
+    return "-";
+  }
+  return typeof value === "object" ? stringifyJson(value) : String(value);
+}
+
+function stringifyJson(value: unknown) {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function eventBadgeClass(eventType: string) {
+  if (eventType === "diagnostic" || eventType === "failed") {
+    return "border-red-200 bg-red-50 text-red-700";
+  }
+  if (eventType === "artifact_created" || eventType === "artifact_found") {
+    return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  }
+  if (eventType === "tool_call") {
+    return "border-blue-200 bg-blue-50 text-blue-700";
+  }
+  return "border bg-white text-muted-foreground";
+}
+
+function DiagnosticsPanel({ events, run }: { events: AgentRunEvent[]; run: AgentRun }) {
+  const diagnostics = events.filter((event) => event.eventType === "diagnostic");
+  if (!run.error && diagnostics.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="rounded-xl border border-red-200 bg-white p-5 shadow-sm">
+      <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-red-700">
+        <FileWarning className="size-4" />
+        失败诊断
+      </div>
+      {run.error ? (
+        <div className="mb-3 rounded-lg border border-red-100 bg-red-50 p-3 text-sm text-red-700">
+          {run.error}
+        </div>
+      ) : null}
+      <div className="space-y-3">
+        {diagnostics.map((event) => {
+          const payload = asRecord(event.payload);
+          const hermesDiagnostics = asRecord(payload.hermesDiagnostics);
+          const artifactDiscovery = asRecord(payload.artifactDiscovery);
+          const rawLogPath = getText(hermesDiagnostics.raw_log_path ?? hermesDiagnostics.rawLogPath);
+          const exitCode = hermesDiagnostics.exit_code ?? hermesDiagnostics.exitCode;
+          const lastStage = getText(hermesDiagnostics.last_stage ?? hermesDiagnostics.lastStage);
+          const stderrTail = getText(hermesDiagnostics.stderr_tail ?? hermesDiagnostics.stderrTail);
+          const stdoutTail = getText(hermesDiagnostics.stdout_tail ?? hermesDiagnostics.stdoutTail);
+
+          return (
+            <div className="rounded-lg border bg-[#fbfbfa] p-3" key={event.step.id}>
+              <div className="text-xs font-medium text-muted-foreground">
+                {new Date(event.step.timestamp).toLocaleString()} / {event.step.label}
+              </div>
+              <dl className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
+                <div>
+                  <dt className="text-muted-foreground">退出码</dt>
+                  <dd className="mt-0.5 font-mono">{getDisplayValue(exitCode)}</dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground">Raw log</dt>
+                  <dd className="mt-0.5 truncate font-mono" title={rawLogPath}>
+                    {rawLogPath ?? "-"}
+                  </dd>
+                </div>
+                <div className="sm:col-span-2">
+                  <dt className="text-muted-foreground">最后阶段</dt>
+                  <dd className="mt-0.5 whitespace-pre-wrap">{lastStage ?? "-"}</dd>
+                </div>
+              </dl>
+              <details className="mt-3 rounded-md border bg-white p-2 text-xs">
+                <summary className="cursor-pointer text-muted-foreground">产物发现结果</summary>
+                <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono">
+                  {stringifyJson(artifactDiscovery)}
+                </pre>
+              </details>
+              {stderrTail || stdoutTail ? (
+                <details className="mt-2 rounded-md border bg-white p-2 text-xs">
+                  <summary className="cursor-pointer text-muted-foreground">
+                    stderr / stdout tail
+                  </summary>
+                  {stderrTail ? (
+                    <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono text-red-700">
+                      {stderrTail}
+                    </pre>
+                  ) : null}
+                  {stdoutTail ? (
+                    <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono">
+                      {stdoutTail}
+                    </pre>
+                  ) : null}
+                </details>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
 }
 
 export function AgentRunDetailView({ runId }: AgentRunDetailViewProps) {
@@ -133,6 +272,11 @@ export function AgentRunDetailView({ runId }: AgentRunDetailViewProps) {
     return Array.from(new Map(summaries.map((artifact) => [artifact.id, artifact])).values());
   }, [events]);
 
+  const timelineEvents = useMemo(
+    () => events.filter((event) => event.eventType !== "diagnostic"),
+    [events],
+  );
+
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
@@ -202,6 +346,8 @@ export function AgentRunDetailView({ runId }: AgentRunDetailViewProps) {
           ) : null}
         </section>
 
+        <DiagnosticsPanel events={events} run={run} />
+
         <section className="rounded-xl border bg-white p-5 shadow-sm">
           <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
             <Boxes className="size-4" />
@@ -232,15 +378,20 @@ export function AgentRunDetailView({ runId }: AgentRunDetailViewProps) {
         <section className="rounded-xl border bg-white p-5 shadow-sm">
           <div className="mb-3 text-sm font-semibold">事件时间线</div>
           <div className="space-y-3">
-            {events.map((event, index) => (
+            {timelineEvents.map((event, index) => (
               <div className="rounded-lg border bg-[#fbfbfa] p-3" key={event.step.id}>
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="text-xs font-medium text-muted-foreground">
-                    #{index + 1} · {event.eventType} · {new Date(event.step.timestamp).toLocaleString()}
+                    #{index + 1} · {new Date(event.step.timestamp).toLocaleString()}
                   </div>
-                  <span className="rounded-full border bg-white px-2 py-0.5 text-[11px] text-muted-foreground">
-                    {event.step.status}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className={`rounded-full border px-2 py-0.5 text-[11px] ${eventBadgeClass(event.eventType)}`}>
+                      {eventLabels[event.eventType] ?? event.eventType}
+                    </span>
+                    <span className="rounded-full border bg-white px-2 py-0.5 text-[11px] text-muted-foreground">
+                      {event.step.status}
+                    </span>
+                  </div>
                 </div>
                 <div className="mt-2 whitespace-pre-wrap text-sm leading-6">{event.step.label}</div>
               </div>

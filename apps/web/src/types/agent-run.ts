@@ -25,6 +25,8 @@ export interface AgentRun {
   startedAt: string;
   completedAt?: string;
   error?: string;
+  hasAssistantResponse?: boolean;
+  isPlainChat?: boolean;
   output?: string;
   adapterKey?: string;
 }

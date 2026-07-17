@@ -50,6 +50,7 @@ interface ChatState {
   deleteModel: (modelId: string) => Promise<void>;
   deleteSession: (sessionId: string) => void;
   hydrate: () => Promise<void>;
+  resetWorkspace: () => void;
   retryHydrate: () => Promise<void>;
   refreshAgentRun: (runId: string) => Promise<AgentRun | undefined>;
   renameSession: (sessionId: string, title: string) => Promise<void>;
@@ -304,8 +305,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const artifacts = state.artifacts.filter((artifact) => artifact.id !== artifactId);
       const selectedArtifactId =
         state.selectedArtifactId === artifactId
-          ? artifacts.find((artifact) => artifact.sessionId === state.currentSessionId)?.id ??
-            artifacts[0]?.id
+          ? artifacts.find((artifact) => artifact.sessionId === state.currentSessionId)?.id
           : state.selectedArtifactId;
 
       return {
@@ -391,8 +391,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         (run) => run.sessionId === currentSessionId && !isTerminalRunStatus(run.status),
       );
       const selectedArtifactId =
-        artifacts.find((artifact) => artifact.sessionId === currentSessionId)?.id ??
-        artifacts[0]?.id;
+        artifacts.find((artifact) => artifact.sessionId === currentSessionId)?.id;
       const selectedModelId = models.find((model) => model.isDefault)?.id ?? models[0]?.id;
 
       set({
@@ -423,6 +422,34 @@ export const useChatStore = create<ChatState>((set, get) => ({
   retryHydrate: async () => {
     set({ hydrated: false, loading: false });
     await get().hydrate();
+  },
+  resetWorkspace: () => {
+    activeRequestAbortController?.abort();
+    activeRequestAbortController = undefined;
+    clearFeedbackTimers();
+    agentRunUnsubscribers.forEach((unsubscribe) => unsubscribe());
+    agentRunUnsubscribers.clear();
+
+    set({
+      activeAgentRunId: undefined,
+      agentFeedback: undefined,
+      agentRuns: [],
+      artifacts: [],
+      currentSessionId: "",
+      error: undefined,
+      hydrated: false,
+      loading: false,
+      messages: [],
+      models: [],
+      selectedArtifactId: undefined,
+      selectedModelId: undefined,
+      sharingSessionId: undefined,
+      sessions: [],
+      skills: [],
+      switchingSessionId: undefined,
+      testingModelId: undefined,
+      updatingSkillKey: undefined,
+    });
   },
   refreshAgentRun: async (runId) => {
     try {
@@ -568,6 +595,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     );
     const run: AgentRun = {
       id: runId,
+      hasAssistantResponse: false,
+      isPlainChat: !requestedSkill,
       progress: 0,
       sessionId,
       startedAt: now,
@@ -586,6 +615,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       agentRuns: [run, ...state.agentRuns],
       error: undefined,
       messages: [...state.messages, optimisticUserMessage, pendingAssistantMessage],
+      selectedArtifactId: requestedSkill ? state.selectedArtifactId : undefined,
       sessions: state.sessions.map((session) =>
         session.id === sessionId
           ? {
@@ -675,6 +705,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 modelName,
                 requestedSkill,
               );
+              const shouldCreateNextPending = Boolean(requestedSkill);
 
               if (pendingIndex >= 0) {
                 return {
@@ -683,6 +714,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     runItem.id === currentRunId
                       ? {
                           ...runItem,
+                          hasAssistantResponse: true,
                           progress: nextProgress,
                           status: "running",
                           steps: [
@@ -704,7 +736,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                   messages: [
                     ...state.messages.slice(0, pendingIndex),
                     completedMessage,
-                    nextPendingMessage,
+                    ...(shouldCreateNextPending ? [nextPendingMessage] : []),
                     ...state.messages.slice(pendingIndex + 1),
                   ],
                 };
@@ -716,6 +748,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                   runItem.id === currentRunId
                     ? {
                         ...runItem,
+                        hasAssistantResponse: true,
                         progress: nextProgress,
                         status: "running",
                         steps: [
@@ -734,7 +767,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
                       }
                     : runItem,
                 ),
-                messages: [...state.messages, completedMessage, nextPendingMessage],
+                messages: [
+                  ...state.messages,
+                  completedMessage,
+                  ...(shouldCreateNextPending ? [nextPendingMessage] : []),
+                ],
               };
             });
           }
@@ -836,6 +873,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     ? {
                       ...runItem,
                         completedAt: new Date().toISOString(),
+                        hasAssistantResponse: true,
                         progress: finalStatus === "completed" ? 100 : runItem.progress,
                         status: finalStatus,
                       }

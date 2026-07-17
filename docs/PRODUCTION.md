@@ -32,6 +32,10 @@ JWT_SECRET_KEY=<at least 32 random characters>
 The API refuses to start in production if `ALLOW_DEV_AUTH_FALLBACK=true` or the
 JWT secret is still a development placeholder.
 
+Do not run `services/api/scripts/seed_local_users.py` in production. The
+`test/test` and `admin/admin` accounts created by that script are local
+development fixtures only.
+
 ## Backend
 
 ```bash

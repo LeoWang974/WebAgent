@@ -5,13 +5,17 @@ import type {
   SkillKey,
   User,
 } from "@/types";
+import type { AuthResult } from "../adapters/types";
 
 export type ProfileUpdateInput = Pick<User, "avatarUrl" | "email" | "nickname" | "username">;
 
 export interface PasswordUpdateInput {
   currentPassword: string;
   newPassword: string;
+  relogin?: boolean;
 }
+
+export type PasswordUpdateResult = AuthResult | null | undefined;
 
 export type ModelCreateInput = Omit<
   ModelConfig,
@@ -34,7 +38,7 @@ export interface SettingsApiAdapter {
     input: Partial<ModelConfig>,
   ): Promise<ModelConfig>;
   updateProfile(input: ProfileUpdateInput): Promise<User>;
-  updatePassword(input: PasswordUpdateInput): Promise<void>;
+  updatePassword(input: PasswordUpdateInput): Promise<PasswordUpdateResult>;
   updateSkillVersion(
     skillKey: SkillKey,
     direction: "rollback" | "update",

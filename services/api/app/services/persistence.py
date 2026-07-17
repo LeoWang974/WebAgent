@@ -194,6 +194,7 @@ async def get_conversation_or_404(
     )
     can_read = (
         conversation.user_id == current_user.id
+        or current_user.role == "admin"
         or conversation.visibility == "public"
         or (conversation.visibility == "shared" and share is not None)
     )

@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { KeyRound, Loader2, Plus, Search, Trash2, Users } from "lucide-react";
+import { Check, KeyRound, Loader2, Plus, Search, Trash2, Users, X } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { webAgentApi } from "@/services";
 import { useUserStore } from "@/stores";
@@ -119,7 +119,7 @@ export function UserManagement() {
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="text-base font-semibold">{t("userManagement")}</h2>
@@ -133,31 +133,31 @@ export function UserManagement() {
       </div>
 
       <form
-        className="grid gap-3 rounded-lg border border-[#ece9e1] bg-[#fbfbfa] p-3 md:grid-cols-[1fr_1fr_1fr_1fr_130px_auto]"
+        className="grid gap-2 rounded-lg border border-[#ece9e1] bg-[#fbfbfa] p-3 md:grid-cols-2 xl:grid-cols-[minmax(180px,1.2fr)_minmax(140px,1fr)_minmax(140px,1fr)_minmax(140px,1fr)_140px_112px]"
         onSubmit={handleCreateUser}
       >
         <input
-          className="h-9 rounded-md border bg-white px-3 text-sm outline-none focus:ring-1 focus:ring-[#242424]"
+          className="h-9 min-w-0 rounded-md border bg-white px-3 text-sm outline-none focus:ring-1 focus:ring-[#242424]"
           onChange={(event) => setEmail(event.target.value)}
           placeholder={t("email")}
           type="email"
           value={email}
         />
         <input
-          className="h-9 rounded-md border bg-white px-3 text-sm outline-none focus:ring-1 focus:ring-[#242424]"
+          className="h-9 min-w-0 rounded-md border bg-white px-3 text-sm outline-none focus:ring-1 focus:ring-[#242424]"
           onChange={(event) => setNickname(event.target.value)}
           placeholder={t("nickname")}
           value={nickname}
         />
         <input
-          className="h-9 rounded-md border bg-white px-3 text-sm outline-none focus:ring-1 focus:ring-[#242424]"
+          className="h-9 min-w-0 rounded-md border bg-white px-3 text-sm outline-none focus:ring-1 focus:ring-[#242424]"
           onChange={(event) => setUsername(event.target.value)}
           pattern="[A-Za-z0-9_.-]{3,80}"
           placeholder={t("username")}
           value={username}
         />
         <input
-          className="h-9 rounded-md border bg-white px-3 text-sm outline-none focus:ring-1 focus:ring-[#242424]"
+          className="h-9 min-w-0 rounded-md border bg-white px-3 text-sm outline-none focus:ring-1 focus:ring-[#242424]"
           minLength={4}
           onChange={(event) => setPassword(event.target.value)}
           placeholder={t("password")}
@@ -165,7 +165,7 @@ export function UserManagement() {
           value={password}
         />
         <select
-          className="h-9 rounded-md border bg-white px-2 text-sm outline-none focus:ring-1 focus:ring-[#242424]"
+          className="h-9 min-w-0 rounded-md border bg-white px-2 text-sm outline-none focus:ring-1 focus:ring-[#242424]"
           onChange={(event) => setRole(event.target.value as "admin" | "user")}
           value={role}
         >
@@ -185,108 +185,156 @@ export function UserManagement() {
       {error ? <p className="text-xs text-red-600">{error}</p> : null}
 
       <div className="overflow-hidden rounded-lg border">
-        <div className="grid gap-3 border-b bg-[#f7f7f5] px-3 py-2 md:grid-cols-[1fr_auto_auto]">
+        <div className="flex flex-col gap-2 border-b bg-[#f7f7f5] px-3 py-2 md:flex-row md:items-center md:justify-between">
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium">{t("userList")}</span>
+            <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-muted-foreground">
+              {filteredUsers.length} / {users.length}
+            </span>
             {loading ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : null}
           </div>
-          <label className="flex h-9 items-center gap-2 rounded-md border bg-white px-2 text-sm">
-            <Search className="size-4 text-muted-foreground" />
-            <input
-              className="w-48 bg-transparent outline-none"
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder={t("search")}
-              value={search}
-            />
-          </label>
-          <select
-            className="h-9 rounded-md border bg-white px-2 text-sm outline-none"
-            onChange={(event) => setFilterRole(event.target.value as "all" | "admin" | "user")}
-            value={filterRole}
-          >
-            <option value="all">{t("allRoles")}</option>
-            <option value="admin">{t("adminUser")}</option>
-            <option value="user">{t("normalUser")}</option>
-          </select>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <label className="flex h-9 items-center gap-2 rounded-md border bg-white px-2 text-sm">
+              <Search className="size-4 text-muted-foreground" />
+              <input
+                className="w-full bg-transparent outline-none sm:w-48"
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder={t("search")}
+                value={search}
+              />
+            </label>
+            <select
+              className="h-9 min-w-[128px] rounded-md border bg-white px-2 text-sm outline-none"
+              onChange={(event) => setFilterRole(event.target.value as "all" | "admin" | "user")}
+              value={filterRole}
+            >
+              <option value="all">{t("allRoles")}</option>
+              <option value="admin">{t("adminUser")}</option>
+              <option value="user">{t("normalUser")}</option>
+            </select>
+          </div>
         </div>
-        <div className="divide-y">
-          {filteredUsers.map((user) => {
-            const isSelf = user.id === currentUser?.id;
-            return (
-              <div className="grid gap-3 px-3 py-3 text-sm xl:grid-cols-[1.2fr_1.3fr_90px_90px_1fr_1fr_190px]" key={user.id}>
-                <div className="min-w-0">
-                  <div className="truncate font-medium">{user.nickname}</div>
-                  <div className="truncate text-xs text-muted-foreground">{user.id}</div>
-                </div>
-                <div className="min-w-0">
-                  <div className="truncate text-muted-foreground">{user.email}</div>
-                  <div className="truncate text-xs text-muted-foreground">@{user.username ?? "-"}</div>
-                </div>
-                <div className="font-mono text-xs text-muted-foreground">
-                  {user.passwordMask ?? "********"}
-                </div>
-                <div className="text-muted-foreground">
-                  {user.role === "admin" ? t("adminUser") : t("normalUser")}
-                </div>
-                <div className="text-xs text-muted-foreground">
-                  {t("conversationCount")}: {user.conversationCount ?? 0}
-                </div>
-                <div className="text-xs text-muted-foreground">
-                  <div>{t("createdAt")}: {formatDate(user.createdAt)}</div>
-                  <div>{t("updatedAt")}: {formatDate(user.updatedAt)}</div>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  {resettingUserId === user.id ? (
-                    <>
-                      <input
-                        className="h-8 w-24 rounded-md border px-2 text-xs outline-none"
-                        minLength={4}
-                        onChange={(event) => setResetPassword(event.target.value)}
-                        placeholder={t("newPassword")}
-                        type="password"
-                        value={resetPassword}
-                      />
-                      <button
-                        className="h-8 rounded-md border px-2 text-xs hover:bg-[#f7f7f5]"
-                        onClick={() => void handleResetPassword(user.id)}
-                        type="button"
-                      >
-                        {t("save")}
-                      </button>
-                    </>
-                  ) : (
-                    <button
-                      className="flex h-8 items-center gap-1.5 rounded-md border px-2 text-xs text-muted-foreground hover:bg-[#f7f7f5]"
-                      onClick={() => {
-                        setResettingUserId(user.id);
-                        setResetPassword("");
-                      }}
-                      type="button"
-                    >
-                      <KeyRound className="size-3.5" />
-                      {t("resetPassword")}
-                    </button>
-                  )}
-                  <button
-                    className="flex h-8 items-center justify-center gap-1.5 rounded-md border px-2 text-xs text-muted-foreground hover:bg-[#f7f7f5] disabled:opacity-40"
-                    disabled={isSelf}
-                    onClick={() => void handleDeleteUser(user.id)}
-                    title={isSelf ? t("deleteSelfNotAllowed") : t("deleteUser")}
-                    type="button"
-                  >
-                    <Trash2 className="size-3.5" />
-                    {t("deleteUser")}
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-          {filteredUsers.length === 0 ? (
-            <div className="px-3 py-8 text-center text-sm text-muted-foreground">
-              {t("noUsersFound")}
-            </div>
-          ) : null}
+
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[900px] table-fixed border-collapse text-left text-sm">
+            <colgroup>
+              <col className="w-[25%]" />
+              <col className="w-[23%]" />
+              <col className="w-[9%]" />
+              <col className="w-[8%]" />
+              <col className="w-[7%]" />
+              <col className="w-[13%]" />
+              <col className="w-[15%]" />
+            </colgroup>
+            <thead className="bg-white text-xs text-muted-foreground">
+              <tr className="border-b">
+                <th className="px-3 py-2 font-medium">{t("username")}</th>
+                <th className="px-3 py-2 font-medium">{t("email")}</th>
+                <th className="px-3 py-2 font-medium">{t("role")}</th>
+                <th className="px-3 py-2 font-medium">{t("passwordMask")}</th>
+                <th className="px-3 py-2 font-medium">{t("conversationCount")}</th>
+                <th className="px-3 py-2 font-medium">{t("createdAt")}</th>
+                <th className="px-3 py-2 text-right font-medium">{t("actions")}</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y bg-white">
+              {filteredUsers.map((user) => {
+                const isSelf = user.id === currentUser?.id;
+                return (
+                  <tr className="align-middle hover:bg-[#fbfbfa]" key={user.id}>
+                    <td className="px-3 py-2">
+                      <div className="truncate font-medium">{user.nickname}</div>
+                      <div className="truncate text-xs text-muted-foreground">
+                        @{user.username ?? "-"} · {user.id}
+                      </div>
+                    </td>
+                    <td className="truncate px-3 py-2 text-muted-foreground">{user.email}</td>
+                    <td className="px-3 py-2">
+                      <span className="inline-flex max-w-full rounded-full border bg-[#f7f7f5] px-2 py-0.5 text-xs text-muted-foreground">
+                        {user.role === "admin" ? t("adminUser") : t("normalUser")}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 font-mono text-xs text-muted-foreground">
+                      {user.passwordMask ?? "********"}
+                    </td>
+                    <td className="px-3 py-2 text-muted-foreground">
+                      {user.conversationCount ?? 0}
+                    </td>
+                    <td className="px-3 py-2 text-xs text-muted-foreground">
+                      {formatDate(user.createdAt)}
+                    </td>
+                    <td className="px-3 py-2">
+                      <div className="flex justify-end gap-1.5">
+                        {resettingUserId === user.id ? (
+                          <div className="flex items-center justify-end gap-1.5">
+                            <input
+                              autoFocus
+                              className="h-8 w-28 rounded-md border px-2 text-xs outline-none focus:border-[#242424]"
+                              minLength={4}
+                              onChange={(event) => setResetPassword(event.target.value)}
+                              placeholder={t("newPassword")}
+                              type="password"
+                              value={resetPassword}
+                            />
+                            <button
+                              className="flex size-8 items-center justify-center rounded-md bg-[#242424] text-white hover:bg-[#111] disabled:opacity-40"
+                              disabled={resetPassword.length < 4}
+                              onClick={() => void handleResetPassword(user.id)}
+                              title={t("save")}
+                              type="button"
+                            >
+                              <Check className="size-3.5" />
+                            </button>
+                            <button
+                              className="flex size-8 items-center justify-center rounded-md border text-muted-foreground hover:bg-[#f7f7f5]"
+                              onClick={() => {
+                                setResettingUserId(undefined);
+                                setResetPassword("");
+                              }}
+                              title={t("cancel")}
+                              type="button"
+                            >
+                              <X className="size-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <button
+                              className="flex size-8 items-center justify-center rounded-md border border-[#dfe3ea] bg-white text-muted-foreground transition hover:border-[#b8c0cc] hover:bg-[#f7f7f5] hover:text-foreground"
+                              onClick={() => {
+                                setResettingUserId(user.id);
+                                setResetPassword("");
+                              }}
+                              title={t("resetPassword")}
+                              type="button"
+                            >
+                              <KeyRound className="size-3.5" />
+                            </button>
+                            <button
+                              className="flex size-8 items-center justify-center rounded-md border border-[#f0d6d6] bg-white text-[#a15c5c] transition hover:border-[#dfb5b5] hover:bg-[#fff7f7] disabled:border-[#e5e5e0] disabled:text-muted-foreground disabled:opacity-40"
+                              disabled={isSelf}
+                              onClick={() => void handleDeleteUser(user.id)}
+                              title={isSelf ? t("deleteSelfNotAllowed") : t("deleteUser")}
+                              type="button"
+                            >
+                              <Trash2 className="size-3.5" />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
+
+        {filteredUsers.length === 0 ? (
+          <div className="border-t bg-white px-3 py-8 text-center text-sm text-muted-foreground">
+            {t("noUsersFound")}
+          </div>
+        ) : null}
       </div>
     </div>
   );

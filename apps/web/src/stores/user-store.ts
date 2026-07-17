@@ -3,6 +3,8 @@
 import { create } from "zustand";
 import { ApiError } from "@/services/api-client";
 import { settingsApi, webAgentApi } from "@/services";
+import { useChatStore } from "./chat-store";
+import { useSettingsStore } from "./settings-store";
 import type { User } from "@/types";
 
 interface UserState {
@@ -16,6 +18,19 @@ interface UserState {
   logout: () => Promise<void>;
   register: (input: { email: string; nickname?: string; password: string; username?: string }) => Promise<boolean>;
   updateProfile: (input: Pick<User, "nickname" | "email" | "avatarUrl" | "username">) => Promise<void>;
+}
+
+function userFacingAuthError(error: unknown, fallback: string) {
+  if (error instanceof ApiError) {
+    if (error.status === 409 && error.message.includes("Username")) {
+      return "用户名已被注册。";
+    }
+    if (error.status === 409 && error.message.includes("Email")) {
+      return "邮箱已被注册。";
+    }
+  }
+
+  return error instanceof Error ? error.message : fallback;
 }
 
 export const useUserStore = create<UserState>((set, get) => ({
@@ -53,7 +68,7 @@ export const useUserStore = create<UserState>((set, get) => ({
       return true;
     } catch (error) {
       set({
-        error: error instanceof Error ? error.message : "Failed to log in.",
+        error: userFacingAuthError(error, "Failed to log in."),
         saving: false,
       });
       return false;
@@ -64,6 +79,8 @@ export const useUserStore = create<UserState>((set, get) => ({
     try {
       await webAgentApi.logout();
     } finally {
+      useChatStore.getState().resetWorkspace();
+      useSettingsStore.getState().reset();
       set({ hydrated: true, saving: false, user: undefined });
     }
   },
@@ -75,7 +92,7 @@ export const useUserStore = create<UserState>((set, get) => ({
       return true;
     } catch (error) {
       set({
-        error: error instanceof Error ? error.message : "Failed to register.",
+        error: userFacingAuthError(error, "Failed to register."),
         saving: false,
       });
       return false;

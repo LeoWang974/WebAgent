@@ -2,6 +2,7 @@ import asyncio
 
 from sqlalchemy import select, update
 
+from app.core.config import settings
 from app.core.security import hash_password
 from app.db.session import AsyncSessionLocal
 from app.models import Conversation, User
@@ -60,6 +61,9 @@ async def count_conversations_for_user(user: User) -> int:
 
 
 async def main() -> None:
+    if settings.is_production:
+        raise RuntimeError("seed_local_users.py is for local development only.")
+
     test_user = await upsert_user(
         email="test@webagent.local",
         username="test",

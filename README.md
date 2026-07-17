@@ -126,4 +126,8 @@ fallback or an insecure JWT secret is configured.
 The API also starts a lightweight cleanup loop when `CLEANUP_ENABLED=true`.
 Admins can run it on demand through `POST /api/admin/cleanup`.
 
+Local development may use `python services/api/scripts/seed_local_users.py` to
+create `test/test` and `admin/admin`. These accounts are local-only fixtures:
+do not seed or keep them in production.
+
 See `docs/PRODUCTION.md` for the deployment checklist.

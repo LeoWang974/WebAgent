@@ -325,6 +325,7 @@ async def list_sessions(
         .outerjoin(ConversationShare, ConversationShare.conversation_id == Conversation.id)
         .where(
             or_(
+                current_user.role == "admin",
                 Conversation.user_id == current_user.id,
                 Conversation.visibility == "public",
                 (Conversation.visibility == "shared")
@@ -582,6 +583,7 @@ async def stream_session_message(
         run: AgentRun | None = None
         assistant_event_count = 0
         artifact_discovery_summary: dict[str, object] = {}
+        short_chat_fast_closed = False
         run_started_monotonic = asyncio.get_running_loop().time()
 
         try:
@@ -734,6 +736,9 @@ async def stream_session_message(
                             "runId": run.id,
                         },
                     )
+                    if resolved_skill_key is None:
+                        short_chat_fast_closed = True
+                        break
             else:
                 runtime_run = await adapter.create_run(adapter_input)
                 if await is_agent_run_cancelled(db, run.id):
@@ -769,6 +774,56 @@ async def stream_session_message(
 
             if await is_agent_run_cancelled(db, run.id):
                 raise AgentRunCancelled()
+
+            if resolved_skill_key is None and assistant_messages:
+                assistant_message = assistant_messages[-1]
+                if short_chat_fast_closed:
+                    await record_db_agent_run_event(
+                        db,
+                        run,
+                        event_type="completed",
+                        label="Short chat completed after first response",
+                        status="running",
+                        progress=95,
+                        payload={
+                            "messageId": assistant_message.id,
+                            "shortChatFastClose": True,
+                            "artifactDiscoverySkipped": True,
+                        },
+                    )
+                conversation = await refresh_conversation(db, session_id)
+                conversation.status = "active"
+                await finish_db_agent_run(
+                    db,
+                    run,
+                    status="completed",
+                    label="Agent run completed",
+                    output=assistant_message.content,
+                )
+                await db.commit()
+                conversation = await refresh_conversation(db, session_id)
+                yield sse(
+                    "assistant_done",
+                    {
+                        "message": to_message(assistant_message).model_dump(by_alias=True),
+                        "session": to_session(conversation).model_dump(by_alias=True),
+                        "runId": run.id,
+                        "status": "completed",
+                    },
+                )
+                if hasattr(adapter, "cancel_run"):
+                    async def cleanup_short_chat_run() -> None:
+                        try:
+                            await adapter.cancel_run(run.id)
+                        except Exception as error:
+                            logger.warning(
+                                "Failed to cleanup short chat adapter run %s: %s",
+                                run.id,
+                                error,
+                            )
+
+                    asyncio.create_task(cleanup_short_chat_run())
+                return
 
             explicit_artifact_paths = (
                 adapter.get_last_artifact_paths()

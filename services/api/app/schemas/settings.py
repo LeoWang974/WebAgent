@@ -19,3 +19,4 @@ class ProfileUpdate(ApiModel):
 class PasswordUpdate(ApiModel):
     current_password: str
     new_password: str
+    relogin: bool = False

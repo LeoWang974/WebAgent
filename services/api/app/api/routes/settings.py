@@ -6,7 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import schemas
-from app.core.security import hash_password, verify_password
+from app.core.security import create_access_token, hash_password, verify_password
 from app.db.session import get_db
 from app.models import ModelConfig, SkillConfig, SkillVersion, User, UserSettings
 from app.services.persistence import get_current_user, get_user_by_username, normalize_email, normalize_username
@@ -240,12 +240,12 @@ async def update_profile(
     return to_user_schema(current_user)
 
 
-@router.put("/profile/password", status_code=204)
+@router.put("/profile/password", response_model=schemas.AuthResult | None)
 async def update_password(
     input_data: schemas.PasswordUpdate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-) -> None:
+) -> schemas.AuthResult | None:
     if len(input_data.new_password) < 4:
         raise HTTPException(status_code=400, detail="New password must be at least 4 characters")
 
@@ -255,6 +255,14 @@ async def update_password(
 
     current_user.hashed_password = hash_password(input_data.new_password)
     await db.commit()
+    await db.refresh(current_user)
+
+    if input_data.relogin:
+        return schemas.AuthResult(
+            access_token=create_access_token(current_user.id),
+            user=to_user_schema(current_user),
+        )
+
     return None
 
 
