@@ -13,6 +13,11 @@ cd services\api
 
 Current backend coverage:
 
+- `tests/test_api_integration.py`
+  - Agent Run SSE persists run events and creates artifacts from adapter paths.
+  - Artifact discovery output can be persisted and served through API permissions.
+  - Private, shared, and public session access rules.
+  - Shared users can read shared sessions, while non-owners cannot delete.
 - `tests/test_artifact_discovery.py`
   - Windows and WSL path normalization.
   - Artifact creation from file paths.
