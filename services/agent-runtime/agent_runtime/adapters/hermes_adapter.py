@@ -188,16 +188,23 @@ class HermesAdapter(AgentRuntimeAdapter):
             toolsets=toolsets,
             skills=skills,
         ):
-            content = str(event.get("content") or "").strip()
+            if hasattr(event, "content"):
+                content = str(event.content or "").strip()
+                event_type = str(getattr(event, "event_type", "stage_update") or "stage_update")
+                payload = event.to_payload() if hasattr(event, "to_payload") else {}
+            else:
+                content = str(event.get("content") or "").strip()
+                event_type = str(event.get("event_type") or "stage_update")
+                payload = dict(event.get("payload") or {})
             if not content:
                 continue
             event_index += 1
             yield AgentRunEvent(
                 run_id=input_data.run_id or input_data.session_id,
-                event_type=str(event.get("event_type") or "stage_update"),
+                event_type=event_type,
                 status="running",
                 progress=min(90, 10 + event_index * 8),
-                payload=dict(event.get("payload") or {}),
+                payload=payload,
                 step=AgentRunStep(
                     id=f"{input_data.run_id or input_data.session_id}_stage_{event_index}",
                     label=content,

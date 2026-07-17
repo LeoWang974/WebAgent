@@ -3,6 +3,9 @@ from functools import cached_property
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+PRODUCTION_ENVIRONMENTS = {"prod", "production"}
+INSECURE_JWT_SECRETS = {"", "change-me", "change-me-in-local-env"}
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
@@ -31,10 +34,29 @@ class Settings(BaseSettings):
     agent_run_overall_timeout_seconds: int = 2 * 60 * 60
     agent_run_ppt_export_timeout_seconds: int = 180
     agent_run_event_poll_interval_seconds: float = 1.0
+    cleanup_enabled: bool = True
+    cleanup_initial_delay_seconds: int = 60
+    cleanup_interval_seconds: int = 6 * 60 * 60
+    cleanup_runtime_file_max_age_days: int = 14
+    cleanup_disconnected_run_max_age_days: int = 30
 
     @cached_property
     def cors_origins(self) -> list[str]:
         return [origin.strip() for origin in self.backend_cors_origins.split(",") if origin.strip()]
+
+    @cached_property
+    def is_production(self) -> bool:
+        return self.environment.lower() in PRODUCTION_ENVIRONMENTS
+
+    def validate_runtime_safety(self) -> None:
+        if not self.is_production:
+            return
+        if self.allow_dev_auth_fallback:
+            raise RuntimeError("ALLOW_DEV_AUTH_FALLBACK must be false in production.")
+        if self.jwt_secret_key in INSECURE_JWT_SECRETS or len(self.jwt_secret_key) < 32:
+            raise RuntimeError("JWT_SECRET_KEY must be a strong secret in production.")
+        if not self.cors_origins:
+            raise RuntimeError("BACKEND_CORS_ORIGINS must include the production web origin.")
 
 
 settings = Settings()

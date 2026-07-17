@@ -102,3 +102,28 @@ pnpm exec next start --port 3002
 ```
 
 For production, run the frontend after `pnpm --filter web build`, place FastAPI and Next.js behind nginx/Caddy, and point Hermes paths in `services/api/.env` to the mac/server filesystem layout. Keep runtime outputs outside git-tracked directories and preserve the `.next` / `.next-build` separation.
+
+## Production Configuration
+
+Production templates are provided but contain placeholders:
+
+- `.env.production.example`
+- `apps/web/.env.production.example`
+- `services/api/.env.production.example`
+
+Required production settings:
+
+- `NEXT_PUBLIC_API_ADAPTER=fastapi`
+- `ENVIRONMENT=production`
+- `ALLOW_DEV_AUTH_FALLBACK=false`
+- `JWT_SECRET_KEY` must be a strong non-placeholder secret with at least 32 characters.
+- `BACKEND_CORS_ORIGINS` must match the public web origin.
+
+The frontend now rejects production builds unless the API adapter is explicitly
+set to `fastapi`. The backend refuses to start in production when dev auth
+fallback or an insecure JWT secret is configured.
+
+The API also starts a lightweight cleanup loop when `CLEANUP_ENABLED=true`.
+Admins can run it on demand through `POST /api/admin/cleanup`.
+
+See `docs/PRODUCTION.md` for the deployment checklist.

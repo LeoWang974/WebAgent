@@ -19,8 +19,8 @@ Current backend coverage:
   - Content-hash based dedupe.
 - `tests/test_runtime_context_builder.py`
   - Runtime path normalization.
-  - Non-target skills do not receive artifact context.
-  - `ppt_generation` receives only a small set of relevant artifacts.
+  - `deep_research` receives only a small set of relevant artifacts.
+  - `ppt_generation` prioritizes final reports and limits injected paths.
 
 Compile check:
 

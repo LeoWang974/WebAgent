@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import shlex
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import AsyncGenerator, Optional, Tuple
@@ -38,6 +39,31 @@ BOX_CODEPOINTS = {
     0x256F,
     0x2570,
 }
+
+
+@dataclass(frozen=True)
+class HermesStreamEvent:
+    event_type: str
+    content: str
+    artifact_paths: list[str] = field(default_factory=list)
+    artifacts: list[dict[str, str | None]] = field(default_factory=list)
+    raw_log_path: str | None = None
+    completion_detected: bool = False
+    payload: dict[str, object] = field(default_factory=dict)
+
+    def to_payload(self) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "protocol": "hermes.stream.v1",
+            "hermesEventType": self.event_type,
+            "content": self.content,
+            "artifact_paths": self.artifact_paths,
+            "artifacts": self.artifacts,
+            "completionDetected": self.completion_detected,
+        }
+        if self.raw_log_path:
+            payload["rawLogPath"] = self.raw_log_path
+        payload.update(self.payload)
+        return payload
 
 
 class HermesCliWrapper:
@@ -219,6 +245,33 @@ class HermesCliWrapper:
                     }
                 )
 
+    def _build_stream_event(
+        self,
+        *,
+        content: str,
+        raw_log_path: Path | None,
+        run_id: Optional[str],
+        completion_detected: bool,
+        payload: dict[str, object] | None = None,
+    ) -> HermesStreamEvent:
+        artifacts: list[dict[str, str | None]] = []
+        for item in self.last_artifacts:
+            artifact = dict(item)
+            if run_id and not artifact.get("run_id"):
+                artifact["run_id"] = run_id
+            artifacts.append(artifact)
+
+        event_type = "completion_signal" if completion_detected else "stage_update"
+        return HermesStreamEvent(
+            event_type=event_type,
+            content=content,
+            artifact_paths=list(self.last_artifact_paths),
+            artifacts=artifacts,
+            raw_log_path=str(raw_log_path) if raw_log_path else None,
+            completion_detected=completion_detected,
+            payload=payload or {},
+        )
+
     async def _terminate_process_tree(
         self,
         process: asyncio.subprocess.Process,
@@ -260,13 +313,16 @@ class HermesCliWrapper:
     def _is_completion_signal(text: str) -> bool:
         normalized = re.sub(r"\s+", "", text.lower())
         completion_markers = [
-            "报告已完成",
-            "报告已生成",
-            "任务已完成",
-            "任务完成",
-            "最终报告已完成",
-            "最终报告已生成",
-            "已生成最终报告",
+            "\u62a5\u544a\u5df2\u5b8c\u6210",
+            "\u62a5\u544a\u5df2\u751f\u6210",
+            "\u4efb\u52a1\u5df2\u5b8c\u6210",
+            "\u4efb\u52a1\u5b8c\u6210",
+            "\u6700\u7ec8\u62a5\u544a\u5df2\u5b8c\u6210",
+            "\u6700\u7ec8\u62a5\u544a\u5df2\u751f\u6210",
+            "\u5df2\u751f\u6210\u6700\u7ec8\u62a5\u544a",
+            "pptx\u8f6c\u6362\u5b8c\u6210",
+            "ppt\u5df2\u751f\u6210",
+            "\u8f6c\u6362\u5b8c\u6210",
             "finalreportcompleted",
             "reportcompleted",
         ]
@@ -377,7 +433,7 @@ class HermesCliWrapper:
             model=model,
             run_id=run_id,
         ):
-            content = str(event.get("content") or "").strip()
+            content = event.content.strip()
             if content:
                 yield content
 
@@ -389,7 +445,7 @@ class HermesCliWrapper:
         skills: Optional[str] = None,
         model: Optional[str] = None,
         run_id: Optional[str] = None,
-    ) -> AsyncGenerator[dict, None]:
+    ) -> AsyncGenerator[HermesStreamEvent, None]:
         self.last_artifact_paths = []
         self.last_artifacts = []
         self.last_diagnostics = {
@@ -550,17 +606,14 @@ class HermesCliWrapper:
                             emitted_output = True
                             last_emitted = flushed
                             self.last_diagnostics["last_stage"] = flushed
-                            logger.info("Hermes stage emitted: %s", flushed[:500])
-                            yield {
-                                "content": flushed,
-                                "event_type": "stage_update",
-                                "payload": {
-                                    "artifact_paths": list(self.last_artifact_paths),
-                                    "artifacts": list(self.last_artifacts),
-                                    "rawLogPath": str(raw_log_path),
-                                },
-                            }
                             completion_detected = self._is_completion_signal(flushed)
+                            logger.info("Hermes stage emitted: %s", flushed[:500])
+                            yield self._build_stream_event(
+                                content=flushed,
+                                raw_log_path=raw_log_path,
+                                run_id=run_id,
+                                completion_detected=completion_detected,
+                            )
                     in_hermes_box = True
                     continue
 
@@ -574,17 +627,14 @@ class HermesCliWrapper:
                         emitted_output = True
                         last_emitted = flushed
                         self.last_diagnostics["last_stage"] = flushed
-                        logger.info("Hermes stage emitted: %s", flushed[:500])
-                        yield {
-                            "content": flushed,
-                            "event_type": "stage_update",
-                            "payload": {
-                                "artifact_paths": list(self.last_artifact_paths),
-                                "artifacts": list(self.last_artifacts),
-                                "rawLogPath": str(raw_log_path),
-                            },
-                        }
                         completion_detected = self._is_completion_signal(flushed)
+                        logger.info("Hermes stage emitted: %s", flushed[:500])
+                        yield self._build_stream_event(
+                            content=flushed,
+                            raw_log_path=raw_log_path,
+                            run_id=run_id,
+                            completion_detected=completion_detected,
+                        )
                     in_hermes_box = False
                     continue
 
@@ -601,17 +651,14 @@ class HermesCliWrapper:
             if flushed and flushed != last_emitted:
                 emitted_output = True
                 self.last_diagnostics["last_stage"] = flushed
-                logger.info("Hermes stage emitted: %s", flushed[:500])
-                yield {
-                    "content": flushed,
-                    "event_type": "stage_update",
-                    "payload": {
-                        "artifact_paths": list(self.last_artifact_paths),
-                        "artifacts": list(self.last_artifacts),
-                        "rawLogPath": str(raw_log_path),
-                    },
-                }
                 completion_detected = self._is_completion_signal(flushed)
+                logger.info("Hermes stage emitted: %s", flushed[:500])
+                yield self._build_stream_event(
+                    content=flushed,
+                    raw_log_path=raw_log_path,
+                    run_id=run_id,
+                    completion_detected=completion_detected,
+                )
 
         if completion_detected:
             await stop_after_completion()

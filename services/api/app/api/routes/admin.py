@@ -1,3 +1,5 @@
+from dataclasses import asdict
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
@@ -19,6 +21,7 @@ from app.models import (
     UserSettings,
 )
 from app.services.persistence import get_current_user, get_user_by_email, normalize_email
+from app.services.cleanup_scheduler import run_configured_data_cleanup
 
 router = APIRouter()
 
@@ -120,3 +123,12 @@ async def delete_user(
     await db.delete(user)
     await db.commit()
     return None
+
+
+@router.post("/cleanup")
+async def run_cleanup(
+    current_user: User = Depends(get_current_user),
+) -> dict[str, int]:
+    require_admin(current_user)
+    result = await run_configured_data_cleanup()
+    return asdict(result)
