@@ -16,6 +16,7 @@ export default function RegisterPage() {
   const [email, setEmail] = useState("");
   const [nickname, setNickname] = useState("");
   const [password, setPassword] = useState("");
+  const [username, setUsername] = useState("");
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -23,6 +24,7 @@ export default function RegisterPage() {
       email: email.trim(),
       nickname: nickname.trim() || undefined,
       password,
+      username: username.trim() || undefined,
     });
     if (ok) {
       router.replace("/app");
@@ -57,6 +59,17 @@ export default function RegisterPage() {
             />
           </label>
           <label className="block space-y-1.5">
+            <span className="text-xs font-medium">{t("username")}</span>
+            <input
+              autoComplete="username"
+              className="h-10 w-full rounded-md border px-3 text-sm outline-none focus:ring-1 focus:ring-[#242424]"
+              onChange={(event) => setUsername(event.target.value)}
+              pattern="[A-Za-z0-9_.-]{3,80}"
+              placeholder="test"
+              value={username}
+            />
+          </label>
+          <label className="block space-y-1.5">
             <span className="text-xs font-medium">{t("email")}</span>
             <input
               autoComplete="email"
@@ -72,7 +85,7 @@ export default function RegisterPage() {
             <input
               autoComplete="new-password"
               className="h-10 w-full rounded-md border px-3 text-sm outline-none focus:ring-1 focus:ring-[#242424]"
-              minLength={6}
+              minLength={4}
               onChange={(event) => setPassword(event.target.value)}
               required
               type="password"

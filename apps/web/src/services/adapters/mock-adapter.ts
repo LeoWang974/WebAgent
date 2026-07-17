@@ -36,7 +36,7 @@ let messages: Message[] = [...mockMessages];
 let artifacts: Artifact[] = [...mockArtifacts];
 let files: FileAsset[] = [];
 let runs: AgentRun[] = [];
-let users: User[] = [{ ...mockUser, role: "admin" }];
+let users: User[] = [{ ...mockUser, passwordMask: "********", role: "admin" }];
 
 function createId(prefix: string) {
   return `${prefix}_${Date.now()}`;
@@ -109,7 +109,9 @@ export const mockAdapter: WebAgentApiAdapter = {
       email: input.email,
       id: createId("user"),
       nickname: input.nickname || input.email.split("@")[0],
+      passwordMask: "********",
       role: input.role,
+      username: input.username,
     };
     users = [user, ...users];
     return user;
@@ -172,8 +174,8 @@ export const mockAdapter: WebAgentApiAdapter = {
   },
   async login(input: LoginInput) {
     return {
-      accessToken: `mock_token_${input.email}`,
-      user: { ...mockUser, email: input.email },
+      accessToken: `mock_token_${input.identifier ?? input.username ?? input.email}`,
+      user: { ...mockUser, email: input.email ?? mockUser.email, username: input.username ?? input.identifier },
     };
   },
   async logout() {
@@ -212,8 +214,17 @@ export const mockAdapter: WebAgentApiAdapter = {
   async register(input: RegisterInput) {
     return {
       accessToken: `mock_token_${input.email}`,
-      user: { ...mockUser, email: input.email },
+      user: { ...mockUser, email: input.email, username: input.username },
     };
+  },
+  async resetUserPassword(userId: string) {
+    const user = users.find((item) => item.id === userId);
+    if (!user) {
+      throw new Error("User not found");
+    }
+    const updatedUser = { ...user, passwordMask: "********" };
+    users = users.map((item) => (item.id === userId ? updatedUser : item));
+    return updatedUser;
   },
   async sendMessage(input: SendMessageInput): Promise<SendMessageResult> {
     const now = new Date().toISOString();

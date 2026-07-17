@@ -159,6 +159,12 @@ export const fastApiAdapter: WebAgentApiAdapter = {
 
     return persistAuth(result);
   },
+  resetUserPassword(userId: string, newPassword: string) {
+    return apiClient<User>(`/api/admin/users/${userId}/password`, {
+      body: JSON.stringify({ newPassword }),
+      method: "POST",
+    });
+  },
   sendMessage(input: SendMessageInput) {
     return apiClient<SendMessageResult>(
       `/api/sessions/${input.sessionId}/messages`,

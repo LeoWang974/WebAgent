@@ -13,14 +13,15 @@ export default function LoginPage() {
   const login = useUserStore((state) => state.login);
   const saving = useUserStore((state) => state.saving);
   const error = useUserStore((state) => state.error);
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const ok = await login({ email: email.trim(), password });
+    const ok = await login({ identifier: identifier.trim(), password });
     if (ok) {
-      router.replace("/app");
+      const user = useUserStore.getState().user;
+      router.replace(user?.role === "admin" ? "/app/admin" : "/app");
     }
   }
 
@@ -42,14 +43,14 @@ export default function LoginPage() {
 
         <div className="space-y-3">
           <label className="block space-y-1.5">
-            <span className="text-xs font-medium">{t("email")}</span>
+            <span className="text-xs font-medium">{t("usernameOrEmail")}</span>
             <input
-              autoComplete="email"
+              autoComplete="username"
               className="h-10 w-full rounded-md border px-3 text-sm outline-none focus:ring-1 focus:ring-[#242424]"
-              onChange={(event) => setEmail(event.target.value)}
+              onChange={(event) => setIdentifier(event.target.value)}
               required
-              type="email"
-              value={email}
+              type="text"
+              value={identifier}
             />
           </label>
           <label className="block space-y-1.5">
@@ -57,7 +58,7 @@ export default function LoginPage() {
             <input
               autoComplete="current-password"
               className="h-10 w-full rounded-md border px-3 text-sm outline-none focus:ring-1 focus:ring-[#242424]"
-              minLength={6}
+              minLength={4}
               onChange={(event) => setPassword(event.target.value)}
               required
               type="password"

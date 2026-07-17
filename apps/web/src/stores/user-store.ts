@@ -12,10 +12,10 @@ interface UserState {
   savedAt?: string;
   user?: User;
   hydrate: () => Promise<void>;
-  login: (input: { email: string; password: string }) => Promise<boolean>;
+  login: (input: { email?: string; identifier?: string; password: string; username?: string }) => Promise<boolean>;
   logout: () => Promise<void>;
-  register: (input: { email: string; nickname?: string; password: string }) => Promise<boolean>;
-  updateProfile: (input: Pick<User, "nickname" | "email" | "avatarUrl">) => Promise<void>;
+  register: (input: { email: string; nickname?: string; password: string; username?: string }) => Promise<boolean>;
+  updateProfile: (input: Pick<User, "nickname" | "email" | "avatarUrl" | "username">) => Promise<void>;
 }
 
 export const useUserStore = create<UserState>((set, get) => ({

@@ -9,7 +9,7 @@ from app import schemas
 from app.core.security import hash_password, verify_password
 from app.db.session import get_db
 from app.models import ModelConfig, SkillConfig, SkillVersion, User, UserSettings
-from app.services.persistence import get_current_user, normalize_email
+from app.services.persistence import get_current_user, get_user_by_username, normalize_email, normalize_username
 
 router = APIRouter()
 
@@ -105,6 +105,7 @@ def to_user_schema(user: User) -> schemas.User:
         id=user.id,
         nickname=user.nickname,
         email=user.email,
+        username=user.username,
         avatar_url=user.avatar_url,
         role=user.role,
     )
@@ -223,6 +224,12 @@ async def update_profile(
 ) -> schemas.User:
     current_user.nickname = input_data.nickname
     current_user.email = normalize_email(input_data.email)
+    username = normalize_username(input_data.username)
+    if username and username != current_user.username:
+        existing_user = await get_user_by_username(db, username)
+        if existing_user is not None and existing_user.id != current_user.id:
+            raise HTTPException(status_code=409, detail="Username is already in use")
+    current_user.username = username
     current_user.avatar_url = input_data.avatar_url
     try:
         await db.commit()
@@ -239,8 +246,8 @@ async def update_password(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> None:
-    if len(input_data.new_password) < 6:
-        raise HTTPException(status_code=400, detail="New password must be at least 6 characters")
+    if len(input_data.new_password) < 4:
+        raise HTTPException(status_code=400, detail="New password must be at least 4 characters")
 
     if not verify_password(input_data.current_password, current_user.hashed_password):
         if current_user.hashed_password != input_data.current_password:

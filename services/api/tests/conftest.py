@@ -40,10 +40,28 @@ async def db_sessionmaker(tmp_path) -> AsyncGenerator[async_sessionmaker[AsyncSe
 @pytest_asyncio.fixture
 async def seeded_users(db_sessionmaker: async_sessionmaker[AsyncSession]) -> dict[str, User]:
     async with db_sessionmaker() as db:
-        owner = await ensure_user(db, "owner@example.com", nickname="Owner")
-        shared = await ensure_user(db, "shared@example.com", nickname="Shared")
-        stranger = await ensure_user(db, "stranger@example.com", nickname="Stranger")
-        admin = await ensure_user(db, "admin@example.com", nickname="Admin", role="admin")
+        owner = await ensure_user(
+            db,
+            "owner@example.com",
+            "ownerpass",
+            nickname="Owner",
+            username="owner",
+        )
+        shared = await ensure_user(db, "shared@example.com", nickname="Shared", username="shared")
+        stranger = await ensure_user(
+            db,
+            "stranger@example.com",
+            nickname="Stranger",
+            username="stranger",
+        )
+        admin = await ensure_user(
+            db,
+            "admin@example.com",
+            "adminpass",
+            nickname="Admin",
+            role="admin",
+            username="admin",
+        )
         return {
             "owner": owner,
             "shared": shared,

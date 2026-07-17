@@ -11,6 +11,7 @@ export const mockUser: User = {
   id: "user_1",
   nickname: "WebAgent User",
   email: "user@example.com",
+  username: "demo",
 };
 
 export const mockSkills: Skill[] = [

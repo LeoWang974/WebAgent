@@ -20,16 +20,19 @@ export function ProfileSettings() {
   const [passwordError, setPasswordError] = useState<string | undefined>();
   const [passwordSaved, setPasswordSaved] = useState(false);
   const [passwordSaving, setPasswordSaving] = useState(false);
+  const [username, setUsername] = useState("");
 
   useEffect(() => {
     setAvatarUrl(user?.avatarUrl ?? "");
     setEmail(user?.email ?? "");
     setNickname(user?.nickname ?? "");
+    setUsername(user?.username ?? "");
   }, [user]);
 
   const dirty =
     nickname !== (user?.nickname ?? "") ||
     email !== (user?.email ?? "") ||
+    username !== (user?.username ?? "") ||
     avatarUrl !== (user?.avatarUrl ?? "");
   const valid = nickname.trim().length > 0 && email.includes("@");
 
@@ -44,13 +47,14 @@ export function ProfileSettings() {
       avatarUrl: avatarUrl.trim() || undefined,
       email: email.trim(),
       nickname: nickname.trim(),
+      username: username.trim() || undefined,
     });
   }
 
   async function handlePasswordSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!currentPassword || newPassword.length < 6) {
+    if (!currentPassword || newPassword.length < 4) {
       setPasswordError(t("passwordValidation"));
       return;
     }
@@ -101,6 +105,17 @@ export function ProfileSettings() {
                 onChange={(event) => setNickname(event.target.value)}
                 placeholder="WebAgent User"
                 value={nickname}
+              />
+            </label>
+            <label className="space-y-1">
+              <span className="text-xs font-medium">{t("username")}</span>
+              <input
+                autoComplete="username"
+                className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-[#242424]"
+                onChange={(event) => setUsername(event.target.value)}
+                pattern="[A-Za-z0-9_.-]{3,80}"
+                placeholder="test"
+                value={username}
               />
             </label>
             <label className="space-y-1">
@@ -165,7 +180,7 @@ export function ProfileSettings() {
             <input
               autoComplete="new-password"
               className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-[#242424]"
-              minLength={6}
+              minLength={4}
               onChange={(event) => setNewPassword(event.target.value)}
               type="password"
               value={newPassword}
@@ -185,7 +200,7 @@ export function ProfileSettings() {
           </div>
           <button
             className="flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-[#f7f7f5] disabled:opacity-40"
-            disabled={!currentPassword || newPassword.length < 6 || passwordSaving}
+            disabled={!currentPassword || newPassword.length < 4 || passwordSaving}
             type="submit"
           >
             {passwordSaving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}

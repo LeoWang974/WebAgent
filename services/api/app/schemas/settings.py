@@ -13,6 +13,7 @@ class ProfileUpdate(ApiModel):
     avatar_url: str | None = None
     email: str
     nickname: str
+    username: str | None = None
 
 
 class PasswordUpdate(ApiModel):

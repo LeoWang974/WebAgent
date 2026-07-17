@@ -6,7 +6,7 @@ import type {
   User,
 } from "@/types";
 
-export type ProfileUpdateInput = Pick<User, "avatarUrl" | "email" | "nickname">;
+export type ProfileUpdateInput = Pick<User, "avatarUrl" | "email" | "nickname" | "username">;
 
 export interface PasswordUpdateInput {
   currentPassword: string;

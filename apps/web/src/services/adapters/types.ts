@@ -19,12 +19,16 @@ export interface CreateSessionInput {
 }
 
 export interface LoginInput {
-  email: string;
+  email?: string;
+  identifier?: string;
   password: string;
+  username?: string;
 }
 
 export interface RegisterInput extends LoginInput {
+  email: string;
   nickname?: string;
+  username?: string;
 }
 
 export interface AdminUserCreateInput extends RegisterInput {
@@ -133,6 +137,7 @@ export interface WebAgentApiAdapter {
   listSkills(): Promise<Skill[]>;
   listUsers(): Promise<User[]>;
   register(input: RegisterInput): Promise<AuthResult>;
+  resetUserPassword(userId: string, newPassword: string): Promise<User>;
   sendMessage(input: SendMessageInput): Promise<SendMessageResult>;
   sendMessageStream(
     input: SendMessageInput,

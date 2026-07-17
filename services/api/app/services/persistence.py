@@ -22,17 +22,28 @@ def normalize_email(email: str) -> str:
     return email.strip().lower()
 
 
+def normalize_username(username: str | None) -> str | None:
+    value = (username or "").strip().lower()
+    return value or None
+
+
 async def ensure_user(
     db: AsyncSession,
     email: str,
     password: str | None = None,
     nickname: str | None = None,
     role: str = "user",
+    username: str | None = None,
 ) -> User:
     email = normalize_email(email)
     result = await db.execute(select(User).where(User.email == email))
     user = result.scalar_one_or_none()
     if user is not None:
+        normalized_username = normalize_username(username)
+        if normalized_username and not user.username:
+            user.username = normalized_username
+            await db.commit()
+            await db.refresh(user)
         return user
 
     display_name = nickname.strip() if nickname and nickname.strip() else email.split("@", maxsplit=1)[0]
@@ -41,6 +52,7 @@ async def ensure_user(
         hashed_password=hash_password(password) if password else None,
         nickname=display_name or "user",
         role=role,
+        username=normalize_username(username),
     )
     db.add(user)
     await db.commit()
@@ -51,6 +63,23 @@ async def ensure_user(
 async def get_user_by_email(db: AsyncSession, email: str) -> User | None:
     result = await db.execute(select(User).where(User.email == normalize_email(email)))
     return result.scalar_one_or_none()
+
+
+async def get_user_by_username(db: AsyncSession, username: str | None) -> User | None:
+    normalized_username = normalize_username(username)
+    if not normalized_username:
+        return None
+    result = await db.execute(select(User).where(User.username == normalized_username))
+    return result.scalar_one_or_none()
+
+
+async def get_user_by_identifier(db: AsyncSession, identifier: str | None) -> User | None:
+    value = (identifier or "").strip()
+    if not value:
+        return None
+    if "@" in value:
+        return await get_user_by_email(db, value)
+    return await get_user_by_username(db, value)
 
 
 async def get_user_by_id(db: AsyncSession, user_id: str) -> User | None:

@@ -6,13 +6,15 @@ from app.schemas.model import ModelConfig
 from app.schemas.session import Session, SessionCreate, SessionShare, SessionUpdate
 from app.schemas.settings import DataContextSettings, PasswordUpdate, ProfileUpdate
 from app.schemas.skill import Skill
-from app.schemas.user import User
+from app.schemas.user import AdminPasswordReset, AdminUser, User
 
 __all__ = [
     "AgentRun",
     "AgentRunCreate",
     "AgentRunEvent",
     "AgentRunStep",
+    "AdminUser",
+    "AdminPasswordReset",
     "AdminUserCreate",
     "Artifact",
     "ArtifactSlides",

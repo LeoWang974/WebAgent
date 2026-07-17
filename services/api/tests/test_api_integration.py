@@ -124,6 +124,47 @@ async def test_session_permissions_and_share_access(
 
 
 @pytest.mark.asyncio
+async def test_username_login_and_admin_user_list_password_mask(
+    api_client: AsyncClient,
+    auth_headers: dict[str, dict[str, str]],
+):
+    login_response = await api_client.post(
+        "/api/auth/login",
+        json={"identifier": "owner", "password": "ownerpass"},
+    )
+    assert login_response.status_code == 200
+    assert login_response.json()["user"]["username"] == "owner"
+
+    users_response = await api_client.get(
+        "/api/admin/users",
+        headers=auth_headers["admin"],
+    )
+    assert users_response.status_code == 200
+    users = users_response.json()
+    assert any(user["username"] == "admin" for user in users)
+    assert all("passwordMask" in user for user in users)
+    assert all(user["passwordMask"] in {"********", "未设置"} for user in users)
+    assert all("conversationCount" in user for user in users)
+    assert all("createdAt" in user for user in users)
+    assert all("updatedAt" in user for user in users)
+
+    owner = next(user for user in users if user["username"] == "owner")
+    reset_response = await api_client.post(
+        f"/api/admin/users/{owner['id']}/password",
+        json={"newPassword": "nextpass"},
+        headers=auth_headers["admin"],
+    )
+    assert reset_response.status_code == 200
+    assert reset_response.json()["passwordMask"] == "********"
+
+    relogin_response = await api_client.post(
+        "/api/auth/login",
+        json={"identifier": "owner", "password": "nextpass"},
+    )
+    assert relogin_response.status_code == 200
+
+
+@pytest.mark.asyncio
 async def test_artifact_discovery_persists_and_respects_permissions(
     api_client: AsyncClient,
     auth_headers: dict[str, dict[str, str]],
