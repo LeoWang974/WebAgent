@@ -18,7 +18,12 @@ from app.services.persistence import get_conversation_or_404
 try:
     from agent_runtime.adapters import HermesAdapter, OpenClawAdapter
 
-    openclaw_adapter = OpenClawAdapter(settings.openclaw_base_url)
+    openclaw_adapter = OpenClawAdapter(
+        settings.openclaw_base_url,
+        agent_id=settings.openclaw_agent_id,
+        cli_path=settings.openclaw_cli_path,
+        command_timeout_seconds=settings.openclaw_command_timeout_seconds,
+    )
     hermes_adapter = HermesAdapter(
         hermes_path=settings.hermes_cli_path,
         hermes_home=settings.hermes_home,

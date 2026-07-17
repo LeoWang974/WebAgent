@@ -25,7 +25,10 @@ class Settings(BaseSettings):
     sensenova_api_key: str | None = None
     sensenova_base_url: str | None = None
     agent_runtime_default: str = "hermes"
-    openclaw_base_url: str = "http://localhost:8643"
+    openclaw_base_url: str = "ws://127.0.0.1:18789"
+    openclaw_agent_id: str = "main"
+    openclaw_cli_path: str = "openclaw"
+    openclaw_command_timeout_seconds: int = 600
     hermes_base_url: str = "http://localhost:8642"
     hermes_cli_path: str = "/home/zhuchangbiaozhu_xyl/.local/bin/hermes"
     hermes_home: str = "/home/zhuchangbiaozhu_xyl/.hermes"
