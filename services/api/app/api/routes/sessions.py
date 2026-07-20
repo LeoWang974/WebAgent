@@ -27,6 +27,7 @@ from app.models import (
 from app.services import mock_store
 from app.services.artifact_discovery import (
     create_artifacts_from_paths,
+    create_artifacts_from_refs,
     create_pptx_from_html_artifacts,
     discover_artifact_paths_from_hermes_sessions,
     discover_artifacts_since,
@@ -65,6 +66,7 @@ def runtime_diagnostics(adapter: object, artifact_discovery_summary: dict[str, o
     )
     return {
         "artifactDiscovery": artifact_discovery_summary,
+        "runtimeDiagnostics": diagnostics,
         "hermesDiagnostics": diagnostics,
     }
 
@@ -95,13 +97,20 @@ async def discover_artifacts_with_retry(
     since: datetime,
     explicit_artifact_paths: list[str],
     run_id: str | None,
+    explicit_artifacts: list[object] | None = None,
 ) -> list[schemas.Artifact]:
     for attempt in range(5):
-        discovered_artifacts = create_artifacts_from_paths(
+        discovered_artifacts = create_artifacts_from_refs(
             session_id,
-            explicit_artifact_paths,
+            explicit_artifacts or [],
             run_id,
         )
+        if not discovered_artifacts:
+            discovered_artifacts = create_artifacts_from_paths(
+                session_id,
+                explicit_artifact_paths,
+                run_id,
+            )
         if not discovered_artifacts:
             session_artifact_paths = discover_artifact_paths_from_hermes_sessions(since)
             discovered_artifacts = create_artifacts_from_paths(
@@ -470,13 +479,17 @@ async def send_session_message(
 
     try:
         from app.api.routes.agent_runs import (
-            _resolve_adapter,
             create_db_agent_run,
             finish_db_agent_run,
             record_db_agent_run_event,
+            resolve_adapter_for_model,
         )
 
-        adapter_key, adapter = _resolve_adapter(model_id=input_data.model_id)
+        adapter_key, adapter = await resolve_adapter_for_model(
+            db,
+            current_user,
+            input_data.model_id,
+        )
         run = await create_db_agent_run(
             db,
             session_id,
@@ -586,13 +599,17 @@ async def stream_session_message(
 
         try:
             from app.api.routes.agent_runs import (
-                _resolve_adapter,
                 create_db_agent_run,
                 finish_db_agent_run,
                 record_db_agent_run_event,
+                resolve_adapter_for_model,
             )
 
-            adapter_key, adapter = _resolve_adapter(model_id=input_data.model_id)
+            adapter_key, adapter = await resolve_adapter_for_model(
+                db,
+                current_user,
+                input_data.model_id,
+            )
 
             run = await create_db_agent_run(
                 db,
@@ -684,7 +701,7 @@ async def stream_session_message(
                         raise AgentRunTimeout(
                             "idle_timeout",
                             (
-                                "Hermes did not emit output within "
+                                "Agent runtime did not emit output within "
                                 f"{settings.agent_run_idle_timeout_seconds} seconds."
                             ),
                         ) from error
@@ -704,6 +721,18 @@ async def stream_session_message(
                         event_payload = {}
                         progress = 0
                     if not content:
+                        continue
+
+                    if event_type == "artifact_found":
+                        await record_db_agent_run_event(
+                            db,
+                            run,
+                            event_type=event_type,
+                            label=content,
+                            status="running",
+                            progress=progress or min(90, 10 + assistant_event_count * 8),
+                            payload=event_payload,
+                        )
                         continue
 
                     assistant_message = await persist_message(db, session_id, "assistant", content)
@@ -844,6 +873,7 @@ async def stream_session_message(
                         "artifact_type": getattr(artifact, "artifact_type", None),
                         "run_id": getattr(artifact, "run_id", None),
                         "source_dir": getattr(artifact, "source_dir", None),
+                        "title": getattr(artifact, "title", None),
                     }
                     for artifact in explicit_artifacts
                 ],
@@ -853,6 +883,7 @@ async def stream_session_message(
                 run_started_at,
                 explicit_artifact_paths,
                 run.id,
+                explicit_artifacts,
             )
             artifact_discovery_summary["discovered_count"] = len(discovered_artifacts)
             artifact_discovery_summary["discovered_artifacts"] = [
@@ -937,14 +968,14 @@ async def stream_session_message(
                 assistant_message = await persist_message(
                     db,
                     session_id,
-                    "assistant",
-                    (
-                        "Hermes completed and generated artifacts."
-                        if response_artifacts
-                        else "Hermes completed without emitting a visible status update."
-                    ),
-                    [artifact.id for artifact in response_artifacts] or None,
-                )
+                        "assistant",
+                        (
+                            "Agent runtime completed and generated artifacts."
+                            if response_artifacts
+                            else "Agent runtime completed without emitting a visible status update."
+                        ),
+                        [artifact.id for artifact in response_artifacts] or None,
+                    )
 
             ordered_artifacts = sorted(response_artifacts, key=artifact_display_priority)
             for artifact in ordered_artifacts:
@@ -1028,7 +1059,7 @@ async def stream_session_message(
                     db,
                     run,
                     event_type="diagnostic",
-                    label="Hermes timeout diagnostics",
+                    label="Agent runtime timeout diagnostics",
                     status="failed",
                     progress=run.progress,
                     step_status="failed",
@@ -1085,7 +1116,7 @@ async def stream_session_message(
                     db,
                     run,
                     event_type="diagnostic",
-                    label="Hermes failure diagnostics",
+                    label="Agent runtime failure diagnostics",
                     status="failed",
                     progress=run.progress,
                     step_status="failed",

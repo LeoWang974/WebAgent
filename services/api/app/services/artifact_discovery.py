@@ -158,6 +158,11 @@ def _artifact_type(path: Path) -> ArtifactType:
     return "markdown_report"
 
 
+def _valid_artifact_type(value: object, fallback: ArtifactType) -> ArtifactType:
+    supported = set(ArtifactType.__args__)
+    return value if isinstance(value, str) and value in supported else fallback
+
+
 def _read_text(path: Path, max_chars: int = 300_000) -> str | None:
     try:
         return path.read_text(encoding="utf-8", errors="replace")[:max_chars]
@@ -250,7 +255,10 @@ def _artifact_from_path(
     session_id: str,
     path: Path,
     *,
+    artifact_type_override: str | None = None,
+    metadata_extra: dict[str, Any] | None = None,
     original_path: str | None = None,
+    title_override: str | None = None,
 ) -> schemas.Artifact | None:
     if not path.exists() or not path.is_file() or _is_ignored(path):
         return None
@@ -259,15 +267,18 @@ def _artifact_from_path(
     if path.suffix.lower() not in SUPPORTED_SUFFIXES:
         return None
 
-    artifact_type = _artifact_type(path)
+    artifact_type = _valid_artifact_type(artifact_type_override, _artifact_type(path))
+    metadata = _metadata(path, artifact_type, original_path=original_path)
+    if metadata_extra:
+        metadata.update({key: value for key, value in metadata_extra.items() if value is not None})
     return schemas.Artifact(
         id=_artifact_id(path),
         session_id=session_id,
         type=artifact_type,
-        title=path.stem,
+        title=title_override or path.stem,
         status="ready",
         content=_content(path, artifact_type),
-        metadata=_metadata(path, artifact_type, original_path=original_path),
+        metadata=metadata,
     )
 
 
@@ -447,6 +458,94 @@ def create_artifacts_from_paths(
         )
         if artifact is None:
             continue
+        metadata = artifact.metadata or {}
+        content_hash = str(metadata.get("contentHash") or "")
+        normalized_path = str(
+            metadata.get("originalNormalizedPath") or metadata.get("normalizedPath") or ""
+        )
+        if (
+            artifact.id in existing_ids
+            or str(path) in existing_paths
+            or (normalized_path and normalized_path in existing_paths)
+            or (content_hash and content_hash in existing_hashes)
+        ):
+            continue
+
+        artifacts.append(artifact)
+        existing_ids.add(artifact.id)
+        existing_paths.add(str(path))
+        if normalized_path:
+            existing_paths.add(normalized_path)
+        if content_hash:
+            existing_hashes.add(content_hash)
+
+    artifacts.sort(
+        key=lambda artifact: str((artifact.metadata or {}).get("updatedAt", "")),
+        reverse=True,
+    )
+    return artifacts
+
+
+def create_artifacts_from_refs(
+    session_id: str,
+    artifact_refs: list[object],
+    run_id: str | None = None,
+) -> list[schemas.Artifact]:
+    existing_paths, existing_ids = _existing_artifact_keys()
+    existing_hashes: set[str] = set()
+    artifacts: list[schemas.Artifact] = []
+
+    for artifact_ref in artifact_refs:
+        path_value = getattr(artifact_ref, "path", None)
+        if not path_value and isinstance(artifact_ref, dict):
+            path_value = (
+                artifact_ref.get("path")
+                or artifact_ref.get("artifact_path")
+                or artifact_ref.get("artifactPath")
+            )
+        if not isinstance(path_value, str) or not path_value:
+            continue
+
+        artifact_type = (
+            getattr(artifact_ref, "artifact_type", None)
+            if not isinstance(artifact_ref, dict)
+            else artifact_ref.get("artifact_type") or artifact_ref.get("artifactType")
+        )
+        source_dir = (
+            getattr(artifact_ref, "source_dir", None)
+            if not isinstance(artifact_ref, dict)
+            else artifact_ref.get("source_dir") or artifact_ref.get("sourceDir")
+        )
+        ref_run_id = (
+            getattr(artifact_ref, "run_id", None)
+            if not isinstance(artifact_ref, dict)
+            else artifact_ref.get("run_id") or artifact_ref.get("runId")
+        )
+        title = (
+            getattr(artifact_ref, "title", None)
+            if not isinstance(artifact_ref, dict)
+            else artifact_ref.get("title")
+        )
+
+        path = _normalize_path(path_value)
+        archived_path = _archive_artifact_path(path, run_id)
+        artifact = _artifact_from_path(
+            session_id,
+            archived_path,
+            artifact_type_override=artifact_type,
+            metadata_extra={
+                "adapterProtocol": "openclaw.artifact.v1",
+                "adapterRunId": ref_run_id,
+                "adapterSourceDir": source_dir,
+                "adapterTitle": title,
+                "adapterType": artifact_type,
+            },
+            original_path=str(path),
+            title_override=title if isinstance(title, str) and title else None,
+        )
+        if artifact is None:
+            continue
+
         metadata = artifact.metadata or {}
         content_hash = str(metadata.get("contentHash") or "")
         normalized_path = str(

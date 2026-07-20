@@ -12,7 +12,7 @@ from app.api.dependencies import CurrentUser, DbSession
 from app.core.config import settings
 from app.models import AgentRun as DBAgentRun
 from app.models import AgentRunEvent as DBAgentRunEvent
-from app.models import Conversation, ConversationShare, User
+from app.models import Conversation, ConversationShare, ModelConfig, User
 from app.services.persistence import get_conversation_or_404
 
 try:
@@ -23,6 +23,7 @@ try:
         agent_id=settings.openclaw_agent_id,
         cli_path=settings.openclaw_cli_path,
         command_timeout_seconds=settings.openclaw_command_timeout_seconds,
+        mode=settings.openclaw_mode,
     )
     hermes_adapter = HermesAdapter(
         hermes_path=settings.hermes_cli_path,
@@ -55,6 +56,46 @@ def _resolve_adapter(model_id: str | None = None, adapter_key: str | None = None
     if openclaw_adapter:
         return "openclaw", openclaw_adapter
     return None, None
+
+
+def _infer_adapter_key_from_model(model: ModelConfig | None) -> str | None:
+    if model is None:
+        return None
+
+    name = (model.name or "").lower()
+    provider = (model.provider or "").lower()
+    base_url = (model.base_url or "").lower()
+    if "openclaw" in name or "openclaw" in base_url or "18789" in base_url:
+        return "openclaw"
+    if "hermes" in name or "hermes" in base_url or "8642" in base_url:
+        return "hermes"
+    if provider == "sensenova":
+        return settings.agent_runtime_default
+    return None
+
+
+async def resolve_adapter_for_model(
+    db: AsyncSession,
+    current_user: User,
+    model_id: str | None = None,
+    adapter_key: str | None = None,
+):
+    if adapter_key:
+        return _resolve_adapter(adapter_key=adapter_key)
+    if not model_id:
+        return _resolve_adapter(model_id=model_id)
+
+    if model_id in {"model_hermes", "model_openclaw"}:
+        return _resolve_adapter(model_id=model_id)
+
+    result = await db.execute(
+        select(ModelConfig).where(
+            ModelConfig.id == model_id,
+            ModelConfig.user_id == current_user.id,
+        )
+    )
+    inferred_adapter_key = _infer_adapter_key_from_model(result.scalar_one_or_none())
+    return _resolve_adapter(adapter_key=inferred_adapter_key, model_id=model_id)
 
 
 def _get_adapter(model_id: str | None):
@@ -345,7 +386,7 @@ async def create_agent_run(
     current_user: CurrentUser,
 ) -> schemas.AgentRun:
     await get_conversation_or_404(db, input_data.session_id, current_user, require_write=True)
-    adapter_key, _ = _resolve_adapter(model_id=input_data.model_id)
+    adapter_key, _ = await resolve_adapter_for_model(db, current_user, input_data.model_id)
     run = await create_db_agent_run(
         db,
         input_data.session_id,
@@ -390,7 +431,7 @@ async def cancel_agent_run(
 ) -> schemas.AgentRun:
     run = await get_db_agent_run(db, run_id, current_user)
     await get_conversation_or_404(db, run.conversation_id, current_user, require_write=True)
-    _, adapter = _resolve_adapter(adapter_key=run.adapter_key)
+    _, adapter = await resolve_adapter_for_model(db, current_user, adapter_key=run.adapter_key)
     adapter_cancelled = False
     adapter_error = None
     if adapter is not None:

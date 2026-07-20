@@ -37,7 +37,7 @@ DEFAULT_MODELS = [
     {
         "name": "OpenClaw Agent",
         "provider": "openai_compatible",
-        "base_url": "http://localhost:8643",
+        "base_url": "ws://127.0.0.1:18789",
         "encrypted_api_key": None,
         "is_default": False,
         "is_available": True,
@@ -146,7 +146,12 @@ def to_data_context_schema(settings: UserSettings) -> schemas.DataContextSetting
 
 async def ensure_default_models(db: AsyncSession, user: User) -> None:
     result = await db.execute(select(ModelConfig).where(ModelConfig.user_id == user.id))
-    if result.scalars().first() is not None:
+    existing_models = list(result.scalars().all())
+    if existing_models:
+        for model in existing_models:
+            if model.name == "OpenClaw Agent" and model.base_url == "http://localhost:8643":
+                model.base_url = "ws://127.0.0.1:18789"
+        await db.commit()
         return
 
     for item in DEFAULT_MODELS:
