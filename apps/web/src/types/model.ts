@@ -1,5 +1,13 @@
 export type ModelProvider = "sensenova" | "openai_compatible" | "custom";
 
+export interface ModelRuntimeStatus {
+  adapterKey?: string;
+  health?: Record<string, unknown>;
+  message?: string;
+  ok?: boolean;
+  status?: "available" | "connected" | "unavailable" | string;
+}
+
 export interface ModelConfig {
   baseUrl?: string;
   id: string;
@@ -8,4 +16,5 @@ export interface ModelConfig {
   provider: ModelProvider;
   isDefault: boolean;
   maskedApiKey?: string;
+  runtimeStatus?: ModelRuntimeStatus;
 }

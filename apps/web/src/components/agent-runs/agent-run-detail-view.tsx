@@ -44,6 +44,11 @@ const eventLabels: Record<string, string> = {
   tool_call: "工具调用",
 };
 
+const adapterLabels: Record<string, string> = {
+  hermes: "Hermes",
+  openclaw: "OpenClaw",
+};
+
 function isTerminalStatus(status: AgentRun["status"]) {
   return terminalStatuses.includes(status);
 }
@@ -115,6 +120,16 @@ function eventBadgeClass(eventType: string) {
   return "border bg-white text-muted-foreground";
 }
 
+function adapterLabel(adapterKey?: string) {
+  return adapterKey ? (adapterLabels[adapterKey] ?? adapterKey) : "-";
+}
+
+function latestStage(events: AgentRunEvent[]) {
+  return [...events]
+    .reverse()
+    .find((event) => event.eventType !== "diagnostic" && event.step.label)?.step.label;
+}
+
 function DiagnosticsPanel({ events, run }: { events: AgentRunEvent[]; run: AgentRun }) {
   const diagnostics = events.filter((event) => event.eventType === "diagnostic");
   if (!run.error && diagnostics.length === 0) {
@@ -135,13 +150,23 @@ function DiagnosticsPanel({ events, run }: { events: AgentRunEvent[]; run: Agent
       <div className="space-y-3">
         {diagnostics.map((event) => {
           const payload = asRecord(event.payload);
-          const hermesDiagnostics = asRecord(payload.hermesDiagnostics);
+          const runtimeDiagnostics = asRecord(
+            payload.runtimeDiagnostics ?? payload.hermesDiagnostics,
+          );
           const artifactDiscovery = asRecord(payload.artifactDiscovery);
-          const rawLogPath = getText(hermesDiagnostics.raw_log_path ?? hermesDiagnostics.rawLogPath);
-          const exitCode = hermesDiagnostics.exit_code ?? hermesDiagnostics.exitCode;
-          const lastStage = getText(hermesDiagnostics.last_stage ?? hermesDiagnostics.lastStage);
-          const stderrTail = getText(hermesDiagnostics.stderr_tail ?? hermesDiagnostics.stderrTail);
-          const stdoutTail = getText(hermesDiagnostics.stdout_tail ?? hermesDiagnostics.stdoutTail);
+          const exitCode = runtimeDiagnostics.exit_code ?? runtimeDiagnostics.exitCode;
+          const rawLogPath = getText(
+            runtimeDiagnostics.raw_log_path ?? runtimeDiagnostics.rawLogPath,
+          );
+          const stage =
+            getText(runtimeDiagnostics.last_stage ?? runtimeDiagnostics.lastStage) ??
+            latestStage(events);
+          const stderrTail = getText(
+            runtimeDiagnostics.stderr_tail ?? runtimeDiagnostics.stderrTail,
+          );
+          const stdoutTail = getText(
+            runtimeDiagnostics.stdout_tail ?? runtimeDiagnostics.stdoutTail,
+          );
 
           return (
             <div className="rounded-lg border bg-[#fbfbfa] p-3" key={event.step.id}>
@@ -149,6 +174,10 @@ function DiagnosticsPanel({ events, run }: { events: AgentRunEvent[]; run: Agent
                 {new Date(event.step.timestamp).toLocaleString()} / {event.step.label}
               </div>
               <dl className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
+                <div>
+                  <dt className="text-muted-foreground">适配器</dt>
+                  <dd className="mt-0.5 font-medium">{adapterLabel(run.adapterKey)}</dd>
+                </div>
                 <div>
                   <dt className="text-muted-foreground">退出码</dt>
                   <dd className="mt-0.5 font-mono">{getDisplayValue(exitCode)}</dd>
@@ -159,13 +188,15 @@ function DiagnosticsPanel({ events, run }: { events: AgentRunEvent[]; run: Agent
                     {rawLogPath ?? "-"}
                   </dd>
                 </div>
-                <div className="sm:col-span-2">
+                <div>
                   <dt className="text-muted-foreground">最后阶段</dt>
-                  <dd className="mt-0.5 whitespace-pre-wrap">{lastStage ?? "-"}</dd>
+                  <dd className="mt-0.5 whitespace-pre-wrap">{stage ?? "-"}</dd>
                 </div>
               </dl>
               <details className="mt-3 rounded-md border bg-white p-2 text-xs">
-                <summary className="cursor-pointer text-muted-foreground">产物发现结果</summary>
+                <summary className="cursor-pointer text-muted-foreground">
+                  产物发现结果
+                </summary>
                 <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono">
                   {stringifyJson(artifactDiscovery)}
                 </pre>
@@ -303,7 +334,10 @@ export function AgentRunDetailView({ runId }: AgentRunDetailViewProps) {
   return (
     <div className="h-full overflow-y-auto bg-[#fbfbfa]">
       <div className="mx-auto max-w-5xl space-y-5 p-6">
-        <Link className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground" href={`/app/chat/${run.sessionId}`}>
+        <Link
+          className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
+          href={`/app/chat/${run.sessionId}`}
+        >
           <ArrowLeft className="size-4" />
           返回会话
         </Link>
@@ -324,7 +358,7 @@ export function AgentRunDetailView({ runId }: AgentRunDetailViewProps) {
           <div className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
             <div className="rounded-lg border bg-[#fbfbfa] p-3">
               <div className="text-xs text-muted-foreground">适配器</div>
-              <div className="mt-1 font-medium">{run.adapterKey ?? "-"}</div>
+              <div className="mt-1 font-medium">{adapterLabel(run.adapterKey)}</div>
             </div>
             <div className="rounded-lg border bg-[#fbfbfa] p-3">
               <div className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -363,7 +397,7 @@ export function AgentRunDetailView({ runId }: AgentRunDetailViewProps) {
                 >
                   <div className="font-medium">{artifact.title}</div>
                   <div className="mt-1 text-xs text-muted-foreground">
-                    {artifact.type} · {artifact.id}
+                    {artifact.type} / {artifact.id}
                   </div>
                 </Link>
               ))}
@@ -382,7 +416,7 @@ export function AgentRunDetailView({ runId }: AgentRunDetailViewProps) {
               <div className="rounded-lg border bg-[#fbfbfa] p-3" key={event.step.id}>
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="text-xs font-medium text-muted-foreground">
-                    #{index + 1} · {new Date(event.step.timestamp).toLocaleString()}
+                    #{index + 1} / {new Date(event.step.timestamp).toLocaleString()}
                   </div>
                   <div className="flex items-center gap-2">
                     <span className={`rounded-full border px-2 py-0.5 text-[11px] ${eventBadgeClass(event.eventType)}`}>

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { create } from "zustand";
 import { shouldSelectCreatedArtifact } from "@/lib/artifact-selection";
@@ -52,6 +52,7 @@ interface ChatState {
   hydrate: () => Promise<void>;
   resetWorkspace: () => void;
   retryHydrate: () => Promise<void>;
+  refreshRuntimeModelStatus: () => Promise<void>;
   refreshAgentRun: (runId: string) => Promise<AgentRun | undefined>;
   renameSession: (sessionId: string, title: string) => Promise<void>;
   selectArtifact: (artifactId: string) => void;
@@ -199,11 +200,11 @@ function createPendingAssistantMessage(
   const language = useUiStore.getState().language;
   const pendingLabel = requestedSkill
     ? language === "zh-CN"
-      ? `${modelName} 正在执行 ${requestedSkill}，等待 Hermes 阶段反馈...`
-      : `${modelName} is running ${requestedSkill} and waiting for Hermes stage updates...`
+      ? `${modelName} 正在执行 ${requestedSkill}，等待阶段反馈...`
+      : `${modelName} is running ${requestedSkill} and waiting for runtime updates...`
     : language === "zh-CN"
-      ? `${modelName} 正在工作，等待 Hermes 阶段反馈...`
-      : `${modelName} is working and waiting for Hermes stage updates...`;
+      ? `${modelName} 正在工作，等待运行状态...`
+      : `${modelName} is working and waiting for runtime updates...`;
 
   return {
     id: createId("message_assistant_pending"),
@@ -408,6 +409,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         sessions,
         skills,
       });
+      void get().refreshRuntimeModelStatus();
       agentRuns
         .filter((run) => !isTerminalRunStatus(run.status))
         .forEach((run) => subscribeAgentRunEvents(get, run.id));
@@ -1003,6 +1005,53 @@ export const useChatStore = create<ChatState>((set, get) => ({
         session.id === state.currentSessionId ? { ...session, status: "active" } : session,
       ),
     }));
+  },
+  refreshRuntimeModelStatus: async () => {
+    const runtimeModels = get().models.filter((model) => {
+      const marker = `${model.name} ${model.baseUrl ?? ""}`.toLowerCase();
+      return (
+        marker.includes("openclaw") ||
+        marker.includes("hermes") ||
+        marker.includes("18789") ||
+        marker.includes("8642")
+      );
+    });
+
+    await Promise.all(
+      runtimeModels.map(async (model) => {
+        try {
+          const updatedModel = await settingsApi.testModelConnection(model.id);
+          set((state) => ({
+            models: state.models.map((item) =>
+              item.id === model.id ? { ...item, ...updatedModel } : item,
+            ),
+          }));
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : "Runtime health check failed.";
+          set((state) => ({
+            models: state.models.map((item) =>
+              item.id === model.id
+                ? {
+                    ...item,
+                    isAvailable: false,
+                    runtimeStatus: {
+                      adapterKey: item.name.toLowerCase().includes("openclaw")
+                        ? "openclaw"
+                        : item.name.toLowerCase().includes("hermes")
+                          ? "hermes"
+                          : undefined,
+                      message,
+                      ok: false,
+                      status: "unavailable",
+                    },
+                  }
+                : item,
+            ),
+          }));
+        }
+      }),
+    );
   },
   testModelConnection: async (modelId) => {
     set({ testingModelId: modelId });

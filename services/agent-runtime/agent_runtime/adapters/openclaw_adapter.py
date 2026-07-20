@@ -15,12 +15,53 @@ def now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+OPENCLAW_SKILL_MAPPING = {
+    "data_analysis": {
+        "name": "OpenClaw data analysis",
+        "capability": "data_analysis",
+        "instruction": (
+            "Run OpenClaw's data analysis workflow. Prefer attached or referenced CSV/XLSX/table "
+            "artifacts, inspect the data, summarize findings, and create a concise report or table."
+        ),
+        "artifact_type_hint": "data_table or markdown_report",
+    },
+    "deep_research": {
+        "name": "OpenClaw research",
+        "capability": "research",
+        "instruction": (
+            "Run OpenClaw's research workflow. Search and synthesize evidence, keep citations clear, "
+            "and produce one final report instead of scattering the answer across sub-reports."
+        ),
+        "artifact_type_hint": "markdown_report or html_page",
+    },
+    "ppt_generation": {
+        "name": "OpenClaw presentation generation",
+        "capability": "presentation",
+        "instruction": (
+            "Run OpenClaw's presentation generation workflow. Use the most relevant source report "
+            "or HTML content, generate slide pages, and export a PPTX deliverable when possible."
+        ),
+        "artifact_type_hint": "ppt_deck and optional html_page fallback",
+    },
+    "u1_image": {
+        "name": "OpenClaw image generation",
+        "capability": "image_generation",
+        "instruction": (
+            "Run OpenClaw's image generation workflow. Treat U1 as the image generation capability, "
+            "not as a reference image name. Generate image files matching the user's request."
+        ),
+        "artifact_type_hint": "image_result",
+    },
+}
+
+
 class OpenClawAdapter(AgentRuntimeAdapter):
     """Adapter for OpenClaw's CLI/Gateway agent interface.
 
-    The first implementation uses `openclaw agent --local` because it works without
-    keeping a Gateway process alive. The public adapter surface mirrors Hermes so
-    WebAgent can switch runtimes through the same AgentRun/SSE pipeline.
+    The public adapter surface mirrors Hermes so WebAgent can switch runtimes
+    through the same AgentRun/SSE pipeline. `gateway_cli` talks to a running
+    OpenClaw Gateway through the CLI; `local_cli` keeps the previous embedded
+    fallback for machines without a Gateway process.
     """
 
     def __init__(
@@ -30,7 +71,7 @@ class OpenClawAdapter(AgentRuntimeAdapter):
         agent_id: str = "main",
         cli_path: str = "openclaw",
         command_timeout_seconds: int = 600,
-        mode: str = "local_cli",
+        mode: str = "gateway_cli",
     ):
         self.base_url = base_url.rstrip("/")
         self.agent_id = agent_id
@@ -131,6 +172,18 @@ class OpenClawAdapter(AgentRuntimeAdapter):
         run_id = input_data.run_id or input_data.session_id
         self._reset_last_state()
 
+        if input_data.skill_key:
+            skill_name = self._skill_mapping(input_data.skill_key).get(
+                "name",
+                input_data.skill_key,
+            )
+            yield self._stage_event(
+                run_id,
+                "stage_started",
+                f"OpenClaw is running {skill_name}.",
+                10,
+            )
+
         process = await self._start_agent_process(input_data, run_id)
         try:
             stdout, stderr = await asyncio.wait_for(
@@ -153,6 +206,15 @@ class OpenClawAdapter(AgentRuntimeAdapter):
         self._remember_artifact_paths(raw_stdout)
         self._remember_artifact_paths(raw_stderr)
         output = self._extract_output(raw_stdout, raw_stderr)
+        structured_artifacts = self._extract_structured_artifacts(
+            raw_stdout,
+            raw_stderr,
+        )
+        for artifact in structured_artifacts:
+            artifact.run_id = artifact.run_id or run_id
+            self._remember_artifact_ref(artifact)
+        for artifact in self.last_artifacts:
+            artifact.run_id = artifact.run_id or run_id
         self.last_diagnostics = {
             "adapter": "openclaw",
             "mode": self.mode,
@@ -160,12 +222,33 @@ class OpenClawAdapter(AgentRuntimeAdapter):
             "stderrTail": raw_stderr[-2000:],
             "stdoutTail": raw_stdout[-2000:],
             "artifactPaths": list(self.last_artifact_paths),
+            "artifactCount": len(self.last_artifact_paths),
         }
 
         if process.returncode != 0:
             raise RuntimeError(
                 f"OpenClaw exited with code {process.returncode}: "
                 f"{(raw_stderr or raw_stdout).strip()[-1000:]}"
+            )
+
+        for index, artifact in enumerate(self.last_artifacts, start=1):
+            yield AgentRunEvent(
+                run_id=run_id,
+                event_type="artifact_found",
+                status="running",
+                progress=90,
+                payload={
+                    "protocol": "openclaw.cli.v1",
+                    "mode": self.mode,
+                    "artifact_paths": list(self.last_artifact_paths),
+                    "artifact": self._artifact_to_payload(artifact),
+                },
+                step=AgentRunStep(
+                    id=f"{run_id}_openclaw_artifact_{index}",
+                    label=f"OpenClaw artifact found: {artifact.path}",
+                    status="completed",
+                    timestamp=now_iso(),
+                ),
             )
 
         yield AgentRunEvent(
@@ -220,7 +303,7 @@ class OpenClawAdapter(AgentRuntimeAdapter):
         run_id: str,
     ) -> asyncio.subprocess.Process:
         process = await asyncio.create_subprocess_exec(
-            *self._build_local_cli_args(input_data),
+            *self._build_agent_cli_args(input_data),
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -228,28 +311,81 @@ class OpenClawAdapter(AgentRuntimeAdapter):
         self.active_processes[run_id] = process
         return process
 
-    def _build_local_cli_args(self, input_data: AgentRunCreate) -> list[str]:
+    def _build_agent_cli_args(self, input_data: AgentRunCreate) -> list[str]:
         timeout = str(max(1, self.command_timeout_seconds))
         args = [
             "agent",
-            "--local",
             "--agent",
             self.agent_id,
             "--message",
-            input_data.content,
+            self._build_openclaw_message(input_data),
             "--json",
             "--timeout",
             timeout,
         ]
+        if self.mode == "local_cli":
+            args.insert(1, "--local")
         if input_data.session_id:
             args.extend(["--session-id", input_data.session_id])
         return self._build_cli_args(args)
 
+    @staticmethod
+    def _skill_mapping(skill_key: str | None) -> dict[str, str]:
+        if not skill_key:
+            return {}
+        return OPENCLAW_SKILL_MAPPING.get(skill_key, {})
+
+    def _build_openclaw_message(self, input_data: AgentRunCreate) -> str:
+        mapping = self._skill_mapping(input_data.skill_key)
+        if not mapping:
+            return input_data.content
+
+        protocol_instruction = (
+            "When artifacts are created, return a JSON-compatible artifact protocol with: "
+            "artifact_paths, artifact_type, source_dir, run_id, and title. "
+            f"Expected artifact_type: {mapping['artifact_type_hint']}."
+        )
+        return (
+            f"[WebAgent skill mapping]\n"
+            f"webagent_skill={input_data.skill_key}\n"
+            f"openclaw_capability={mapping['capability']}\n"
+            f"{mapping['instruction']}\n"
+            f"{protocol_instruction}\n\n"
+            f"[User request]\n{input_data.content}"
+        )
+
+    def _build_local_cli_args(self, input_data: AgentRunCreate) -> list[str]:
+        previous_mode = self.mode
+        self.mode = "local_cli"
+        try:
+            return self._build_agent_cli_args(input_data)
+        finally:
+            self.mode = previous_mode
+
     def _build_cli_args(self, args: list[str]) -> list[str]:
         if os.name == "nt" and self.cli_path == "openclaw":
             command = " ".join(shlex.quote(str(arg)) for arg in ["openclaw", *args])
+            command = self._with_runtime_env(command)
             return ["wsl.exe", "--", "bash", "-lc", command]
         return [self.cli_path, *args]
+
+    @staticmethod
+    def _with_runtime_env(command: str) -> str:
+        return (
+            "for __f in ~/.hermes/.env ~/.openclaw/.env; do "
+            "[ -f \"$__f\" ] || continue; "
+            "while IFS= read -r __line || [ -n \"$__line\" ]; do "
+            "__line=${__line%$'\\r'}; "
+            "case \"$__line\" in ''|\\#*) continue;; esac; "
+            "__key=${__line%%=*}; "
+            "if [[ \"$__key\" =~ ^[A-Za-z_][A-Za-z0-9_]*$ && \"$__key\" != PATH ]]; then "
+            "export \"$__line\"; "
+            "fi; "
+            "done < \"$__f\"; "
+            "done; "
+            "unset __f __line __key; "
+            f"{command}"
+        )
 
     def _reset_last_state(self) -> None:
         self.last_artifact_paths = []
@@ -258,18 +394,36 @@ class OpenClawAdapter(AgentRuntimeAdapter):
 
     def _remember_artifact_paths(self, text: str) -> None:
         for path in self._extract_paths(text):
-            if self._is_openclaw_bootstrap_path(path):
-                continue
-            if path in self.last_artifact_paths:
-                continue
-            self.last_artifact_paths.append(path)
-            self.last_artifacts.append(
-                AgentArtifactRef(
-                    path=path,
-                    artifact_type=self._guess_artifact_type(path),
-                    source_dir=str(Path(path).parent) if not path.startswith("/mnt/") else None,
-                )
+            self._remember_artifact_path(path)
+
+    def _remember_artifact_path(self, path: str) -> None:
+        self._remember_artifact_ref(AgentArtifactRef(path=path))
+
+    def _remember_artifact_ref(self, artifact: AgentArtifactRef) -> None:
+        path = artifact.path
+        if self._is_openclaw_bootstrap_path(path):
+            return
+        existing_index = next(
+            (index for index, item in enumerate(self.last_artifacts) if item.path == path),
+            None,
+        )
+        if existing_index is not None:
+            existing = self.last_artifacts[existing_index]
+            existing.artifact_type = artifact.artifact_type or existing.artifact_type
+            existing.source_dir = artifact.source_dir or existing.source_dir
+            existing.run_id = artifact.run_id or existing.run_id
+            existing.title = artifact.title or existing.title
+            return
+        self.last_artifact_paths.append(path)
+        self.last_artifacts.append(
+            AgentArtifactRef(
+                path=path,
+                artifact_type=artifact.artifact_type or self._guess_artifact_type(path),
+                run_id=artifact.run_id,
+                source_dir=artifact.source_dir or self._source_dir_from_path(path),
+                title=artifact.title or self._title_from_path(path),
             )
+        )
 
     @staticmethod
     def _extract_output(stdout: str, stderr: str) -> str:
@@ -292,6 +446,14 @@ class OpenClawAdapter(AgentRuntimeAdapter):
         if not isinstance(parsed, dict):
             return None
 
+        result = parsed.get("result")
+        if isinstance(result, dict):
+            result_output = OpenClawAdapter._extract_json_output(
+                json.dumps(result, ensure_ascii=False)
+            )
+            if result_output:
+                return result_output
+
         for key in ("output", "reply", "message", "content", "text"):
             value = parsed.get(key)
             if isinstance(value, str) and value.strip():
@@ -310,6 +472,162 @@ class OpenClawAdapter(AgentRuntimeAdapter):
                 return "\n".join(parts)
 
         return json.dumps(parsed, ensure_ascii=False)
+
+    @staticmethod
+    def _extract_structured_artifact_paths(stdout: str, stderr: str) -> list[str]:
+        return [
+            artifact.path
+            for artifact in OpenClawAdapter._extract_structured_artifacts(stdout, stderr)
+        ]
+
+    @staticmethod
+    def _extract_structured_artifacts(stdout: str, stderr: str) -> list[AgentArtifactRef]:
+        artifacts: list[AgentArtifactRef] = []
+        seen: set[str] = set()
+        for text in (stdout, stderr):
+            cleaned = OpenClawAdapter._clean_text_output(text)
+            if not cleaned:
+                continue
+            try:
+                parsed = json.loads(cleaned)
+            except json.JSONDecodeError:
+                continue
+            OpenClawAdapter._collect_artifact_refs(parsed, artifacts, seen)
+        return artifacts
+
+    @staticmethod
+    def _extract_structured_artifact_paths_legacy(stdout: str, stderr: str) -> list[str]:
+        paths: list[str] = []
+        for text in (stdout, stderr):
+            cleaned = OpenClawAdapter._clean_text_output(text)
+            if not cleaned:
+                continue
+            try:
+                parsed = json.loads(cleaned)
+            except json.JSONDecodeError:
+                continue
+            OpenClawAdapter._collect_artifact_paths(parsed, paths)
+        return paths
+
+    @staticmethod
+    def _collect_artifact_refs(
+        value: object,
+        artifacts: list[AgentArtifactRef],
+        seen: set[str],
+        inherited: dict[str, str | None] | None = None,
+    ) -> None:
+        inherited = inherited or {}
+        if isinstance(value, dict):
+            artifact_type = OpenClawAdapter._string_value(
+                value,
+                "artifact_type",
+                "artifactType",
+                "type",
+            ) or inherited.get("artifact_type")
+            source_dir = OpenClawAdapter._string_value(
+                value,
+                "source_dir",
+                "sourceDir",
+            ) or inherited.get("source_dir")
+            run_id = OpenClawAdapter._string_value(value, "run_id", "runId") or inherited.get("run_id")
+            title = OpenClawAdapter._string_value(value, "title", "name") or inherited.get("title")
+            context = {
+                "artifact_type": artifact_type,
+                "source_dir": source_dir,
+                "run_id": run_id,
+                "title": title,
+            }
+
+            direct_paths = OpenClawAdapter._artifact_paths_from_mapping(value)
+            for path in direct_paths:
+                if path in seen:
+                    continue
+                seen.add(path)
+                artifacts.append(
+                    AgentArtifactRef(
+                        path=path,
+                        artifact_type=artifact_type,
+                        run_id=run_id,
+                        source_dir=source_dir,
+                        title=title,
+                    )
+                )
+
+            for item in value.values():
+                OpenClawAdapter._collect_artifact_refs(item, artifacts, seen, context)
+        elif isinstance(value, list):
+            for item in value:
+                OpenClawAdapter._collect_artifact_refs(item, artifacts, seen, inherited)
+
+    @staticmethod
+    def _artifact_paths_from_mapping(value: dict) -> list[str]:
+        paths: list[str] = []
+        for key, item in value.items():
+            normalized_key = key.lower()
+            if normalized_key in {
+                "artifact_path",
+                "artifact_paths",
+                "artifactpath",
+                "path",
+                "paths",
+                "filepath",
+                "file_path",
+                "mediaurl",
+                "media_url",
+            }:
+                paths.extend(OpenClawAdapter._extract_paths_from_value(item))
+        return paths
+
+    @staticmethod
+    def _extract_paths_from_value(value: object) -> list[str]:
+        if isinstance(value, str):
+            return OpenClawAdapter._extract_paths(value)
+        if isinstance(value, list):
+            paths: list[str] = []
+            for item in value:
+                paths.extend(OpenClawAdapter._extract_paths_from_value(item))
+            return paths
+        if isinstance(value, dict):
+            paths: list[str] = []
+            for item in value.values():
+                paths.extend(OpenClawAdapter._extract_paths_from_value(item))
+            return paths
+        return []
+
+    @staticmethod
+    def _string_value(value: dict, *keys: str) -> str | None:
+        for key in keys:
+            item = value.get(key)
+            if isinstance(item, str) and item.strip():
+                return item.strip()
+        return None
+
+    @staticmethod
+    def _collect_artifact_paths(value: object, paths: list[str]) -> None:
+        if isinstance(value, dict):
+            for key, item in value.items():
+                normalized_key = key.lower()
+                if normalized_key in {
+                    "artifact_path",
+                    "artifact_paths",
+                    "artifactpath",
+                    "path",
+                    "paths",
+                    "filepath",
+                    "file_path",
+                    "mediaurl",
+                    "media_url",
+                } and isinstance(item, str):
+                    paths.extend(OpenClawAdapter._extract_paths(item))
+                elif normalized_key in {"artifact_paths", "paths"} and isinstance(item, list):
+                    for path in item:
+                        if isinstance(path, str):
+                            paths.extend(OpenClawAdapter._extract_paths(path))
+                else:
+                    OpenClawAdapter._collect_artifact_paths(item, paths)
+        elif isinstance(value, list):
+            for item in value:
+                OpenClawAdapter._collect_artifact_paths(item, paths)
 
     @staticmethod
     def _clean_text_output(text: str) -> str:
@@ -349,6 +667,14 @@ class OpenClawAdapter(AgentRuntimeAdapter):
         return None
 
     @staticmethod
+    def _source_dir_from_path(path: str) -> str | None:
+        return str(Path(path).parent)
+
+    @staticmethod
+    def _title_from_path(path: str) -> str:
+        return Path(path).stem
+
+    @staticmethod
     def _is_openclaw_bootstrap_path(path: str) -> bool:
         normalized = path.replace("\\", "/")
         bootstrap_names = {
@@ -365,10 +691,36 @@ class OpenClawAdapter(AgentRuntimeAdapter):
         return normalized.rsplit("/", 1)[-1] in bootstrap_names
 
     @staticmethod
-    def _artifact_to_payload(artifact: AgentArtifactRef) -> dict[str, str | None]:
+    def _artifact_to_payload(artifact: AgentArtifactRef) -> dict[str, object]:
         return {
+            "artifact_paths": [artifact.path],
             "artifact_path": artifact.path,
             "artifact_type": artifact.artifact_type,
             "run_id": artifact.run_id,
             "source_dir": artifact.source_dir,
+            "title": artifact.title,
         }
+
+    def _stage_event(
+        self,
+        run_id: str,
+        event_type: str,
+        label: str,
+        progress: int,
+    ) -> AgentRunEvent:
+        return AgentRunEvent(
+            run_id=run_id,
+            event_type=event_type,
+            status="running",
+            progress=progress,
+            payload={
+                "protocol": "openclaw.cli.v1",
+                "mode": self.mode,
+            },
+            step=AgentRunStep(
+                id=f"{run_id}_openclaw_{event_type}",
+                label=label,
+                status="running",
+                timestamp=now_iso(),
+            ),
+        )

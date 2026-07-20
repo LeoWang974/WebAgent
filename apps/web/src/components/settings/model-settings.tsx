@@ -12,6 +12,36 @@ const providerOptions: Array<{ label: string; value: ModelProvider }> = [
   { label: "Custom", value: "custom" },
 ];
 
+function runtimeStatusText(model: { isAvailable?: boolean; runtimeStatus?: { message?: string } }) {
+  if (model.runtimeStatus?.message) {
+    return model.runtimeStatus.message;
+  }
+  if (model.isAvailable === false) {
+    return "连接不可用";
+  }
+  return "连接可用";
+}
+
+function runtimeHealthSummary(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const health = value as Record<string, unknown>;
+  const exitCode = health.exitCode;
+  const stderr = typeof health.stderr === "string" ? health.stderr : "";
+  const stdout = typeof health.stdout === "string" ? health.stdout : "";
+  const parts = [];
+  if (exitCode !== undefined) {
+    parts.push(`exit=${String(exitCode)}`);
+  }
+  if (stderr) {
+    parts.push(`stderr=${stderr.slice(-160)}`);
+  } else if (stdout) {
+    parts.push(`stdout=${stdout.slice(-160)}`);
+  }
+  return parts.join(" / ") || undefined;
+}
+
 export function ModelSettings() {
   const { t } = useI18n();
   const addModel = useChatStore((state) => state.addModel);
@@ -125,6 +155,20 @@ export function ModelSettings() {
                         {model.maskedApiKey}
                       </div>
                     ) : null}
+                    <div
+                      className={`mt-2 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] ${
+                        model.isAvailable === false
+                          ? "border-amber-200 bg-amber-50 text-amber-700"
+                          : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                      }`}
+                      title={runtimeHealthSummary(model.runtimeStatus?.health)}
+                    >
+                      <span className="size-1.5 rounded-full bg-current" />
+                      {model.runtimeStatus?.adapterKey
+                        ? `${model.runtimeStatus.adapterKey} / `
+                        : ""}
+                      {runtimeStatusText(model)}
+                    </div>
                   </button>
                 )}
               </div>

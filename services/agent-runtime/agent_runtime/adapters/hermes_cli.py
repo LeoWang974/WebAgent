@@ -98,10 +98,28 @@ class HermesCliWrapper:
 
         env_str = " ".join(f"{key}={shlex.quote(value)}" for key, value in env.items())
         quoted_args = " ".join(shlex.quote(arg) for arg in args)
-        command = f"{env_str} {quoted_args}".strip()
+        command = self._with_runtime_env(f"{env_str} {quoted_args}".strip())
         if use_pty:
             command = f"script -q -e -c {shlex.quote(command)} /dev/null"
         return f"wsl -d {shlex.quote(self.wsl_distribution)} -- bash -lc {shlex.quote(command)}"
+
+    def _with_runtime_env(self, command: str) -> str:
+        env_path = PurePosixPath(self.hermes_home) / ".env"
+        env_loader = (
+            f"__f={shlex.quote(str(env_path))}; "
+            "if [ -f \"$__f\" ]; then "
+            "while IFS= read -r __line || [ -n \"$__line\" ]; do "
+            "__line=${__line%$'\\r'}; "
+            "case \"$__line\" in ''|\\#*) continue;; esac; "
+            "__key=${__line%%=*}; "
+            "if [[ \"$__key\" =~ ^[A-Za-z_][A-Za-z0-9_]*$ && \"$__key\" != PATH ]]; then "
+            "export \"$__line\"; "
+            "fi; "
+            "done < \"$__f\"; "
+            "fi; "
+            "unset __f __line __key; "
+        )
+        return env_loader + command
 
     def _raw_log_path(self) -> Path:
         log_dir = Path(__file__).resolve().parents[4] / "logs"
@@ -162,7 +180,7 @@ class HermesCliWrapper:
                 quoted_args.append(f'"{arg}"')
             else:
                 quoted_args.append(shlex.quote(arg))
-        command = f"{env_str} {' '.join(quoted_args)}".strip()
+        command = self._with_runtime_env(f"{env_str} {' '.join(quoted_args)}".strip())
         if use_pty:
             command = f"script -q -e -c {shlex.quote(command)} /dev/null"
         logger.info("Hermes prompt file: %s", prompt_path)

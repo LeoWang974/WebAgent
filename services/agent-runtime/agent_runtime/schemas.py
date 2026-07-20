@@ -60,11 +60,13 @@ class AgentArtifactRef:
         artifact_type: Optional[str] = None,
         run_id: Optional[str] = None,
         source_dir: Optional[str] = None,
+        title: Optional[str] = None,
     ):
         self.path = path
         self.artifact_type = artifact_type
         self.run_id = run_id
         self.source_dir = source_dir
+        self.title = title
 
 
 class AgentRunEvent:

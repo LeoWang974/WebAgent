@@ -77,7 +77,20 @@ export const mockSettingsAdapter: SettingsApiAdapter = {
       throw new Error("Model not found");
     }
 
-    const updatedModel = { ...model, isAvailable: true };
+    const updatedModel = {
+      ...model,
+      isAvailable: true,
+      runtimeStatus: {
+        adapterKey: model.name.toLowerCase().includes("openclaw")
+          ? "openclaw"
+          : model.name.toLowerCase().includes("hermes")
+            ? "hermes"
+            : undefined,
+        message: "Mock runtime health check passed.",
+        ok: true,
+        status: "connected",
+      },
+    };
     models = models.map((item) => (item.id === modelId ? updatedModel : item));
     return updatedModel;
   },
