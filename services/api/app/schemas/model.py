@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Any, Literal
 
 from app.schemas.base import ApiModel
 
@@ -13,3 +13,4 @@ class ModelConfig(ApiModel):
     provider: ModelProvider
     is_default: bool
     masked_api_key: str | None = None
+    runtime_status: dict[str, Any] | None = None

@@ -467,12 +467,6 @@ async def send_session_message(
     conversation = await get_conversation_or_404(db, session_id, current_user, require_write=True)
     resolved_skill_key = resolve_skill_key(input_data.content, input_data.skill_key)
     user_message = await persist_message(db, session_id, "user", input_data.content)
-    runtime_content = await build_skill_runtime_content(
-        db,
-        session_id,
-        input_data.content,
-        resolved_skill_key,
-    )
 
     assistant_content = "Agent runtime did not return a response."
     run = None
@@ -489,6 +483,13 @@ async def send_session_message(
             db,
             current_user,
             input_data.model_id,
+        )
+        runtime_content = await build_skill_runtime_content(
+            db,
+            session_id,
+            input_data.content,
+            resolved_skill_key,
+            adapter_key,
         )
         run = await create_db_agent_run(
             db,
@@ -581,12 +582,6 @@ async def stream_session_message(
     async def event_stream():
         run_started_at = datetime.now()
         user_message = await persist_message(db, session_id, "user", input_data.content)
-        runtime_content = await build_skill_runtime_content(
-            db,
-            session_id,
-            input_data.content,
-            resolved_skill_key,
-        )
         yield sse("user_message", to_message(user_message).model_dump(by_alias=True))
 
         assistant_messages: list[Message] = []
@@ -609,6 +604,13 @@ async def stream_session_message(
                 db,
                 current_user,
                 input_data.model_id,
+            )
+            runtime_content = await build_skill_runtime_content(
+                db,
+                session_id,
+                input_data.content,
+                resolved_skill_key,
+                adapter_key,
             )
 
             run = await create_db_agent_run(

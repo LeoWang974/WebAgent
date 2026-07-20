@@ -42,6 +42,33 @@ def test_openclaw_adapter_can_build_local_cli_args():
     assert "--local" in " ".join(args)
 
 
+def test_openclaw_adapter_maps_webagent_skill_to_openclaw_prompt():
+    adapter = OpenClawAdapter(agent_id="main", command_timeout_seconds=30)
+    input_data = AgentRunCreate(
+        content="请生成《未来餐桌》PPT",
+        session_id="session_123",
+        run_id="run_123",
+        skill_key="ppt_generation",
+    )
+
+    message = adapter._build_openclaw_message(input_data)
+    args = adapter._build_agent_cli_args(input_data)
+    joined = " ".join(args)
+
+    assert "webagent_skill=ppt_generation" in message
+    assert "openclaw_capability=presentation" in message
+    assert "artifact_paths, artifact_type, source_dir, run_id, and title" in message
+    assert "请生成《未来餐桌》PPT" in message
+    assert "openclaw_capability=presentation" in joined
+
+
+def test_openclaw_adapter_leaves_plain_chat_prompt_unchanged():
+    adapter = OpenClawAdapter(agent_id="main", command_timeout_seconds=30)
+    input_data = AgentRunCreate(content="你好", session_id="session_123", run_id="run_123")
+
+    assert adapter._build_openclaw_message(input_data) == "你好"
+
+
 def test_openclaw_adapter_extracts_json_output():
     output = OpenClawAdapter._extract_output(
         '{"reply":"OpenClaw connected"}',

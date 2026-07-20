@@ -115,7 +115,10 @@ def to_user_schema(user: User) -> schemas.User:
     )
 
 
-def to_model_schema(model: ModelConfig) -> schemas.ModelConfig:
+def to_model_schema(
+    model: ModelConfig,
+    runtime_status: dict[str, Any] | None = None,
+) -> schemas.ModelConfig:
     return schemas.ModelConfig(
         id=model.id,
         name=model.name,
@@ -124,7 +127,52 @@ def to_model_schema(model: ModelConfig) -> schemas.ModelConfig:
         is_default=model.is_default,
         is_available=model.is_available,
         masked_api_key=mask_api_key(model.encrypted_api_key),
+        runtime_status=runtime_status,
     )
+
+
+async def test_runtime_model(
+    db: AsyncSession,
+    current_user: User,
+    model: ModelConfig,
+) -> dict[str, Any]:
+    from app.api.routes.agent_runs import resolve_adapter_for_model
+
+    adapter_key, adapter = await resolve_adapter_for_model(db, current_user, model.id)
+    if adapter is None:
+        return {
+            "adapterKey": adapter_key,
+            "ok": False,
+            "status": "unavailable",
+            "message": "Runtime adapter is unavailable.",
+        }
+
+    if not hasattr(adapter, "health_check"):
+        return {
+            "adapterKey": adapter_key,
+            "ok": True,
+            "status": "available",
+            "message": "Runtime adapter is available; no active health check is implemented.",
+        }
+
+    try:
+        health = await adapter.health_check()
+    except Exception as error:
+        return {
+            "adapterKey": adapter_key,
+            "ok": False,
+            "status": "unavailable",
+            "message": str(error),
+        }
+
+    ok = bool(health.get("ok")) if isinstance(health, dict) else False
+    return {
+        "adapterKey": adapter_key,
+        "ok": ok,
+        "status": "connected" if ok else "unavailable",
+        "message": "Runtime health check passed." if ok else "Runtime health check failed.",
+        "health": health,
+    }
 
 
 def to_skill_schema(skill: SkillConfig) -> schemas.Skill:
@@ -384,10 +432,11 @@ async def test_model_connection(
     current_user: CurrentUser,
 ) -> schemas.ModelConfig:
     model = await get_user_model(db, current_user, model_id)
-    model.is_available = True
+    runtime_status = await test_runtime_model(db, current_user, model)
+    model.is_available = bool(runtime_status.get("ok"))
     await db.commit()
     await db.refresh(model)
-    return to_model_schema(model)
+    return to_model_schema(model, runtime_status=runtime_status)
 
 
 @router.post("/skills/default", response_model=list[schemas.Skill])

@@ -48,7 +48,6 @@ def test_normalize_runtime_path_handles_windows_and_wsl_paths():
 
 @pytest.mark.asyncio
 async def test_runtime_context_builder_injects_limited_deep_research_context():
-    content = "请研究未来餐桌"
     result = await build_runtime_content(
         FakeDb(
             [
@@ -59,12 +58,12 @@ async def test_runtime_context_builder_injects_limited_deep_research_context():
             ]
         ),
         "session_1",
-        content,
+        "请研究《未来餐桌》",
         "deep_research",
     )
 
-    context = result.split("Available artifacts: ", maxsplit=1)[1]
-    assert "[WebAgent runtime context]" in result
+    context = result.split("[WebAgent runtime context: hermes]", maxsplit=1)[1]
+    assert "Available artifacts" not in result
     assert context.count(" -> ") == 3
     assert "未来餐桌报告" in context
 
@@ -90,9 +89,32 @@ async def test_runtime_context_builder_prioritizes_final_reports_and_limits_path
         "ppt_generation",
     )
 
-    context = result.split("Available artifacts: ", maxsplit=1)[1]
-    assert "[WebAgent runtime context]" in result
+    context = result.split("[WebAgent runtime context: hermes]", maxsplit=1)[1]
     assert context.count(" -> ") == 6
-    assert context.startswith("1. markdown_report: 未来餐桌深度研究报告")
+    assert "1. markdown_report: 未来餐桌深度研究报告" in context
     assert "plan.md" not in context
     assert ".hermes/skills" not in context
+
+
+@pytest.mark.asyncio
+async def test_runtime_context_builder_uses_openclaw_context_style_and_limits_paths():
+    result = await build_runtime_content(
+        FakeDb(
+            [
+                artifact("未来餐桌报告", "markdown_report", "/home/demo/report.md"),
+                artifact("deck", "ppt_deck", "/home/demo/deck.pptx"),
+                artifact("page", "html_page", "/home/demo/page.html"),
+                artifact("table", "data_table", "/home/demo/table.csv"),
+            ]
+        ),
+        "session_1",
+        "最后请基于《未来餐桌》报告生成 PPT",
+        "ppt_generation",
+        "openclaw",
+    )
+
+    assert "[WebAgent runtime context: openclaw]" in result
+    assert "OpenClaw context" in result
+    assert "artifact_1: type=markdown_report" in result
+    assert result.count("path=") == 3
+    assert "artifact_4" not in result
