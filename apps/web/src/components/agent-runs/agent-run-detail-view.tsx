@@ -12,6 +12,10 @@ import {
 } from "lucide-react";
 import { webAgentApi } from "@/services";
 import type { AgentRun, AgentRunEvent } from "@/types";
+import {
+  adapterLabel,
+  buildRunDiagnosticViewModel,
+} from "./agent-run-diagnostics";
 
 interface AgentRunDetailViewProps {
   runId: string;
@@ -42,11 +46,6 @@ const eventLabels: Record<string, string> = {
   stage_started: "阶段开始",
   started: "开始",
   tool_call: "工具调用",
-};
-
-const adapterLabels: Record<string, string> = {
-  hermes: "Hermes",
-  openclaw: "OpenClaw",
 };
 
 function isTerminalStatus(status: AgentRun["status"]) {
@@ -82,16 +81,6 @@ function getArtifactSummary(event: AgentRunEvent): RunArtifactSummary | undefine
   };
 }
 
-function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
-
-function getText(value: unknown) {
-  return typeof value === "string" && value.trim() ? value : undefined;
-}
-
 function getDisplayValue(value: unknown) {
   if (value === null || value === undefined || value === "") {
     return "-";
@@ -120,16 +109,6 @@ function eventBadgeClass(eventType: string) {
   return "border bg-white text-muted-foreground";
 }
 
-function adapterLabel(adapterKey?: string) {
-  return adapterKey ? (adapterLabels[adapterKey] ?? adapterKey) : "-";
-}
-
-function latestStage(events: AgentRunEvent[]) {
-  return [...events]
-    .reverse()
-    .find((event) => event.eventType !== "diagnostic" && event.step.label)?.step.label;
-}
-
 function DiagnosticsPanel({ events, run }: { events: AgentRunEvent[]; run: AgentRun }) {
   const diagnostics = events.filter((event) => event.eventType === "diagnostic");
   if (!run.error && diagnostics.length === 0) {
@@ -149,24 +128,7 @@ function DiagnosticsPanel({ events, run }: { events: AgentRunEvent[]; run: Agent
       ) : null}
       <div className="space-y-3">
         {diagnostics.map((event) => {
-          const payload = asRecord(event.payload);
-          const runtimeDiagnostics = asRecord(
-            payload.runtimeDiagnostics ?? payload.hermesDiagnostics,
-          );
-          const artifactDiscovery = asRecord(payload.artifactDiscovery);
-          const exitCode = runtimeDiagnostics.exit_code ?? runtimeDiagnostics.exitCode;
-          const rawLogPath = getText(
-            runtimeDiagnostics.raw_log_path ?? runtimeDiagnostics.rawLogPath,
-          );
-          const stage =
-            getText(runtimeDiagnostics.last_stage ?? runtimeDiagnostics.lastStage) ??
-            latestStage(events);
-          const stderrTail = getText(
-            runtimeDiagnostics.stderr_tail ?? runtimeDiagnostics.stderrTail,
-          );
-          const stdoutTail = getText(
-            runtimeDiagnostics.stdout_tail ?? runtimeDiagnostics.stdoutTail,
-          );
+          const diagnostic = buildRunDiagnosticViewModel(event, run, events);
 
           return (
             <div className="rounded-lg border bg-[#fbfbfa] p-3" key={event.step.id}>
@@ -176,21 +138,23 @@ function DiagnosticsPanel({ events, run }: { events: AgentRunEvent[]; run: Agent
               <dl className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
                 <div>
                   <dt className="text-muted-foreground">适配器</dt>
-                  <dd className="mt-0.5 font-medium">{adapterLabel(run.adapterKey)}</dd>
+                  <dd className="mt-0.5 font-medium">{diagnostic.adapterLabel}</dd>
                 </div>
                 <div>
                   <dt className="text-muted-foreground">退出码</dt>
-                  <dd className="mt-0.5 font-mono">{getDisplayValue(exitCode)}</dd>
+                  <dd className="mt-0.5 font-mono">{getDisplayValue(diagnostic.exitCode)}</dd>
                 </div>
                 <div>
                   <dt className="text-muted-foreground">Raw log</dt>
-                  <dd className="mt-0.5 truncate font-mono" title={rawLogPath}>
-                    {rawLogPath ?? "-"}
+                  <dd className="mt-0.5 truncate font-mono" title={diagnostic.rawLogPath}>
+                    {diagnostic.rawLogPath ?? "-"}
                   </dd>
                 </div>
                 <div>
                   <dt className="text-muted-foreground">最后阶段</dt>
-                  <dd className="mt-0.5 whitespace-pre-wrap">{stage ?? "-"}</dd>
+                  <dd className="mt-0.5 whitespace-pre-wrap">
+                    {diagnostic.lastStage ?? "-"}
+                  </dd>
                 </div>
               </dl>
               <details className="mt-3 rounded-md border bg-white p-2 text-xs">
@@ -198,22 +162,22 @@ function DiagnosticsPanel({ events, run }: { events: AgentRunEvent[]; run: Agent
                   产物发现结果
                 </summary>
                 <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono">
-                  {stringifyJson(artifactDiscovery)}
+                  {stringifyJson(diagnostic.artifactDiscovery)}
                 </pre>
               </details>
-              {stderrTail || stdoutTail ? (
+              {diagnostic.stderrTail || diagnostic.stdoutTail ? (
                 <details className="mt-2 rounded-md border bg-white p-2 text-xs">
                   <summary className="cursor-pointer text-muted-foreground">
                     stderr / stdout tail
                   </summary>
-                  {stderrTail ? (
+                  {diagnostic.stderrTail ? (
                     <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono text-red-700">
-                      {stderrTail}
+                      {diagnostic.stderrTail}
                     </pre>
                   ) : null}
-                  {stdoutTail ? (
+                  {diagnostic.stdoutTail ? (
                     <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono">
-                      {stdoutTail}
+                      {diagnostic.stdoutTail}
                     </pre>
                   ) : null}
                 </details>

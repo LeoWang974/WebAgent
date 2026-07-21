@@ -131,7 +131,7 @@ def to_model_schema(
     )
 
 
-async def test_runtime_model(
+async def check_runtime_model(
     db: AsyncSession,
     current_user: User,
     model: ModelConfig,
@@ -432,7 +432,7 @@ async def test_model_connection(
     current_user: CurrentUser,
 ) -> schemas.ModelConfig:
     model = await get_user_model(db, current_user, model_id)
-    runtime_status = await test_runtime_model(db, current_user, model)
+    runtime_status = await check_runtime_model(db, current_user, model)
     model.is_available = bool(runtime_status.get("ok"))
     await db.commit()
     await db.refresh(model)

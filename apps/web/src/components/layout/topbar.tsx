@@ -1,13 +1,32 @@
 "use client";
 
-import { Menu, PanelRight, Search } from "lucide-react";
+import { Menu, PanelRight, RefreshCw, Search } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
-import { useUiStore } from "@/stores";
+import { useChatStore, useUiStore } from "@/stores";
+
+function formatCheckedAt(value?: string) {
+  if (!value) {
+    return "尚未检查";
+  }
+  return new Date(value).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
 export function Topbar() {
   const { t } = useI18n();
   const openSidebarDrawer = useUiStore((state) => state.openSidebarDrawer);
   const toggleArtifactPanel = useUiStore((state) => state.toggleArtifactPanel);
+  const models = useChatStore((state) => state.models);
+  const selectedModelId = useChatStore((state) => state.selectedModelId);
+  const refreshRuntimeModelStatus = useChatStore((state) => state.refreshRuntimeModelStatus);
+  const runtimeStatusCheckedAt = useChatStore((state) => state.runtimeStatusCheckedAt);
+  const runtimeStatusRefreshing = useChatStore((state) => state.runtimeStatusRefreshing);
+  const selectedModel = models.find((model) => model.id === selectedModelId);
+  const adapterKey = selectedModel?.runtimeStatus?.adapterKey;
+  const showRuntimeStatus = Boolean(adapterKey);
+  const runtimeConnected = selectedModel?.isAvailable !== false;
 
   function focusSessionSearch() {
     const shouldOpenDrawer = window.matchMedia("(max-width: 767px)").matches;
@@ -44,6 +63,38 @@ export function Topbar() {
         </span>
       </div>
       <div className="flex items-center gap-1.5">
+        {showRuntimeStatus ? (
+          <div
+            className="hidden items-center gap-1.5 rounded-full border bg-white px-2 py-1 text-[11px] text-muted-foreground md:flex"
+            title={`${selectedModel?.baseUrl ?? "未配置地址"} / ${
+              selectedModel?.runtimeStatus?.message ?? ""
+            }`}
+          >
+            <span
+              className={`size-1.5 rounded-full ${
+                runtimeConnected ? "bg-emerald-500" : "bg-amber-500"
+              }`}
+            />
+            <span className="max-w-[170px] truncate">
+              {adapterKey === "openclaw" ? "OpenClaw Gateway" : adapterKey}
+            </span>
+            <span>{runtimeConnected ? "已连接" : "未连接"}</span>
+            <span className="text-muted-foreground/70">
+              {formatCheckedAt(runtimeStatusCheckedAt)}
+            </span>
+            <button
+              className="ml-0.5 flex size-5 items-center justify-center rounded-full hover:bg-muted disabled:opacity-50"
+              disabled={runtimeStatusRefreshing}
+              onClick={() => void refreshRuntimeModelStatus()}
+              title="刷新运行时状态"
+              type="button"
+            >
+              <RefreshCw
+                className={`size-3 ${runtimeStatusRefreshing ? "animate-spin" : ""}`}
+              />
+            </button>
+          </div>
+        ) : null}
         <button
           className="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
           onClick={focusSessionSearch}

@@ -1,7 +1,16 @@
 "use client";
 
 import { useState } from "react";
-import { CheckCircle2, Loader2, Pencil, Plus, Save, Trash2, X } from "lucide-react";
+import {
+  CheckCircle2,
+  Loader2,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Save,
+  Trash2,
+  X,
+} from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { useChatStore } from "@/stores";
 import type { ModelProvider } from "@/types";
@@ -42,11 +51,31 @@ function runtimeHealthSummary(value: unknown) {
   return parts.join(" / ") || undefined;
 }
 
+function isRuntimeModel(model: { baseUrl?: string; name: string }) {
+  const marker = `${model.name} ${model.baseUrl ?? ""}`.toLowerCase();
+  return (
+    marker.includes("openclaw") ||
+    marker.includes("hermes") ||
+    marker.includes("18789") ||
+    marker.includes("8642")
+  );
+}
+
+function formatCheckedAt(value?: string) {
+  if (!value) {
+    return "尚未检查";
+  }
+  return new Date(value).toLocaleString();
+}
+
 export function ModelSettings() {
   const { t } = useI18n();
   const addModel = useChatStore((state) => state.addModel);
   const deleteModel = useChatStore((state) => state.deleteModel);
   const models = useChatStore((state) => state.models);
+  const refreshRuntimeModelStatus = useChatStore((state) => state.refreshRuntimeModelStatus);
+  const runtimeStatusCheckedAt = useChatStore((state) => state.runtimeStatusCheckedAt);
+  const runtimeStatusRefreshing = useChatStore((state) => state.runtimeStatusRefreshing);
   const selectedModelId = useChatStore((state) => state.selectedModelId);
   const selectModel = useChatStore((state) => state.selectModel);
   const setDefaultModel = useChatStore((state) => state.setDefaultModel);
@@ -61,6 +90,7 @@ export function ModelSettings() {
   const [editProvider, setEditProvider] = useState<ModelProvider>("openai_compatible");
   const [name, setName] = useState("");
   const [provider, setProvider] = useState<ModelProvider>("openai_compatible");
+  const runtimeModels = models.filter(isRuntimeModel);
 
   function handleAddModel() {
     const trimmedName = name.trim();
@@ -83,12 +113,67 @@ export function ModelSettings() {
 
   return (
     <section className="space-y-5">
-      <div>
-        <h2 className="text-base font-semibold">{t("modelConfiguration")}</h2>
-        <p className="mt-1 text-sm leading-6 text-muted-foreground">
-          {t("modelSettingsDescription")}
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold">{t("modelConfiguration")}</h2>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">
+            {t("modelSettingsDescription")}
+          </p>
+        </div>
+        <button
+          className="inline-flex h-8 items-center gap-1.5 rounded-md border bg-white px-2.5 text-xs hover:bg-muted disabled:opacity-50"
+          disabled={runtimeStatusRefreshing}
+          onClick={() => void refreshRuntimeModelStatus()}
+          type="button"
+        >
+          <RefreshCw
+            className={`size-3.5 ${runtimeStatusRefreshing ? "animate-spin" : ""}`}
+          />
+          刷新运行时状态
+        </button>
       </div>
+
+      {runtimeModels.length > 0 ? (
+        <div className="rounded-lg border bg-white p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-semibold">运行时状态</h3>
+              <p className="mt-1 text-xs text-muted-foreground">
+                最近检查：{formatCheckedAt(runtimeStatusCheckedAt)}
+              </p>
+            </div>
+          </div>
+          <div className="mt-3 grid gap-2 md:grid-cols-2">
+            {runtimeModels.map((model) => (
+              <div className="rounded-md border bg-[#fbfbfa] p-3" key={model.id}>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium">{model.name}</div>
+                    <div className="mt-1 truncate text-xs text-muted-foreground">
+                      {model.runtimeStatus?.adapterKey ?? "runtime"} /{" "}
+                      {model.baseUrl ?? "未配置地址"}
+                    </div>
+                  </div>
+                  <span
+                    className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] ${
+                      model.isAvailable === false
+                        ? "border-amber-200 bg-amber-50 text-amber-700"
+                        : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                    }`}
+                  >
+                    {model.isAvailable === false ? "未连接" : "已连接"}
+                  </span>
+                </div>
+                {model.runtimeStatus?.message ? (
+                  <div className="mt-2 line-clamp-2 text-xs text-muted-foreground">
+                    {model.runtimeStatus.message}
+                  </div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       <div className="space-y-2">
         {models.map((model) => (

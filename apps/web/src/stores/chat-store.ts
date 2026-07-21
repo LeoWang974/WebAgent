@@ -41,6 +41,8 @@ interface ChatState {
   sessions: Session[];
   skills: Skill[];
   switchingSessionId?: string;
+  runtimeStatusCheckedAt?: string;
+  runtimeStatusRefreshing: boolean;
   testingModelId?: string;
   updatingSkillKey?: SkillKey;
   addModel: (input: Omit<ModelConfig, "id" | "isDefault" | "isAvailable">) => Promise<void>;
@@ -229,6 +231,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   loading: false,
   messages: [],
   models: [],
+  runtimeStatusCheckedAt: undefined,
+  runtimeStatusRefreshing: false,
   selectedArtifactId: undefined,
   selectedModelId: undefined,
   sharingSessionId: undefined,
@@ -443,6 +447,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       loading: false,
       messages: [],
       models: [],
+      runtimeStatusCheckedAt: undefined,
+      runtimeStatusRefreshing: false,
       selectedArtifactId: undefined,
       selectedModelId: undefined,
       sharingSessionId: undefined,
@@ -1007,6 +1013,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }));
   },
   refreshRuntimeModelStatus: async () => {
+    set({ runtimeStatusRefreshing: true });
     const runtimeModels = get().models.filter((model) => {
       const marker = `${model.name} ${model.baseUrl ?? ""}`.toLowerCase();
       return (
@@ -1052,6 +1059,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
       }),
     );
+    set({
+      runtimeStatusCheckedAt: new Date().toISOString(),
+      runtimeStatusRefreshing: false,
+    });
   },
   testModelConnection: async (modelId) => {
     set({ testingModelId: modelId });
@@ -1059,11 +1070,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const updatedModel = await settingsApi.testModelConnection(modelId);
       set((state) => ({
         models: state.models.map((model) => (model.id === modelId ? updatedModel : model)),
+        runtimeStatusCheckedAt: new Date().toISOString(),
         testingModelId: undefined,
       }));
     } catch (error) {
       set({
         error: error instanceof Error ? error.message : "Failed to test model.",
+        runtimeStatusCheckedAt: new Date().toISOString(),
         testingModelId: undefined,
       });
     }
