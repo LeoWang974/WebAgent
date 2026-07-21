@@ -1,4 +1,11 @@
-import type { DataContextSettings, ModelConfig, Skill, SkillKey, User } from "@/types";
+import type {
+  DataContextSettings,
+  InterfaceSettings,
+  ModelConfig,
+  Skill,
+  SkillKey,
+  User,
+} from "@/types";
 import { mockModels, mockSkills, mockUser } from "../mock-data";
 import type {
   ModelCreateInput,
@@ -15,6 +22,9 @@ let dataContextSettings: DataContextSettings = {
   maxContextMessages: 40,
   saveConversationHistory: true,
   saveUploadedFiles: true,
+};
+let interfaceSettings: InterfaceSettings = {
+  developerMode: false,
 };
 
 function createId(prefix: string) {
@@ -52,6 +62,10 @@ export const mockSettingsAdapter: SettingsApiAdapter = {
   async getDataContextSettings() {
     await wait(150);
     return dataContextSettings;
+  },
+  async getInterfaceSettings() {
+    await wait(150);
+    return interfaceSettings;
   },
   async setDefaultModel(modelId: string) {
     await wait();
@@ -111,6 +125,11 @@ export const mockSettingsAdapter: SettingsApiAdapter = {
     await wait();
     dataContextSettings = input;
     return dataContextSettings;
+  },
+  async updateInterfaceSettings(input: InterfaceSettings) {
+    await wait();
+    interfaceSettings = input;
+    return interfaceSettings;
   },
   async updateModel(modelId: string, input: Partial<ModelConfig>) {
     await wait();

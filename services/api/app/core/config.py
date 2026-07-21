@@ -33,7 +33,9 @@ class Settings(BaseSettings):
     hermes_base_url: str = "http://localhost:8642"
     hermes_cli_path: str = "/home/zhuchangbiaozhu_xyl/.local/bin/hermes"
     hermes_home: str = "/home/zhuchangbiaozhu_xyl/.hermes"
+    hermes_skills_dir: str | None = None
     hermes_wsl_distribution: str = "Ubuntu"
+    openclaw_skills_dir: str | None = None
     agent_run_idle_timeout_seconds: int = 30 * 60
     agent_run_overall_timeout_seconds: int = 2 * 60 * 60
     agent_run_ppt_export_timeout_seconds: int = 180
@@ -43,6 +45,16 @@ class Settings(BaseSettings):
     cleanup_interval_seconds: int = 6 * 60 * 60
     cleanup_runtime_file_max_age_days: int = 14
     cleanup_disconnected_run_max_age_days: int = 30
+    skills_update_enabled: bool = True
+    skills_update_repo_url: str = "https://github.com/OpenSenseNova/SenseNova-Skills.git"
+    skills_update_branch: str | None = None
+    skills_update_cache_dir: str | None = None
+    skills_update_source_subdir: str = "."
+    skills_update_timezone: str = "Asia/Shanghai"
+    skills_update_weekday: int = 4
+    skills_update_hour: int = 17
+    skills_update_minute: int = 0
+    skills_update_run_on_startup: bool = False
 
     @cached_property
     def cors_origins(self) -> list[str]:

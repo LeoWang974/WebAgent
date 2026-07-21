@@ -19,6 +19,7 @@ class SessionShare(ApiModel):
 
 class Session(ApiModel):
     id: str
+    folder_id: str | None = None
     title: str
     type: SessionType
     pinned: bool
@@ -30,14 +31,31 @@ class Session(ApiModel):
 
 
 class SessionCreate(ApiModel):
+    folder_id: str | None = None
     skill_key: SkillKey | None = None
     title: str | None = None
     visibility: SessionVisibility | None = None
 
 
 class SessionUpdate(ApiModel):
+    folder_id: str | None = None
     pinned: bool | None = None
     title: str | None = None
     visibility: SessionVisibility | None = None
     share_with_email: str | None = None
     unshare_user_id: str | None = None
+
+
+class ConversationFolder(ApiModel):
+    id: str
+    name: str
+    created_at: str
+    updated_at: str
+
+
+class ConversationFolderCreate(ApiModel):
+    name: str
+
+
+class ConversationFolderUpdate(ApiModel):
+    name: str

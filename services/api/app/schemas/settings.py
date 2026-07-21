@@ -9,6 +9,10 @@ class DataContextSettings(ApiModel):
     save_uploaded_files: bool
 
 
+class InterfaceSettings(ApiModel):
+    developer_mode: bool = False
+
+
 class ProfileUpdate(ApiModel):
     avatar_url: str | None = None
     email: str

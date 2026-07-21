@@ -35,6 +35,17 @@ test("artifact_created keeps a higher-priority current artifact from the same me
   );
 });
 
+test("artifact_created does not let debug JSON steal focus from user artifacts", () => {
+  assert.equal(
+    shouldSelectCreatedArtifact({
+      currentSelectedArtifact: artifact("report", "markdown_report"),
+      eventArtifact: artifact("briefing", "debug_json"),
+      selectedBelongsToTargetMessage: true,
+    }),
+    false,
+  );
+});
+
 test("artifact_created selects the new artifact when current selection is from another message", () => {
   assert.equal(
     shouldSelectCreatedArtifact({

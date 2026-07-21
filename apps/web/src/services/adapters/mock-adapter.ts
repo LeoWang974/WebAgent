@@ -15,6 +15,7 @@ import type {
   AgentRun,
   Artifact,
   ArtifactSlides,
+  ConversationFolder,
   FileAsset,
   Message,
   Session,
@@ -35,6 +36,7 @@ let sessions: Session[] = [...mockSessions];
 let messages: Message[] = [...mockMessages];
 let artifacts: Artifact[] = [...mockArtifacts];
 let files: FileAsset[] = [];
+let folders: ConversationFolder[] = [];
 let runs: AgentRun[] = [];
 let users: User[] = [{ ...mockUser, passwordMask: "********", role: "admin" }];
 
@@ -91,6 +93,7 @@ export const mockAdapter: WebAgentApiAdapter = {
     const skillName = getSkillName(mockSkills, input.skillKey);
     const session: Session = {
       id: createId("session"),
+      folderId: input.folderId,
       title:
         input.title ??
         (input.skillKey ? `${skillName} session` : "New conversation"),
@@ -103,6 +106,17 @@ export const mockAdapter: WebAgentApiAdapter = {
     sessions = [session, ...sessions];
 
     return session;
+  },
+  async createConversationFolder(name: string) {
+    const now = new Date().toISOString();
+    const folder: ConversationFolder = {
+      createdAt: now,
+      id: createId("folder"),
+      name,
+      updatedAt: now,
+    };
+    folders = [...folders, folder];
+    return folder;
   },
   async createUser(input: AdminUserCreateInput) {
     const user: User = {
@@ -123,6 +137,12 @@ export const mockAdapter: WebAgentApiAdapter = {
     sessions = sessions.filter((session) => session.id !== sessionId);
     messages = messages.filter((message) => message.sessionId !== sessionId);
     artifacts = artifacts.filter((artifact) => artifact.sessionId !== sessionId);
+  },
+  async deleteConversationFolder(folderId: string) {
+    folders = folders.filter((folder) => folder.id !== folderId);
+    sessions = sessions.map((session) =>
+      session.folderId === folderId ? { ...session, folderId: undefined } : session,
+    );
   },
   async deleteUser(userId: string) {
     users = users.filter((user) => user.id !== userId);
@@ -193,6 +213,9 @@ export const mockAdapter: WebAgentApiAdapter = {
     return sessionId
       ? files.filter((file) => file.sessionId === sessionId)
       : files;
+  },
+  async listConversationFolders() {
+    return folders;
   },
   async listMessages(sessionId?: string) {
     return sessionId
@@ -330,6 +353,7 @@ export const mockAdapter: WebAgentApiAdapter = {
 
     const updatedSession: Session = {
       ...session,
+      folderId: input.folderId === null ? undefined : input.folderId ?? session.folderId,
       pinned: input.pinned ?? session.pinned,
       title: input.title ?? session.title,
       visibility: input.visibility ?? session.visibility,

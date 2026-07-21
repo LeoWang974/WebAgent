@@ -18,9 +18,39 @@ function getMetadata<T>(artifact: Artifact): Partial<T> {
   return (artifact.metadata ?? {}) as Partial<T>;
 }
 
+function formatJsonContent(content?: string) {
+  if (!content) {
+    return "";
+  }
+
+  try {
+    return JSON.stringify(JSON.parse(content), null, 2);
+  } catch {
+    return content;
+  }
+}
+
 export function ArtifactPreviewContent({ artifact }: ArtifactPreviewContentProps) {
   if (!artifact) {
     return <ArtifactEmptyState />;
+  }
+
+  if (artifact.type === "debug_json") {
+    const jsonContent = formatJsonContent(artifact.content);
+
+    return (
+      <div className="flex h-full min-h-0 flex-col bg-white">
+        <div className="border-b px-4 py-3">
+          <div className="text-sm font-semibold">{artifact.title}</div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Agent runtime JSON intermediate artifact.
+          </p>
+        </div>
+        <pre className="min-h-0 flex-1 overflow-auto bg-[#fbfbfa] p-4 text-xs leading-5 text-[#27364a]">
+          {jsonContent || "{}"}
+        </pre>
+      </div>
+    );
   }
 
   if (artifact.type === "markdown_report") {

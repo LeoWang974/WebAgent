@@ -6,6 +6,7 @@ import type {
   FileAsset,
   Message,
   ModelConfig,
+  ConversationFolder,
   Session,
   Skill,
   SkillKey,
@@ -14,6 +15,7 @@ import type {
 import type { SessionVisibility } from "@/types/session";
 
 export interface CreateSessionInput {
+  folderId?: string;
   skillKey?: SkillKey;
   title?: string;
 }
@@ -90,6 +92,7 @@ export type SendMessageStreamEvent =
 export type SendMessageStreamHandler = (event: SendMessageStreamEvent) => void;
 
 export interface UpdateSessionInput {
+  folderId?: string | null;
   pinned?: boolean;
   shareWithEmail?: string;
   title?: string;
@@ -115,11 +118,13 @@ export type AgentRunUnsubscribe = () => void;
 
 export interface WebAgentApiAdapter {
   cancelAgentRun(runId: string): Promise<AgentRun>;
+  createConversationFolder(name: string): Promise<ConversationFolder>;
   createAgentRun(input: CreateAgentRunInput): Promise<AgentRun>;
   createSession(input: CreateSessionInput): Promise<Session>;
   createUser(input: AdminUserCreateInput): Promise<User>;
   deleteArtifact(artifactId: string): Promise<void>;
   deleteSession(sessionId: string): Promise<void>;
+  deleteConversationFolder(folderId: string): Promise<void>;
   deleteUser(userId: string): Promise<void>;
   downloadArtifact(artifactId: string): Promise<Blob>;
   getCurrentUser(): Promise<User>;
@@ -131,6 +136,7 @@ export interface WebAgentApiAdapter {
   listArtifacts(sessionId?: string): Promise<Artifact[]>;
   listAgentRuns(sessionId?: string): Promise<AgentRun[]>;
   listFiles(sessionId?: string): Promise<FileAsset[]>;
+  listConversationFolders(): Promise<ConversationFolder[]>;
   listMessages(sessionId?: string): Promise<Message[]>;
   listModels(): Promise<ModelConfig[]>;
   listSessions(): Promise<Session[]>;

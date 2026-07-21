@@ -1,5 +1,6 @@
 import type {
   DataContextSettings,
+  InterfaceSettings,
   ModelConfig,
   Skill,
   SkillKey,
@@ -26,6 +27,7 @@ export interface SettingsApiAdapter {
   addModel(input: ModelCreateInput): Promise<ModelConfig>;
   deleteModel(modelId: string): Promise<void>;
   getDataContextSettings(): Promise<DataContextSettings>;
+  getInterfaceSettings(): Promise<InterfaceSettings>;
   setDefaultModel(modelId: string): Promise<ModelConfig[]>;
   setDefaultSkill(skillKey: SkillKey): Promise<Skill[]>;
   testModelConnection(modelId: string): Promise<ModelConfig>;
@@ -33,6 +35,7 @@ export interface SettingsApiAdapter {
   updateDataContextSettings(
     input: DataContextSettings,
   ): Promise<DataContextSettings>;
+  updateInterfaceSettings(input: InterfaceSettings): Promise<InterfaceSettings>;
   updateModel(
     modelId: string,
     input: Partial<ModelConfig>,

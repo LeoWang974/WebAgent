@@ -3,9 +3,9 @@ import json
 import os
 import re
 import shlex
+from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import AsyncGenerator
 
 from ..schemas import AgentArtifactRef, AgentRun, AgentRunCreate, AgentRunEvent, AgentRunStep
 from .base import AgentRuntimeAdapter
@@ -29,7 +29,8 @@ OPENCLAW_SKILL_MAPPING = {
         "name": "OpenClaw research",
         "capability": "research",
         "instruction": (
-            "Run OpenClaw's research workflow. Search and synthesize evidence, keep citations clear, "
+            "Run OpenClaw's research workflow. Search and synthesize evidence, "
+            "keep citations clear, "
             "and produce one final report instead of scattering the answer across sub-reports."
         ),
         "artifact_type_hint": "markdown_report or html_page",
@@ -47,7 +48,8 @@ OPENCLAW_SKILL_MAPPING = {
         "name": "OpenClaw image generation",
         "capability": "image_generation",
         "instruction": (
-            "Run OpenClaw's image generation workflow. Treat U1 as the image generation capability, "
+            "Run OpenClaw's image generation workflow. Treat U1 as the image "
+            "generation capability, "
             "not as a reference image name. Generate image files matching the user's request."
         ),
         "artifact_type_hint": "image_result",
@@ -72,12 +74,14 @@ class OpenClawAdapter(AgentRuntimeAdapter):
         cli_path: str = "openclaw",
         command_timeout_seconds: int = 600,
         mode: str = "gateway_cli",
+        skills_dir: str | None = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.agent_id = agent_id
         self.cli_path = cli_path
         self.command_timeout_seconds = command_timeout_seconds
         self.mode = mode
+        self.skills_dir = skills_dir
         self.active_processes: dict[str, asyncio.subprocess.Process] = {}
         self.cancelled_run_ids: set[str] = set()
         self.last_artifact_paths: list[str] = []
@@ -130,7 +134,7 @@ class OpenClawAdapter(AgentRuntimeAdapter):
             process.terminate()
             try:
                 await asyncio.wait_for(process.wait(), timeout=5)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 process.kill()
                 await process.wait()
         return AgentRun(
@@ -190,7 +194,7 @@ class OpenClawAdapter(AgentRuntimeAdapter):
                 process.communicate(),
                 timeout=self.command_timeout_seconds,
             )
-        except asyncio.TimeoutError as exc:
+        except TimeoutError as exc:
             await self.cancel_run(run_id)
             self.last_diagnostics = {
                 "adapter": "openclaw",
@@ -365,12 +369,19 @@ class OpenClawAdapter(AgentRuntimeAdapter):
     def _build_cli_args(self, args: list[str]) -> list[str]:
         if os.name == "nt" and self.cli_path == "openclaw":
             command = " ".join(shlex.quote(str(arg)) for arg in ["openclaw", *args])
-            command = self._with_runtime_env(command)
+            command = self._with_runtime_env(
+                command,
+                {"OPENCLAW_SKILLS_DIR": self.skills_dir} if self.skills_dir else None,
+            )
             return ["wsl.exe", "--", "bash", "-lc", command]
         return [self.cli_path, *args]
 
     @staticmethod
-    def _with_runtime_env(command: str) -> str:
+    def _with_runtime_env(command: str, extra_env: dict[str, str | None] | None = None) -> str:
+        extra_exports = ""
+        for key, value in (extra_env or {}).items():
+            if value:
+                extra_exports += f"export {key}=${{{key}:-{shlex.quote(value)}}}; "
         return (
             "for __f in ~/.hermes/.env ~/.openclaw/.env; do "
             "[ -f \"$__f\" ] || continue; "
@@ -384,6 +395,7 @@ class OpenClawAdapter(AgentRuntimeAdapter):
             "done < \"$__f\"; "
             "done; "
             "unset __f __line __key; "
+            f"{extra_exports}"
             f"{command}"
         )
 
@@ -529,7 +541,9 @@ class OpenClawAdapter(AgentRuntimeAdapter):
                 "source_dir",
                 "sourceDir",
             ) or inherited.get("source_dir")
-            run_id = OpenClawAdapter._string_value(value, "run_id", "runId") or inherited.get("run_id")
+            run_id = OpenClawAdapter._string_value(value, "run_id", "runId") or inherited.get(
+                "run_id"
+            )
             title = OpenClawAdapter._string_value(value, "title", "name") or inherited.get("title")
             context = {
                 "artifact_type": artifact_type,

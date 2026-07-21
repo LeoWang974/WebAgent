@@ -227,6 +227,125 @@ async def test_admin_can_view_all_private_sessions(
 
 
 @pytest.mark.asyncio
+async def test_debug_json_artifacts_require_developer_mode(
+    api_client: AsyncClient,
+    auth_headers: dict[str, dict[str, str]],
+    db_sessionmaker: async_sessionmaker[AsyncSession],
+):
+    create_response = await api_client.post(
+        "/api/sessions",
+        json={"title": "Debug artifacts"},
+        headers=auth_headers["owner"],
+    )
+    assert create_response.status_code == 200
+    session_id = create_response.json()["id"]
+
+    async with db_sessionmaker() as db:
+        db.add(
+            Artifact(
+                conversation_id=session_id,
+                type="debug_json",
+                title="briefing.json",
+                status="ready",
+                content='{"topic":"future food"}',
+                artifact_metadata={"filename": "briefing.json"},
+            )
+        )
+        await db.commit()
+
+    hidden_response = await api_client.get(
+        f"/api/sessions/{session_id}/artifacts",
+        headers=auth_headers["owner"],
+    )
+    assert hidden_response.status_code == 200
+    assert hidden_response.json() == []
+
+    settings_response = await api_client.put(
+        "/api/settings/interface",
+        json={"developerMode": True},
+        headers=auth_headers["owner"],
+    )
+    assert settings_response.status_code == 200
+    assert settings_response.json()["developerMode"] is True
+
+    visible_response = await api_client.get(
+        f"/api/sessions/{session_id}/artifacts",
+        headers=auth_headers["owner"],
+    )
+    assert visible_response.status_code == 200
+    artifacts = visible_response.json()
+    assert len(artifacts) == 1
+    assert artifacts[0]["type"] == "debug_json"
+    assert artifacts[0]["content"] == '{"topic":"future food"}'
+
+
+@pytest.mark.asyncio
+async def test_conversation_folder_create_assign_clear_and_public_listing(
+    api_client: AsyncClient,
+    auth_headers: dict[str, dict[str, str]],
+):
+    folder_response = await api_client.post(
+        "/api/sessions/folders",
+        json={"name": "项目资料"},
+        headers=auth_headers["owner"],
+    )
+    assert folder_response.status_code == 200
+    folder = folder_response.json()
+
+    duplicate_response = await api_client.post(
+        "/api/sessions/folders",
+        json={"name": "项目资料"},
+        headers=auth_headers["owner"],
+    )
+    assert duplicate_response.status_code == 409
+
+    create_response = await api_client.post(
+        "/api/sessions",
+        json={"folderId": folder["id"], "title": "目录中的会话"},
+        headers=auth_headers["owner"],
+    )
+    assert create_response.status_code == 200
+    session = create_response.json()
+    assert session["folderId"] == folder["id"]
+
+    list_folders_response = await api_client.get(
+        "/api/sessions/folders",
+        headers=auth_headers["owner"],
+    )
+    assert list_folders_response.status_code == 200
+    assert [item["id"] for item in list_folders_response.json()] == [folder["id"]]
+
+    clear_response = await api_client.patch(
+        f"/api/sessions/{session['id']}",
+        json={"folderId": None},
+        headers=auth_headers["owner"],
+    )
+    assert clear_response.status_code == 200
+    assert clear_response.json()["folderId"] is None
+
+    public_response = await api_client.post(
+        "/api/sessions",
+        json={"title": "公开资料", "visibility": "public"},
+        headers=auth_headers["owner"],
+    )
+    assert public_response.status_code == 200
+    public_id = public_response.json()["id"]
+
+    stranger_list_response = await api_client.get(
+        "/api/sessions",
+        headers=auth_headers["stranger"],
+    )
+    assert stranger_list_response.status_code == 200
+    assert any(session["id"] == public_id for session in stranger_list_response.json())
+
+    delete_response = await api_client.delete(
+        f"/api/sessions/folders/{folder['id']}",
+        headers=auth_headers["owner"],
+    )
+    assert delete_response.status_code == 204
+
+
+@pytest.mark.asyncio
 async def test_username_login_and_admin_user_list_password_mask(
     api_client: AsyncClient,
     auth_headers: dict[str, dict[str, str]],

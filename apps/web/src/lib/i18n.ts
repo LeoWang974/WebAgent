@@ -177,6 +177,9 @@ export const translations = {
     artifactPanelWidth: "\u4ea7\u7269\u9762\u677f\u5bbd\u5ea6",
     artifactPanelWidthDescription:
       "\u8bbe\u7f6e\u684c\u9762\u7aef\u53f3\u4fa7\u4ea7\u7269\u9884\u89c8\u533a\u7684\u9ed8\u8ba4\u5bbd\u5ea6\u3002",
+    developerMode: "开发者模式",
+    developerModeDescription:
+      "开启后，产物栏会显示 Agent 运行过程中的 JSON 中间产物，便于调试和优化。",
     allRoles: "全部角色",
     conversationCount: "会话数",
     createdAt: "注册时间",
@@ -399,6 +402,9 @@ export const translations = {
     artifactPanelWidth: "Artifact panel width",
     artifactPanelWidthDescription:
       "Set the default width of the desktop artifact preview panel.",
+    developerMode: "Developer mode",
+    developerModeDescription:
+      "When enabled, the artifact panel shows JSON intermediate files produced during agent runs for debugging and optimization.",
     allRoles: "All roles",
     conversationCount: "Conversations",
     createdAt: "Created",

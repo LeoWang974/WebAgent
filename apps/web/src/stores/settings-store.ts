@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import { settingsApi } from "@/services";
-import type { DataContextSettings } from "@/types";
+import type { DataContextSettings, InterfaceSettings } from "@/types";
 
 interface SettingsState {
   dataContextSettings?: DataContextSettings;
@@ -10,9 +10,11 @@ interface SettingsState {
   hydrated: boolean;
   saving: boolean;
   savedAt?: string;
+  interfaceSettings?: InterfaceSettings;
   hydrate: () => Promise<void>;
   reset: () => void;
   updateDataContextSettings: (input: DataContextSettings) => Promise<void>;
+  updateInterfaceSettings: (input: InterfaceSettings) => Promise<void>;
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
@@ -21,14 +23,18 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   hydrated: false,
   saving: false,
   savedAt: undefined,
+  interfaceSettings: undefined,
   hydrate: async () => {
     if (get().hydrated) {
       return;
     }
 
     try {
-      const dataContextSettings = await settingsApi.getDataContextSettings();
-      set({ dataContextSettings, hydrated: true });
+      const [dataContextSettings, interfaceSettings] = await Promise.all([
+        settingsApi.getDataContextSettings(),
+        settingsApi.getInterfaceSettings(),
+      ]);
+      set({ dataContextSettings, hydrated: true, interfaceSettings });
     } catch (error) {
       set({
         error:
@@ -46,6 +52,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       hydrated: false,
       saving: false,
       savedAt: undefined,
+      interfaceSettings: undefined,
     });
   },
   updateDataContextSettings: async (input) => {
@@ -65,6 +72,29 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
           error instanceof Error
             ? error.message
             : "Failed to save data settings.",
+        saving: false,
+      });
+    }
+  },
+  updateInterfaceSettings: async (input) => {
+    const previousSettings = get().interfaceSettings;
+    set({ error: undefined, saving: true });
+
+    try {
+      set({ interfaceSettings: input });
+      const interfaceSettings = await settingsApi.updateInterfaceSettings(input);
+      set({
+        interfaceSettings,
+        savedAt: new Date().toISOString(),
+        saving: false,
+      });
+    } catch (error) {
+      set({
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to save interface settings.",
+        interfaceSettings: previousSettings,
         saving: false,
       });
     }

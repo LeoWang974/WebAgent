@@ -8,6 +8,7 @@ from sqlalchemy import or_, select
 
 from app import schemas
 from app.api.dependencies import CurrentUser, DbSession
+from app.api.routes.settings import user_developer_mode
 from app.models import Artifact, Conversation, ConversationShare
 from app.services.persistence import (
     get_conversation_or_404,
@@ -23,11 +24,29 @@ MEDIA_TYPES = {
     ".html": "text/html; charset=utf-8",
     ".jpeg": "image/jpeg",
     ".jpg": "image/jpeg",
+    ".json": "application/json; charset=utf-8",
     ".md": "text/markdown; charset=utf-8",
     ".png": "image/png",
     ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 }
+
+DEBUG_ARTIFACT_TYPES = {"debug_json"}
+
+
+def is_debug_artifact(artifact: Artifact) -> bool:
+    return artifact.type in DEBUG_ARTIFACT_TYPES
+
+
+async def ensure_artifact_visible(
+    db: DbSession,
+    artifact: Artifact,
+    current_user: CurrentUser,
+) -> None:
+    if not is_debug_artifact(artifact):
+        return
+    if not await user_developer_mode(db, current_user):
+        raise HTTPException(status_code=404, detail="Artifact not found")
 
 
 def artifact_download_name(artifact: Artifact) -> str:
@@ -38,6 +57,7 @@ def artifact_download_name(artifact: Artifact) -> str:
     suffix_by_type = {
         "chart": ".csv",
         "data_table": ".csv",
+        "debug_json": ".json",
         "html_page": ".html",
         "image_result": ".png",
         "markdown_report": ".md",
@@ -84,7 +104,12 @@ async def list_artifacts(
         )
         .order_by(Artifact.created_at.desc())
     )
-    return [to_artifact(item) for item in result.scalars().unique().all()]
+    developer_mode = await user_developer_mode(db, current_user)
+    return [
+        to_artifact(item)
+        for item in result.scalars().unique().all()
+        if developer_mode or not is_debug_artifact(item)
+    ]
 
 
 @router.get("/{artifact_id}", response_model=schemas.Artifact)
@@ -98,6 +123,7 @@ async def get_artifact(
     if artifact is None:
         raise HTTPException(status_code=404, detail="Artifact not found")
     await get_conversation_or_404(db, artifact.conversation_id, current_user)
+    await ensure_artifact_visible(db, artifact, current_user)
     return to_artifact(artifact)
 
 
@@ -112,6 +138,7 @@ async def get_artifact_slides(
     if artifact is None:
         raise HTTPException(status_code=404, detail="Artifact not found")
     await get_conversation_or_404(db, artifact.conversation_id, current_user)
+    await ensure_artifact_visible(db, artifact, current_user)
     if artifact.type != "ppt_deck":
         raise HTTPException(status_code=400, detail="Artifact is not a PPT deck")
 
@@ -169,6 +196,7 @@ async def delete_artifact(
     if artifact is None:
         return None
     conversation = await get_conversation_or_404(db, artifact.conversation_id, current_user)
+    await ensure_artifact_visible(db, artifact, current_user)
     require_owner(conversation, current_user)
     await db.delete(artifact)
     await db.commit()
@@ -186,6 +214,7 @@ async def download_artifact(
     if artifact is None:
         raise HTTPException(status_code=404, detail="Artifact not found")
     await get_conversation_or_404(db, artifact.conversation_id, current_user)
+    await ensure_artifact_visible(db, artifact, current_user)
     path = artifact_file_path(artifact)
     if path is not None:
         return FileResponse(

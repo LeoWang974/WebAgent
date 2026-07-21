@@ -5,3 +5,7 @@ export interface DataContextSettings {
   saveConversationHistory: boolean;
   saveUploadedFiles: boolean;
 }
+
+export interface InterfaceSettings {
+  developerMode: boolean;
+}

@@ -11,6 +11,7 @@ export interface SessionShare {
 }
 
 export interface Session {
+  folderId?: string;
   id: string;
   title: string;
   type: "chat" | SkillKey;
@@ -20,4 +21,11 @@ export interface Session {
   ownerId?: string;
   sharedWith?: SessionShare[];
   visibility?: SessionVisibility;
+}
+
+export interface ConversationFolder {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
 }

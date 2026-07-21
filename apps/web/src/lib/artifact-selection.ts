@@ -8,6 +8,7 @@ export function artifactDisplayPriority(artifact?: Artifact) {
   const priorities: Record<Artifact["type"], number> = {
     chart: 30,
     data_table: 20,
+    debug_json: 1,
     html_page: 40,
     image_result: 90,
     markdown_report: 10,

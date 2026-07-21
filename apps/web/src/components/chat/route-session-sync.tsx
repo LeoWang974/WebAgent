@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useLayoutEffect } from "react";
 import { useChatStore } from "@/stores";
 
 interface RouteSessionSyncProps {
@@ -9,15 +9,13 @@ interface RouteSessionSyncProps {
 
 export function RouteSessionSync({ sessionId }: RouteSessionSyncProps) {
   const currentSessionId = useChatStore((state) => state.currentSessionId);
-  const hydrated = useChatStore((state) => state.hydrated);
   const selectSession = useChatStore((state) => state.selectSession);
 
-  useEffect(() => {
-    if (hydrated && sessionId && currentSessionId !== sessionId) {
+  useLayoutEffect(() => {
+    if (sessionId && currentSessionId !== sessionId) {
       selectSession(sessionId);
     }
-  }, [currentSessionId, hydrated, selectSession, sessionId]);
+  }, [currentSessionId, selectSession, sessionId]);
 
   return null;
 }
-

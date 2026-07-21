@@ -4,7 +4,8 @@ export type ArtifactType =
   | "ppt_deck"
   | "image_result"
   | "data_table"
-  | "chart";
+  | "chart"
+  | "debug_json";
 
 export type ArtifactStatus = "pending" | "rendering" | "ready" | "failed";
 

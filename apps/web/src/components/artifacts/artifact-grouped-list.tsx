@@ -15,6 +15,7 @@ type GroupMode = "run" | "type" | "time";
 const typeLabel: Record<ArtifactType, string> = {
   chart: "图表",
   data_table: "表格",
+  debug_json: "JSON",
   html_page: "HTML",
   image_result: "图片",
   markdown_report: "Markdown",
@@ -24,6 +25,7 @@ const typeLabel: Record<ArtifactType, string> = {
 const typeIcon: Record<ArtifactType, typeof FileText> = {
   chart: Table2,
   data_table: Table2,
+  debug_json: FileText,
   html_page: FileText,
   image_result: Image,
   markdown_report: FileText,

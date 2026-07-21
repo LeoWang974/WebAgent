@@ -22,7 +22,7 @@ docker compose -f infra\docker-compose.yml up -d
 Run the API:
 
 ```powershell
-uvicorn app.main:app --reload --port 8000
+uvicorn app.main:app --host 127.0.0.1 --port 8010
 ```
 
 Run the worker:
@@ -40,6 +40,7 @@ celery -A app.workers.celery_app.celery_app worker --loglevel=info
 - SQLAlchemy model skeleton for the MVP tables
 - Alembic migration scaffold
 - Celery worker scaffold backed by Redis
+- Scheduled SenseNova skills updater for Hermes and OpenClaw
 
 ## Next backend step
 

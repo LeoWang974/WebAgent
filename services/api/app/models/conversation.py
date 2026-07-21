@@ -9,6 +9,9 @@ class Conversation(IdMixin, TimestampMixin, Base):
     __tablename__ = "conversations"
 
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    folder_id: Mapped[str | None] = mapped_column(
+        ForeignKey("conversation_folders.id"), nullable=True, index=True
+    )
     title: Mapped[str] = mapped_column(String(255))
     type: Mapped[str] = mapped_column(String(50), default="chat")
     pinned: Mapped[bool] = mapped_column(default=False)
@@ -16,6 +19,7 @@ class Conversation(IdMixin, TimestampMixin, Base):
     visibility: Mapped[str] = mapped_column(String(20), default="private")
 
     user = relationship("User", back_populates="conversations")
+    folder = relationship("ConversationFolder", back_populates="conversations")
     messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan")
     shares = relationship(
         "ConversationShare", back_populates="conversation", cascade="all, delete-orphan"
@@ -46,3 +50,15 @@ class ConversationShare(IdMixin, TimestampMixin, Base):
 
     conversation = relationship("Conversation", back_populates="shares")
     user = relationship("User", back_populates="conversation_shares")
+
+
+class ConversationFolder(IdMixin, TimestampMixin, Base):
+    __tablename__ = "conversation_folders"
+    __table_args__ = (
+        UniqueConstraint("user_id", "name", name="uq_conversation_folder_user_name"),
+    )
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+
+    conversations = relationship("Conversation", back_populates="folder")

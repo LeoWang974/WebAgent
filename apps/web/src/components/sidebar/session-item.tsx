@@ -1,17 +1,22 @@
 "use client";
 
+import { Check, Pencil, Pin, PinOff, Trash2, X } from "lucide-react";
+import { useRouter } from "next/navigation";
 import type { FormEvent, MouseEvent } from "react";
+import { useState } from "react";
 import { useI18n } from "@/lib/i18n";
 import { getStatusDotClass, getStatusLabelKey } from "@/lib/status";
-import { Check, Pencil, Pin, PinOff, Trash2, X } from "lucide-react";
-import { useState } from "react";
 import type { SessionStatus } from "@/types";
+import type { ConversationFolder } from "@/types/session";
 
 interface SessionItemProps {
   active?: boolean;
+  folderId?: string;
+  folders?: ConversationFolder[];
   href?: string;
   onClick?: () => void;
   onDelete?: () => void;
+  onMoveToFolder?: (folderId?: string) => Promise<void> | void;
   onRename?: (title: string) => Promise<void> | void;
   onTogglePinned?: () => void;
   pinned?: boolean;
@@ -23,9 +28,12 @@ interface SessionItemProps {
 
 export function SessionItem({
   active = false,
+  folderId,
+  folders = [],
   href,
   onClick,
   onDelete,
+  onMoveToFolder,
   onRename,
   onTogglePinned,
   pinned = false,
@@ -35,6 +43,7 @@ export function SessionItem({
   updatedLabel,
 }: SessionItemProps) {
   const { t } = useI18n();
+  const router = useRouter();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState(title);
@@ -42,6 +51,7 @@ export function SessionItem({
   const className = `group flex w-full items-start gap-1 rounded-md hover:bg-[#e9e9e2] ${
     active ? "bg-white shadow-sm ring-1 ring-[#deded8]" : ""
   }`;
+
   async function saveTitle(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
     const nextTitle = draftTitle.trim();
@@ -112,7 +122,7 @@ export function SessionItem({
             event.preventDefault();
             onClick?.();
             if (href && window.location.pathname !== href) {
-              window.location.assign(href);
+              router.push(href);
             }
           }}
           type="button"
@@ -138,6 +148,32 @@ export function SessionItem({
           >
             <Pencil className="size-3.5" />
           </button>
+          {folders.length > 0 ? (
+            <select
+              aria-label="移动到目录"
+              className={`h-6 max-w-8 rounded-md border bg-white text-[11px] text-muted-foreground opacity-0 outline-none group-hover:max-w-[92px] group-hover:opacity-100 ${
+                active || folderId ? "opacity-100" : ""
+              }`}
+              onChange={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                void onMoveToFolder?.(event.target.value || undefined);
+              }}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              title="移动到目录"
+              value={folderId ?? ""}
+            >
+              <option value="">散放</option>
+              {folders.map((folder) => (
+                <option key={folder.id} value={folder.id}>
+                  {folder.name}
+                </option>
+              ))}
+            </select>
+          ) : null}
           <button
             aria-label={pinned ? t("unpinConversation") : t("pinConversation")}
             className={`flex size-6 items-center justify-center rounded-md text-muted-foreground opacity-0 hover:bg-white hover:text-foreground group-hover:opacity-100 ${

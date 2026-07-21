@@ -14,16 +14,19 @@ from app.models import AgentRun as DBAgentRun
 from app.models import AgentRunEvent as DBAgentRunEvent
 from app.models import Conversation, ConversationShare, ModelConfig, User
 from app.services.persistence import get_conversation_or_404
+from app.services.skills_updater import default_openclaw_skills_dir
 
 try:
     from agent_runtime.adapters import HermesAdapter, OpenClawAdapter
 
+    openclaw_skills_dir = settings.openclaw_skills_dir or str(default_openclaw_skills_dir())
     openclaw_adapter = OpenClawAdapter(
         settings.openclaw_base_url,
         agent_id=settings.openclaw_agent_id,
         cli_path=settings.openclaw_cli_path,
         command_timeout_seconds=settings.openclaw_command_timeout_seconds,
         mode=settings.openclaw_mode,
+        skills_dir=openclaw_skills_dir,
     )
     hermes_adapter = HermesAdapter(
         hermes_path=settings.hermes_cli_path,

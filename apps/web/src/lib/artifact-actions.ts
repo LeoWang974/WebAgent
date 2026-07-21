@@ -62,6 +62,14 @@ export function getArtifactFallbackDownload(artifact: Artifact) {
     };
   }
 
+  if (artifact.type === "debug_json") {
+    return {
+      content: artifact.content ?? "",
+      fileName: metadataFileName(artifact) ?? `${baseName}.json`,
+      mimeType: "application/json;charset=utf-8",
+    };
+  }
+
   if (artifact.type === "data_table" || artifact.type === "chart") {
     return {
       content: tableToCsv(artifact),

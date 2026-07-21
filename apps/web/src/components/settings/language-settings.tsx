@@ -1,7 +1,10 @@
 "use client";
 
+import { useEffect } from "react";
 import { useI18n } from "@/lib/i18n";
 import {
+  useChatStore,
+  useSettingsStore,
   useUiStore,
   type AppLanguage,
   type AppTheme,
@@ -13,12 +16,18 @@ const languageOptions: Array<{ label: string; value: AppLanguage }> = [
   { label: "English", value: "en-US" },
 ];
 
-const shortcutOptions: Array<{ labelKey: "enterToSend" | "modEnterToSend"; value: SendShortcut }> = [
+const shortcutOptions: Array<{
+  labelKey: "enterToSend" | "modEnterToSend";
+  value: SendShortcut;
+}> = [
   { labelKey: "enterToSend", value: "enter" },
   { labelKey: "modEnterToSend", value: "mod-enter" },
 ];
 
-const themeOptions: Array<{ labelKey: "themeLight" | "themeDark" | "themeSystem"; value: AppTheme }> = [
+const themeOptions: Array<{
+  labelKey: "themeLight" | "themeDark" | "themeSystem";
+  value: AppTheme;
+}> = [
   { labelKey: "themeLight", value: "light" },
   { labelKey: "themeDark", value: "dark" },
   { labelKey: "themeSystem", value: "system" },
@@ -35,6 +44,17 @@ export function LanguageSettings() {
   const setLanguage = useUiStore((state) => state.setLanguage);
   const setSendShortcut = useUiStore((state) => state.setSendShortcut);
   const setTheme = useUiStore((state) => state.setTheme);
+  const interfaceSettings = useSettingsStore((state) => state.interfaceSettings);
+  const settingsError = useSettingsStore((state) => state.error);
+  const settingsSaving = useSettingsStore((state) => state.saving);
+  const hydrateSettings = useSettingsStore((state) => state.hydrate);
+  const updateInterfaceSettings = useSettingsStore((state) => state.updateInterfaceSettings);
+  const refreshArtifacts = useChatStore((state) => state.refreshArtifacts);
+  const developerMode = interfaceSettings?.developerMode ?? false;
+
+  useEffect(() => {
+    void hydrateSettings();
+  }, [hydrateSettings]);
 
   return (
     <section className="space-y-5">
@@ -148,6 +168,38 @@ export function LanguageSettings() {
           value={artifactPanelWidth}
         />
       </div>
+
+      <div className="flex items-center justify-between gap-4 rounded-lg border bg-[#fbfbfa] p-3">
+        <div>
+          <div className="text-sm font-medium">{t("developerMode")}</div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {t("developerModeDescription")}
+          </p>
+        </div>
+        <button
+          aria-pressed={developerMode}
+          className={`h-6 w-11 rounded-full p-0.5 transition ${
+            developerMode ? "bg-[#242424]" : "bg-[#d9d9d2]"
+          }`}
+          disabled={settingsSaving}
+          onClick={() => {
+            const nextSettings = { developerMode: !developerMode };
+            void updateInterfaceSettings(nextSettings).then(() => {
+              void refreshArtifacts();
+            });
+          }}
+          type="button"
+        >
+          <span
+            className={`block size-5 rounded-full bg-white transition ${
+              developerMode ? "translate-x-5" : "translate-x-0"
+            }`}
+          />
+        </button>
+      </div>
+      {settingsError ? (
+        <p className="-mt-3 text-xs text-red-600">{settingsError}</p>
+      ) : null}
     </section>
   );
 }

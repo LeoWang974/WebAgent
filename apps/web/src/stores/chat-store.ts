@@ -11,6 +11,7 @@ import type {
   Artifact,
   Message,
   ModelConfig,
+  ConversationFolder,
   Session,
   Skill,
   SkillKey,
@@ -31,6 +32,7 @@ interface ChatState {
   artifacts: Artifact[];
   currentSessionId: string;
   error?: string;
+  folders: ConversationFolder[];
   hydrated: boolean;
   loading: boolean;
   messages: Message[];
@@ -47,15 +49,19 @@ interface ChatState {
   updatingSkillKey?: SkillKey;
   addModel: (input: Omit<ModelConfig, "id" | "isDefault" | "isAvailable">) => Promise<void>;
   applyAgentRunEvent: (event: AgentRunEvent) => void;
+  createConversationFolder: (name: string) => Promise<void>;
   createSession: (skillKey?: SkillKey) => Promise<Session | undefined>;
   deleteArtifact: (artifactId: string) => void;
+  deleteConversationFolder: (folderId: string) => Promise<void>;
   deleteModel: (modelId: string) => Promise<void>;
   deleteSession: (sessionId: string) => void;
   hydrate: () => Promise<void>;
+  refreshArtifacts: () => Promise<void>;
   resetWorkspace: () => void;
   retryHydrate: () => Promise<void>;
   refreshRuntimeModelStatus: () => Promise<void>;
   refreshAgentRun: (runId: string) => Promise<AgentRun | undefined>;
+  moveSessionToFolder: (sessionId: string, folderId?: string) => Promise<void>;
   renameSession: (sessionId: string, title: string) => Promise<void>;
   selectArtifact: (artifactId: string) => void;
   selectModel: (modelId: string) => void;
@@ -227,6 +233,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   artifacts: [],
   currentSessionId: "",
   error: undefined,
+  folders: [],
   hydrated: false,
   loading: false,
   messages: [],
@@ -299,6 +306,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
     } catch (error) {
       set({ error: error instanceof Error ? error.message : "Failed to create session." });
       return undefined;
+    }
+  },
+  createConversationFolder: async (name) => {
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      return;
+    }
+    try {
+      const folder = await webAgentApi.createConversationFolder(trimmedName);
+      set((state) => ({ folders: [...state.folders, folder] }));
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : "Failed to create folder." });
     }
   },
   deleteArtifact: (artifactId) => {
@@ -376,6 +395,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
       };
     });
   },
+  deleteConversationFolder: async (folderId) => {
+    try {
+      await webAgentApi.deleteConversationFolder(folderId);
+      set((state) => ({
+        folders: state.folders.filter((folder) => folder.id !== folderId),
+        sessions: state.sessions.map((session) =>
+          session.folderId === folderId ? { ...session, folderId: undefined } : session,
+        ),
+      }));
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : "Failed to delete folder." });
+    }
+  },
   hydrate: async () => {
     if (get().hydrated || get().loading) {
       return;
@@ -383,15 +415,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     set({ error: undefined, loading: true });
     try {
-      const [sessions, messages, skills, artifacts, models] = await Promise.all([
+      const [sessions, messages, skills, artifacts, models, folders] = await Promise.all([
         webAgentApi.listSessions(),
         webAgentApi.listMessages(),
         webAgentApi.listSkills(),
         webAgentApi.listArtifacts(),
         webAgentApi.listModels(),
+        webAgentApi.listConversationFolders(),
       ]);
       const agentRuns = await webAgentApi.listAgentRuns();
-      const currentSessionId = sessions[0]?.id ?? "";
+      const preferredSessionId = get().currentSessionId;
+      const currentSessionId = sessions.some((session) => session.id === preferredSessionId)
+        ? preferredSessionId
+        : sessions[0]?.id ?? "";
       const activeRun = agentRuns.find(
         (run) => run.sessionId === currentSessionId && !isTerminalRunStatus(run.status),
       );
@@ -404,6 +440,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         activeAgentRunId: activeRun?.id,
         agentRuns,
         currentSessionId,
+        folders,
         hydrated: true,
         loading: false,
         messages,
@@ -429,6 +466,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ hydrated: false, loading: false });
     await get().hydrate();
   },
+  refreshArtifacts: async () => {
+    try {
+      const artifacts = await webAgentApi.listArtifacts();
+      const selectedArtifactId = artifacts.some((artifact) => artifact.id === get().selectedArtifactId)
+        ? get().selectedArtifactId
+        : artifacts.find((artifact) => artifact.sessionId === get().currentSessionId)?.id;
+      set({ artifacts, selectedArtifactId });
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : "Failed to refresh artifacts." });
+    }
+  },
   resetWorkspace: () => {
     activeRequestAbortController?.abort();
     activeRequestAbortController = undefined;
@@ -443,6 +491,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       artifacts: [],
       currentSessionId: "",
       error: undefined,
+      folders: [],
       hydrated: false,
       loading: false,
       messages: [],
@@ -502,6 +551,31 @@ export const useChatStore = create<ChatState>((set, get) => ({
     } catch (error) {
       set((state) => ({
         error: error instanceof Error ? error.message : "Failed to rename session.",
+        sessions: previousSession
+          ? state.sessions.map((session) =>
+              session.id === sessionId ? previousSession : session,
+            )
+          : state.sessions,
+      }));
+    }
+  },
+  moveSessionToFolder: async (sessionId, folderId) => {
+    const previousSession = get().sessions.find((session) => session.id === sessionId);
+    set((state) => ({
+      sessions: state.sessions.map((session) =>
+        session.id === sessionId ? { ...session, folderId } : session,
+      ),
+    }));
+    try {
+      const session = await webAgentApi.updateSession(sessionId, {
+        folderId: folderId ?? null,
+      });
+      set((state) => ({
+        sessions: state.sessions.map((item) => (item.id === sessionId ? session : item)),
+      }));
+    } catch (error) {
+      set((state) => ({
+        error: error instanceof Error ? error.message : "Failed to move session.",
         sessions: previousSession
           ? state.sessions.map((session) =>
               session.id === sessionId ? previousSession : session,

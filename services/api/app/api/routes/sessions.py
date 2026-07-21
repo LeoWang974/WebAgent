@@ -9,17 +9,20 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy import delete, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app import schemas
 from app.api.dependencies import CurrentUser, DbSession
+from app.api.routes.settings import user_developer_mode
 from app.core.config import settings
 from app.models import (
     AgentRun,
     AgentRunEvent,
     Artifact,
     Conversation,
+    ConversationFolder,
     ConversationShare,
     FileAsset,
     Message,
@@ -138,6 +141,7 @@ def is_primary_report_artifact(artifact: Artifact) -> bool:
 
 def artifact_display_priority(artifact: Artifact) -> tuple[int, datetime]:
     type_priority = {
+        "debug_json": 1,
         "markdown_report": 10,
         "data_table": 20,
         "chart": 30,
@@ -146,6 +150,10 @@ def artifact_display_priority(artifact: Artifact) -> tuple[int, datetime]:
         "image_result": 90,
     }
     return (type_priority.get(artifact.type, 0), artifact.created_at)
+
+
+def is_debug_artifact(artifact: Artifact) -> bool:
+    return artifact.type == "debug_json"
 
 
 def artifact_metadata_paths(metadata: dict) -> list[Path]:
@@ -324,6 +332,105 @@ async def persist_discovered_artifacts(
     return stored_artifacts
 
 
+async def get_owned_folder_or_404(
+    db: AsyncSession,
+    folder_id: str,
+    current_user: CurrentUser,
+) -> ConversationFolder:
+    result = await db.execute(
+        select(ConversationFolder).where(
+            ConversationFolder.id == folder_id,
+            ConversationFolder.user_id == current_user.id,
+        )
+    )
+    folder = result.scalar_one_or_none()
+    if folder is None:
+        raise HTTPException(status_code=404, detail="Conversation folder not found")
+    return folder
+
+
+def to_folder_schema(folder: ConversationFolder) -> schemas.ConversationFolder:
+    return schemas.ConversationFolder(
+        id=folder.id,
+        name=folder.name,
+        created_at=folder.created_at.isoformat(),
+        updated_at=folder.updated_at.isoformat(),
+    )
+
+
+@router.get("/folders", response_model=list[schemas.ConversationFolder])
+async def list_conversation_folders(
+    db: DbSession,
+    current_user: CurrentUser,
+) -> list[schemas.ConversationFolder]:
+    result = await db.execute(
+        select(ConversationFolder)
+        .where(ConversationFolder.user_id == current_user.id)
+        .order_by(ConversationFolder.created_at.asc())
+    )
+    return [to_folder_schema(folder) for folder in result.scalars().all()]
+
+
+@router.post("/folders", response_model=schemas.ConversationFolder)
+async def create_conversation_folder(
+    input_data: schemas.ConversationFolderCreate,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> schemas.ConversationFolder:
+    name = input_data.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Folder name is required")
+    folder = ConversationFolder(user_id=current_user.id, name=name)
+    db.add(folder)
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Folder name already exists") from exc
+    await db.refresh(folder)
+    return to_folder_schema(folder)
+
+
+@router.patch("/folders/{folder_id}", response_model=schemas.ConversationFolder)
+async def update_conversation_folder(
+    folder_id: str,
+    input_data: schemas.ConversationFolderUpdate,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> schemas.ConversationFolder:
+    folder = await get_owned_folder_or_404(db, folder_id, current_user)
+    name = input_data.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Folder name is required")
+    folder.name = name
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Folder name already exists") from exc
+    await db.refresh(folder)
+    return to_folder_schema(folder)
+
+
+@router.delete("/folders/{folder_id}", status_code=204)
+async def delete_conversation_folder(
+    folder_id: str,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> None:
+    folder = await get_owned_folder_or_404(db, folder_id, current_user)
+    result = await db.execute(
+        select(Conversation).where(
+            Conversation.folder_id == folder.id,
+            Conversation.user_id == current_user.id,
+        )
+    )
+    for conversation in result.scalars().all():
+        conversation.folder_id = None
+    await db.delete(folder)
+    await db.commit()
+
+
 @router.get("", response_model=list[schemas.Session])
 async def list_sessions(
     db: DbSession,
@@ -354,7 +461,10 @@ async def create_session(
     db: DbSession,
     current_user: CurrentUser,
 ) -> schemas.Session:
+    if input_data.folder_id is not None:
+        await get_owned_folder_or_404(db, input_data.folder_id, current_user)
     conversation = Conversation(
+        folder_id=input_data.folder_id,
         user_id=current_user.id,
         title=input_data.title or "新对话",
         type=input_data.skill_key or "chat",
@@ -382,6 +492,12 @@ async def update_session(
         conversation.pinned = input_data.pinned
     if input_data.title is not None:
         conversation.title = input_data.title
+    if "folder_id" in input_data.model_fields_set:
+        if input_data.folder_id:
+            await get_owned_folder_or_404(db, input_data.folder_id, current_user)
+            conversation.folder_id = input_data.folder_id
+        else:
+            conversation.folder_id = None
     if input_data.visibility is not None:
         conversation.visibility = input_data.visibility
         if input_data.visibility == "private":
@@ -941,10 +1057,21 @@ async def stream_session_message(
             current_run_artifacts = [
                 artifact for artifact in stored_artifacts if artifact.run_id == run.id
             ]
+            developer_mode = await user_developer_mode(db, current_user)
+            visible_current_run_artifacts = [
+                artifact
+                for artifact in current_run_artifacts
+                if developer_mode or not is_debug_artifact(artifact)
+            ]
+            visible_stored_artifacts = [
+                artifact
+                for artifact in stored_artifacts
+                if developer_mode or not is_debug_artifact(artifact)
+            ]
             response_artifacts = (
-                current_run_artifacts
+                visible_current_run_artifacts
                 or sorted(
-                    stored_artifacts,
+                    visible_stored_artifacts,
                     key=artifact_display_priority,
                 )[-1:]
             )
@@ -1166,9 +1293,15 @@ async def list_session_artifacts(
         .where(Artifact.conversation_id == session_id)
         .order_by(Artifact.created_at.desc())
     )
-    return [to_artifact(item) for item in result.scalars().all()]
+    developer_mode = await user_developer_mode(db, current_user)
+    return [
+        to_artifact(item)
+        for item in result.scalars().all()
+        if developer_mode or not is_debug_artifact(item)
+    ]
 
 
 @router.get("/{session_id}/files", response_model=list[schemas.FileAsset])
 async def list_session_files(session_id: str) -> list[schemas.FileAsset]:
     return [item for item in mock_store.files if item.session_id == session_id]
+

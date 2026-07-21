@@ -25,6 +25,10 @@ DEFAULT_DATA_CONTEXT = {
     "save_uploaded_files": True,
 }
 
+DEFAULT_INTERFACE = {
+    "developer_mode": False,
+}
+
 DEFAULT_MODELS = [
     {
         "name": "SenseNova default model",
@@ -192,6 +196,16 @@ def to_data_context_schema(settings: UserSettings) -> schemas.DataContextSetting
     return schemas.DataContextSettings(**data)
 
 
+def to_interface_schema(settings: UserSettings) -> schemas.InterfaceSettings:
+    data = {**DEFAULT_INTERFACE, **(settings.interface or {})}
+    return schemas.InterfaceSettings(**data)
+
+
+async def user_developer_mode(db: AsyncSession, user: User) -> bool:
+    settings = await ensure_user_settings(db, user)
+    return to_interface_schema(settings).developer_mode
+
+
 async def ensure_default_models(db: AsyncSession, user: User) -> None:
     result = await db.execute(select(ModelConfig).where(ModelConfig.user_id == user.id))
     existing_models = list(result.scalars().all())
@@ -236,7 +250,11 @@ async def ensure_user_settings(db: AsyncSession, user: User) -> UserSettings:
     if settings is not None:
         return settings
 
-    settings = UserSettings(user_id=user.id, data_context=DEFAULT_DATA_CONTEXT, interface={})
+    settings = UserSettings(
+        user_id=user.id,
+        data_context=DEFAULT_DATA_CONTEXT,
+        interface=DEFAULT_INTERFACE,
+    )
     db.add(settings)
     await db.commit()
     await db.refresh(settings)
@@ -343,6 +361,28 @@ async def update_data_context_settings(
     await db.commit()
     await db.refresh(settings)
     return to_data_context_schema(settings)
+
+
+@router.get("/interface", response_model=schemas.InterfaceSettings)
+async def get_interface_settings(
+    db: DbSession,
+    current_user: CurrentUser,
+) -> schemas.InterfaceSettings:
+    settings = await ensure_user_settings(db, current_user)
+    return to_interface_schema(settings)
+
+
+@router.put("/interface", response_model=schemas.InterfaceSettings)
+async def update_interface_settings(
+    input_data: schemas.InterfaceSettings,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> schemas.InterfaceSettings:
+    settings = await ensure_user_settings(db, current_user)
+    settings.interface = input_data.model_dump()
+    await db.commit()
+    await db.refresh(settings)
+    return to_interface_schema(settings)
 
 
 @router.post("/models", response_model=schemas.ModelConfig)

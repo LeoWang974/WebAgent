@@ -1,5 +1,12 @@
 import { apiClient } from "../api-client";
-import type { DataContextSettings, ModelConfig, Skill, SkillKey, User } from "@/types";
+import type {
+  DataContextSettings,
+  InterfaceSettings,
+  ModelConfig,
+  Skill,
+  SkillKey,
+  User,
+} from "@/types";
 import type {
   ModelCreateInput,
   PasswordUpdateInput,
@@ -22,6 +29,9 @@ export const fastApiSettingsAdapter: SettingsApiAdapter = {
   },
   getDataContextSettings() {
     return apiClient<DataContextSettings>("/api/settings/data-context");
+  },
+  getInterfaceSettings() {
+    return apiClient<InterfaceSettings>("/api/settings/interface");
   },
   setDefaultModel(modelId: string) {
     return apiClient<ModelConfig[]>("/api/settings/models/default", {
@@ -47,6 +57,12 @@ export const fastApiSettingsAdapter: SettingsApiAdapter = {
   },
   updateDataContextSettings(input: DataContextSettings) {
     return apiClient<DataContextSettings>("/api/settings/data-context", {
+      body: JSON.stringify(input),
+      method: "PUT",
+    });
+  },
+  updateInterfaceSettings(input: InterfaceSettings) {
+    return apiClient<InterfaceSettings>("/api/settings/interface", {
       body: JSON.stringify(input),
       method: "PUT",
     });

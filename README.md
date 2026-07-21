@@ -126,6 +126,24 @@ fallback or an insecure JWT secret is configured.
 The API also starts a lightweight cleanup loop when `CLEANUP_ENABLED=true`.
 Admins can run it on demand through `POST /api/admin/cleanup`.
 
+The API can also keep open-source SenseNova skills current for both Hermes and
+OpenClaw. When `SKILLS_UPDATE_ENABLED=true`, FastAPI schedules a weekly update
+from `https://github.com/OpenSenseNova/SenseNova-Skills.git`; the default
+schedule is Friday 17:00 in `Asia/Shanghai`.
+
+Relevant backend settings:
+
+- `SKILLS_UPDATE_REPO_URL`
+- `SKILLS_UPDATE_CACHE_DIR`
+- `SKILLS_UPDATE_SOURCE_SUBDIR`
+- `SKILLS_UPDATE_WEEKDAY`, `SKILLS_UPDATE_HOUR`, `SKILLS_UPDATE_MINUTE`
+- `HERMES_SKILLS_DIR`, defaulting to `${HERMES_HOME}/skills`
+- `OPENCLAW_SKILLS_DIR`, defaulting to `runtime/openclaw-skills`
+
+On Windows development machines, Hermes paths such as `/home/.../.hermes/skills`
+are synced through WSL using `HERMES_WSL_DISTRIBUTION`. On a mac server, set
+`HERMES_SKILLS_DIR` and `OPENCLAW_SKILLS_DIR` to normal mac filesystem paths.
+
 Local development may use `python services/api/scripts/seed_local_users.py` to
 create `test/test` and `admin/admin`. These accounts are local-only fixtures:
 do not seed or keep them in production.

@@ -9,6 +9,7 @@ ArtifactType = Literal[
     "image_result",
     "data_table",
     "chart",
+    "debug_json",
 ]
 ArtifactStatus = Literal["pending", "rendering", "ready", "failed"]
 

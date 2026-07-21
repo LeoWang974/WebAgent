@@ -138,6 +138,7 @@ def to_session(conversation: Conversation) -> schemas.Session:
         ]
     return schemas.Session(
         id=conversation.id,
+        folder_id=conversation.folder_id,
         owner_id=conversation.user_id,
         title=conversation.title,
         type=conversation.type,

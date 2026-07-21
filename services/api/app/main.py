@@ -9,6 +9,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.router import api_router
 from app.core.config import settings
 from app.services.cleanup_scheduler import run_periodic_data_cleanup, stop_cleanup_task
+from app.services.skills_update_scheduler import (
+    run_periodic_skills_update,
+    stop_skills_update_task,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 
@@ -16,12 +20,17 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     cleanup_task: asyncio.Task[None] | None = None
+    skills_update_task: asyncio.Task[None] | None = None
     if settings.cleanup_enabled:
         cleanup_task = asyncio.create_task(run_periodic_data_cleanup())
         app.state.cleanup_task = cleanup_task
+    if settings.skills_update_enabled:
+        skills_update_task = asyncio.create_task(run_periodic_skills_update())
+        app.state.skills_update_task = skills_update_task
     try:
         yield
     finally:
+        await stop_skills_update_task(skills_update_task)
         await stop_cleanup_task(cleanup_task)
 
 

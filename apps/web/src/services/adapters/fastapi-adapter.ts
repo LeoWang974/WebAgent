@@ -8,6 +8,7 @@ import type {
   FileAsset,
   Message,
   ModelConfig,
+  ConversationFolder,
   Session,
   Skill,
   User,
@@ -47,9 +48,16 @@ export const fastApiAdapter: WebAgentApiAdapter = {
   createSession(input: CreateSessionInput) {
     return apiClient<Session>("/api/sessions", {
       body: JSON.stringify({
+        folder_id: input.folderId,
         skill_key: input.skillKey,
         title: input.title,
       }),
+      method: "POST",
+    });
+  },
+  createConversationFolder(name: string) {
+    return apiClient<ConversationFolder>("/api/sessions/folders", {
+      body: JSON.stringify({ name }),
       method: "POST",
     });
   },
@@ -77,6 +85,11 @@ export const fastApiAdapter: WebAgentApiAdapter = {
   },
   deleteSession(sessionId: string) {
     return apiClient<void>(`/api/sessions/${sessionId}`, {
+      method: "DELETE",
+    });
+  },
+  deleteConversationFolder(folderId: string) {
+    return apiClient<void>(`/api/sessions/folders/${folderId}`, {
       method: "DELETE",
     });
   },
@@ -132,6 +145,9 @@ export const fastApiAdapter: WebAgentApiAdapter = {
   listFiles(sessionId?: string) {
     const path = sessionId ? `/api/sessions/${sessionId}/files` : "/api/files";
     return apiClient<FileAsset[]>(path);
+  },
+  listConversationFolders() {
+    return apiClient<ConversationFolder[]>("/api/sessions/folders");
   },
   listMessages(sessionId?: string) {
     const path = sessionId
@@ -276,6 +292,7 @@ export const fastApiAdapter: WebAgentApiAdapter = {
   updateSession(sessionId: string, input: UpdateSessionInput) {
     return apiClient<Session>(`/api/sessions/${sessionId}`, {
       body: JSON.stringify({
+        folder_id: input.folderId,
         pinned: input.pinned,
         share_with_email: input.shareWithEmail,
         title: input.title,

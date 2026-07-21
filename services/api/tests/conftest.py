@@ -76,6 +76,7 @@ async def api_client(
     seeded_users: dict[str, User],
 ) -> AsyncGenerator[AsyncClient, None]:
     settings.cleanup_enabled = False
+    settings.skills_update_enabled = False
     settings.allow_dev_auth_fallback = True
     app = create_app()
 

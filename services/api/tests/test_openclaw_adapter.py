@@ -32,6 +32,17 @@ def test_openclaw_adapter_builds_gateway_cli_args():
         assert "~/.openclaw/.env" in joined
 
 
+def test_openclaw_adapter_injects_default_skills_dir_for_wsl_commands():
+    command = OpenClawAdapter._with_runtime_env(
+        "openclaw health",
+        {"OPENCLAW_SKILLS_DIR": "/mnt/d/WebAgent/runtime/openclaw-skills"},
+    )
+
+    assert "OPENCLAW_SKILLS_DIR=${OPENCLAW_SKILLS_DIR:-" in command
+    assert "/mnt/d/WebAgent/runtime/openclaw-skills" in command
+    assert command.endswith("openclaw health")
+
+
 def test_openclaw_adapter_can_build_local_cli_args():
     adapter = OpenClawAdapter(agent_id="main", command_timeout_seconds=30, mode="local_cli")
 

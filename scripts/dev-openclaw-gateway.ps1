@@ -5,8 +5,10 @@ $runtimeRoot = Join-Path $repoRoot "runtime"
 $stdoutLog = Join-Path $runtimeRoot "openclaw-gateway.log"
 $stderrLog = Join-Path $runtimeRoot "openclaw-gateway.err.log"
 $startScript = Join-Path $runtimeRoot "start-openclaw-gateway.sh"
+$openclawSkillsDir = Join-Path $runtimeRoot "openclaw-skills"
 
 New-Item -ItemType Directory -Force -Path $runtimeRoot | Out-Null
+New-Item -ItemType Directory -Force -Path $openclawSkillsDir | Out-Null
 
 $existing = wsl.exe -- bash -lc "ss -ltn | grep -q ':18789 ' && echo running || true"
 if (($existing | Out-String).Trim() -eq "running") {
@@ -34,8 +36,12 @@ for __f in ~/.hermes/.env ~/.openclaw/.env; do
 done
 unset __f __line __key
 
+export OPENCLAW_SKILLS_DIR="${OPENCLAW_SKILLS_DIR:-__OPENCLAW_SKILLS_DIR__}"
+
 exec openclaw gateway run --port 18789 --auth none --bind loopback --force --compact
 '@
+$openclawSkillsDirWsl = "/mnt/" + $openclawSkillsDir.Substring(0, 1).ToLower() + $openclawSkillsDir.Substring(2).Replace("\", "/")
+$script = $script.Replace("__OPENCLAW_SKILLS_DIR__", $openclawSkillsDirWsl)
 [System.IO.File]::WriteAllText(
   $startScript,
   $script,

@@ -39,6 +39,24 @@ def test_create_artifacts_from_paths_dedupes_by_content_hash(tmp_path: Path):
         mock_store.artifacts[:] = original_artifacts
 
 
+def test_create_artifacts_from_paths_supports_debug_json(tmp_path: Path):
+    original_artifacts = list(mock_store.artifacts)
+    try:
+        mock_store.artifacts.clear()
+        json_file = tmp_path / "briefing.json"
+        json_file.write_text('{"topic":"future food","steps":2}', encoding="utf-8")
+
+        artifacts = create_artifacts_from_paths("session_1", [str(json_file)])
+
+        assert len(artifacts) == 1
+        assert artifacts[0].type == "debug_json"
+        assert artifacts[0].content == '{"topic":"future food","steps":2}'
+        assert artifacts[0].metadata
+        assert artifacts[0].metadata["filename"] == "briefing.json"
+    finally:
+        mock_store.artifacts[:] = original_artifacts
+
+
 def test_create_artifacts_from_refs_preserves_openclaw_protocol_metadata(tmp_path: Path):
     original_artifacts = list(mock_store.artifacts)
     try:
