@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.api.routes.sessions import persist_discovered_artifacts
 from app.core.config import settings
 from app.core.security import create_access_token
-from app.models import AgentRun, Artifact, Conversation, User
+from app.models import AgentRun, Artifact, Conversation, Message, User
 from app.models import AgentRunEvent as DBAgentRunEvent
 from app.services.artifact_discovery import create_artifacts_from_paths
 
@@ -109,6 +109,32 @@ class FakeHangingAdapter:
 
     def get_last_diagnostics(self) -> dict[str, object]:
         return {"adapter": "hanging", "stderr_tail": "no output before timeout"}
+
+
+class FakeRawActivityAdapter:
+    async def stream_response_events(self, input_data):
+        yield AgentRunEvent(
+            run_id=input_data.run_id,
+            event_type="stage_started",
+            status="running",
+            progress=20,
+            payload={"rawActivityHeartbeat": True},
+            step=AgentRunStep(
+                id=f"{input_data.run_id}_raw_activity",
+                label="Hermes is still running; raw output is being received.",
+                status="running",
+                timestamp="2026-07-17T00:00:00Z",
+            ),
+        )
+
+    def get_last_artifact_paths(self) -> list[str]:
+        return []
+
+    def get_last_artifacts(self) -> list[AgentArtifactRef]:
+        return []
+
+    def get_last_diagnostics(self) -> dict[str, object]:
+        return {"adapter": "raw_activity"}
 
 
 class FakeShortChatAdapter:
@@ -554,6 +580,75 @@ async def test_agent_run_sse_persists_events_and_artifact(
         )
         assert len(artifacts) == 1
         assert artifacts[0].content == "# SSE 报告\n\n已生成。"
+
+
+@pytest.mark.asyncio
+async def test_raw_activity_heartbeat_does_not_create_assistant_message(
+    api_client: AsyncClient,
+    auth_headers: dict[str, dict[str, str]],
+    db_sessionmaker: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+):
+    fake_adapter = FakeRawActivityAdapter()
+
+    def fake_resolve_adapter(model_id=None, adapter_key=None):
+        return "hermes", fake_adapter
+
+    monkeypatch.setattr(
+        "app.api.routes.agent_runs._resolve_adapter",
+        fake_resolve_adapter,
+    )
+
+    async def fake_discover_artifacts_with_retry(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr(
+        "app.api.routes.sessions.discover_artifacts_with_retry",
+        fake_discover_artifacts_with_retry,
+    )
+
+    session_response = await api_client.post(
+        "/api/sessions",
+        json={"title": "Raw activity session"},
+        headers=auth_headers["owner"],
+    )
+    session_id = session_response.json()["id"]
+
+    response = await api_client.post(
+        f"/api/sessions/{session_id}/messages/stream",
+        json={
+            "content": "run quietly",
+            "skillKey": "deep_research",
+            "modelId": "model_hermes",
+        },
+        headers=auth_headers["owner"],
+    )
+    assert response.status_code == 200
+    events = parse_sse_events(response.text)
+    event_names = [name for name, _ in events]
+    assert "assistant_delta" not in event_names
+    done_event = next(data for name, data in events if name == "assistant_done")
+
+    async with db_sessionmaker() as db:
+        messages = (
+            (await db.execute(select(Message).where(Message.conversation_id == session_id)))
+            .scalars()
+            .all()
+        )
+        assert not any(
+            message.content == "Hermes is still running; raw output is being received."
+            for message in messages
+        )
+        run_events = (
+            (
+                await db.execute(
+                    select(DBAgentRunEvent).where(DBAgentRunEvent.run_id == done_event["runId"])
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert any(event.event_type == "raw_activity" for event in run_events)
 
 
 @pytest.mark.asyncio

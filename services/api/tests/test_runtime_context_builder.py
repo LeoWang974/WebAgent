@@ -118,3 +118,26 @@ async def test_runtime_context_builder_uses_openclaw_context_style_and_limits_pa
     assert "artifact_1: type=markdown_report" in result
     assert result.count("path=") == 3
     assert "artifact_4" not in result
+
+
+@pytest.mark.asyncio
+async def test_runtime_context_builder_injects_markdown_for_openclaw_html_generation():
+    result = await build_runtime_content(
+        FakeDb(
+            [
+                artifact("二次元正在改变消费市场", "markdown_report", "/home/demo/report.md"),
+                artifact("old-page", "html_page", "/home/demo/old.html"),
+                artifact("deck", "ppt_deck", "/home/demo/deck.pptx"),
+            ]
+        ),
+        "session_1",
+        "请使用上述生成的《二次元正在改变消费市场》markdown报告。使用report-html-v2为我输出HTML文件",
+        "html_generation",
+        "openclaw",
+    )
+
+    assert "[WebAgent runtime context: openclaw]" in result
+    assert "report-html-v2 workflow" in result
+    assert "artifact_1: type=markdown_report" in result
+    assert "path=/home/demo/report.md" in result
+    assert result.count("path=") == 2

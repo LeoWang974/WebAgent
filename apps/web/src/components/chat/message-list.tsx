@@ -1,7 +1,6 @@
 "use client";
 
 import { ArtifactCard } from "../artifacts";
-import { AgentFeedbackMessage } from "./agent-feedback-message";
 import { AssistantMessage } from "./assistant-message";
 import { EmptyConversation } from "./empty-conversation";
 import { UserMessage } from "./user-message";
@@ -15,7 +14,6 @@ export function MessageList() {
   const currentSessionId = useChatStore((state) => state.currentSessionId);
   const allMessages = useChatStore((state) => state.messages);
   const artifacts = useChatStore((state) => state.artifacts);
-  const agentFeedback = useChatStore((state) => state.agentFeedback);
   const agentRuns = useChatStore((state) => state.agentRuns);
   const activeAgentRunId = useChatStore((state) => state.activeAgentRunId);
   const selectArtifact = useChatStore((state) => state.selectArtifact);
@@ -27,8 +25,6 @@ export function MessageList() {
     (message) => message.sessionId === currentSessionId,
   );
   const currentRun = agentRuns.find((run) => run.sessionId === currentSessionId);
-  const currentFeedback =
-    agentFeedback?.sessionId === currentSessionId ? agentFeedback : undefined;
   const lastMessageId = messages.at(-1)?.id;
 
   function scrollToBottom(behavior: ScrollBehavior = "smooth") {
@@ -50,8 +46,6 @@ export function MessageList() {
     activeAgentRunId,
     currentRun?.progress,
     currentRun?.status,
-    currentFeedback?.detail,
-    currentFeedback?.stage,
     lastMessageId,
     nearBottom,
   ]);
@@ -119,14 +113,6 @@ export function MessageList() {
             </div>
           );
         })}
-        {currentFeedback ? (
-          <AgentFeedbackMessage
-            detail={currentFeedback.detail}
-            modelName={currentFeedback.modelName}
-            startedAt={currentFeedback.startedAt}
-            stage={currentFeedback.stage}
-          />
-        ) : null}
         <div ref={bottomRef} />
       </div>
       {!nearBottom ? (

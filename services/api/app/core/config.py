@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     agent_run_overall_timeout_seconds: int = 2 * 60 * 60
     agent_run_ppt_export_timeout_seconds: int = 180
     agent_run_event_poll_interval_seconds: float = 1.0
+    artifact_storage_enabled: bool = True
+    artifact_storage_root: str = r"D:\WebAgentArtifacts"
     cleanup_enabled: bool = True
     cleanup_initial_delay_seconds: int = 60
     cleanup_interval_seconds: int = 6 * 60 * 60

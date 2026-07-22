@@ -226,6 +226,23 @@ function createPendingAssistantMessage(
   };
 }
 
+function pendingMessageForRun(run: AgentRun, modelName = "Agent"): Message {
+  return createPendingAssistantMessage(
+    run.sessionId,
+    run.adapterKey ?? modelName,
+    run.title === "Agent request" ? undefined : run.title,
+  );
+}
+
+function hasPendingAssistantMessage(messages: Message[], sessionId: string) {
+  return messages.some(
+    (message) =>
+      message.sessionId === sessionId &&
+      message.role === "assistant" &&
+      message.isPending,
+  );
+}
+
 export const useChatStore = create<ChatState>((set, get) => ({
   activeAgentRunId: undefined,
   agentFeedback: undefined,
@@ -249,9 +266,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   testingModelId: undefined,
   updatingSkillKey: undefined,
   applyAgentRunEvent: (event) => {
+    const terminal = isTerminalRunStatus(event.status);
     set((state) => ({
       activeAgentRunId:
-        state.activeAgentRunId === event.runId && isTerminalRunStatus(event.status)
+        state.activeAgentRunId === event.runId && terminal
           ? undefined
           : state.activeAgentRunId,
       agentRuns: state.agentRuns.map((run) => {
@@ -278,6 +296,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
           steps: hasExistingStep ? previousSteps : [...previousSteps, event.step],
         };
       }),
+      messages: terminal
+        ? state.messages.filter(
+            (message) =>
+              !(
+                message.role === "assistant" &&
+                message.isPending &&
+                state.agentRuns.some(
+                  (run) => run.id === event.runId && run.sessionId === message.sessionId,
+                )
+              ),
+          )
+        : state.messages,
     }));
   },
   addModel: async (input) => {
@@ -434,6 +464,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const selectedArtifactId =
         artifacts.find((artifact) => artifact.sessionId === currentSessionId)?.id;
       const selectedModelId = models.find((model) => model.isDefault)?.id ?? models[0]?.id;
+      const hydratedMessages =
+        activeRun && !hasPendingAssistantMessage(messages, activeRun.sessionId)
+          ? [...messages, pendingMessageForRun(activeRun)]
+          : messages;
 
       set({
         artifacts,
@@ -443,7 +477,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         folders,
         hydrated: true,
         loading: false,
-        messages,
+        messages: hydratedMessages,
         models,
         selectedArtifactId,
         selectedModelId,
@@ -594,6 +628,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({
       activeAgentRunId: activeRun?.id,
       currentSessionId: sessionId,
+      messages:
+        activeRun && !hasPendingAssistantMessage(get().messages, sessionId)
+          ? [...get().messages, pendingMessageForRun(activeRun)]
+          : get().messages,
       selectedArtifactId: artifact?.id,
     });
     if (activeRun) {

@@ -32,11 +32,7 @@ function formatTime(value: string, locale: string) {
 
 function formatDuration(durationMs: number | undefined, locale: string) {
   const useChineseUnits = locale === "zh-CN";
-  if (
-    durationMs === undefined ||
-    !Number.isFinite(durationMs) ||
-    durationMs < 1000
-  ) {
+  if (durationMs === undefined || !Number.isFinite(durationMs) || durationMs < 1000) {
     return useChineseUnits ? "0 秒" : "0s";
   }
 
@@ -92,7 +88,7 @@ export function MessageItem({
   const { language, t } = useI18n();
   const isUser = role === "user";
   const messageTime = formatTime(createdAt, language);
-  const pendingElapsedMs = useElapsed(isPending ? waitStartedAt ?? createdAt : undefined);
+  const pendingElapsedMs = useElapsed(isPending ? (waitStartedAt ?? createdAt) : undefined);
   const waitDuration = isPending
     ? formatDuration(pendingElapsedMs, language)
     : waitDurationMs
@@ -100,9 +96,7 @@ export function MessageItem({
       : undefined;
 
   return (
-    <article
-      className={`flex w-full gap-3 ${isUser ? "justify-end" : "justify-start"}`}
-    >
+    <article className={`flex w-full gap-3 ${isUser ? "justify-end" : "justify-start"}`}>
       {!isUser ? (
         <div className="mt-1 flex size-7 shrink-0 items-center justify-center rounded-full bg-[#242424] text-[11px] font-medium text-white">
           A
@@ -110,9 +104,7 @@ export function MessageItem({
       ) : null}
       <div
         className={`max-w-[78%] rounded-2xl px-4 py-3 text-sm leading-6 shadow-sm ${
-          isUser
-            ? "rounded-tr-md bg-[#242424] text-white"
-            : "rounded-tl-md border bg-white"
+          isUser ? "rounded-tr-md bg-[#242424] text-white" : "rounded-tl-md border bg-white"
         }`}
       >
         <div

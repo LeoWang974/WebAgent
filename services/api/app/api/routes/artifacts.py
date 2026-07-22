@@ -85,6 +85,42 @@ def slide_sort_key(artifact: Artifact) -> tuple[int, str]:
     return (int(match.group(1)) if match else 9999, filename)
 
 
+def html_slide_path_sort_key(path: Path) -> tuple[int, str]:
+    match = re.search(r"page[_-]?(\d+)", path.stem, re.IGNORECASE)
+    return (int(match.group(1)) if match else 9999, path.name)
+
+
+def discover_html_slide_paths_for_deck(artifact: Artifact) -> list[Path]:
+    metadata = artifact.artifact_metadata or {}
+    directories: list[Path] = []
+    seen: set[str] = set()
+    for key in ("path", "originalPath", "adapterSourceDir", "storageConversationDir"):
+        raw_path = metadata.get(key)
+        if not isinstance(raw_path, str) or not raw_path:
+            continue
+        path = Path(raw_path)
+        directory = path if path.is_dir() else path.parent
+        directory_key = str(directory).lower()
+        if directory_key in seen or not directory.exists() or not directory.is_dir():
+            continue
+        seen.add(directory_key)
+        directories.append(directory)
+
+    slide_paths: list[Path] = []
+    seen_paths: set[str] = set()
+    for directory in directories:
+        for path in directory.glob("*.htm*"):
+            if not path.is_file():
+                continue
+            key = str(path).lower()
+            if key in seen_paths:
+                continue
+            seen_paths.add(key)
+            slide_paths.append(path)
+
+    return sorted(slide_paths, key=html_slide_path_sort_key)
+
+
 @router.get("", response_model=list[schemas.Artifact])
 async def list_artifacts(
     db: DbSession,
@@ -181,6 +217,25 @@ async def get_artifact_slides(
             return schemas.ArtifactSlides(
                 artifact_id=artifact.id, slides=slides, source="html_artifacts"
             )
+
+    html_paths = discover_html_slide_paths_for_deck(artifact)
+    slides = []
+    for index, path in enumerate(html_paths, start=1):
+        try:
+            content = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        slides.append(
+            schemas.SlidePreview(
+                content=content,
+                content_type="text/html",
+                id=f"{artifact.id}_path_{index}",
+                index=index,
+                title=path.stem,
+            )
+        )
+    if slides:
+        return schemas.ArtifactSlides(artifact_id=artifact.id, slides=slides, source="html_paths")
 
     return schemas.ArtifactSlides(artifact_id=artifact.id, slides=[], source="unavailable")
 

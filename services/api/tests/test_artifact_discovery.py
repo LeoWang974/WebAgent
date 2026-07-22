@@ -1,12 +1,15 @@
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from agent_runtime.schemas import AgentArtifactRef
 
 from app.services import mock_store
 from app.services.artifact_discovery import (
+    _candidate_roots,
     _normalized_path_key,
     create_artifacts_from_paths,
     create_artifacts_from_refs,
+    discover_related_artifact_paths,
 )
 
 
@@ -17,6 +20,12 @@ def test_normalized_path_key_unifies_windows_and_wsl_paths():
         == "/home/demo/report.md"
     )
     assert _normalized_path_key("/home/demo/report.md") == "/home/demo/report.md"
+
+
+def test_candidate_roots_include_hermes_deep_research_reports():
+    roots = [str(root).replace("\\", "/") for root in _candidate_roots()]
+
+    assert any("/.hermes/deep-research-reports" in root for root in roots)
 
 
 def test_create_artifacts_from_paths_dedupes_by_content_hash(tmp_path: Path):
@@ -91,3 +100,17 @@ def test_create_artifacts_from_refs_preserves_openclaw_protocol_metadata(tmp_pat
         assert artifact.metadata["adapterType"] == "markdown_report"
     finally:
         mock_store.artifacts[:] = original_artifacts
+
+
+def test_discover_related_artifact_paths_finds_html_slides_for_pptx(tmp_path: Path):
+    deck = tmp_path / "deck.pptx"
+    slide = tmp_path / "page_001.html"
+    deck.write_bytes(b"pptx")
+    slide.write_text("<html><body>slide</body></html>", encoding="utf-8")
+
+    since = datetime.fromtimestamp(deck.stat().st_mtime) - timedelta(seconds=1)
+    paths = discover_related_artifact_paths([str(deck)], since)
+
+    normalized = {Path(path).name for path in paths}
+    assert "deck.pptx" in normalized
+    assert "page_001.html" in normalized

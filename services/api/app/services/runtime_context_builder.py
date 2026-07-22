@@ -6,19 +6,27 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Artifact
 
-SUPPORTED_CONTEXT_SKILLS = {"data_analysis", "deep_research", "ppt_generation", "u1_image"}
+SUPPORTED_CONTEXT_SKILLS = {
+    "data_analysis",
+    "deep_research",
+    "html_generation",
+    "ppt_generation",
+    "u1_image",
+}
 DEFAULT_ADAPTER_KEY = "hermes"
 
 MAX_CONTEXT_ARTIFACTS_BY_ADAPTER = {
     "hermes": {
         "data_analysis": 4,
         "deep_research": 3,
+        "html_generation": 4,
         "ppt_generation": 6,
         "u1_image": 5,
     },
     "openclaw": {
         "data_analysis": 3,
         "deep_research": 2,
+        "html_generation": 2,
         "ppt_generation": 3,
         "u1_image": 2,
     },
@@ -49,6 +57,14 @@ TYPE_SCORES_BY_ADAPTER = {
             "data_table": 40,
             "chart": 40,
             "ppt_deck": 20,
+        },
+        "html_generation": {
+            "markdown_report": 115,
+            "html_page": 45,
+            "data_table": 25,
+            "chart": 20,
+            "ppt_deck": 10,
+            "image_result": 5,
         },
         "u1_image": {
             "markdown_report": 100,
@@ -83,6 +99,14 @@ TYPE_SCORES_BY_ADAPTER = {
             "image_result": 35,
             "data_table": 15,
             "chart": 15,
+        },
+        "html_generation": {
+            "markdown_report": 120,
+            "html_page": 35,
+            "data_table": 15,
+            "chart": 10,
+            "ppt_deck": 5,
+            "image_result": 5,
         },
         "u1_image": {
             "markdown_report": 90,
@@ -197,6 +221,12 @@ def hermes_instruction_for_skill(skill_key: str) -> str:
             "如果用户提到已有 Markdown/HTML/图片，请优先从下方会话产物中选择最匹配文件；"
             "生成 PPT 时需要明确输出最终 PPTX 或可转换的 HTML 页面路径。"
         )
+    if skill_key == "html_generation":
+        return (
+            "If the user asks to convert or render an existing Markdown report as HTML, "
+            "prefer the most relevant markdown_report path below as the source input. "
+            "Generate a standalone HTML file and output the final HTML file path."
+        )
     if skill_key == "u1_image":
         return (
             "用户提到 U1 生图时，表示调用 u1_image/sn-image-base 生图能力，"
@@ -226,6 +256,13 @@ def openclaw_instruction_for_skill(skill_key: str) -> str:
             "Generate a PPT deliverable when possible; if HTML slides are produced first, "
             "return both "
             "HTML paths and the final PPTX path with artifact_type=ppt_deck/html_page."
+        )
+    if skill_key == "html_generation":
+        return (
+            "OpenClaw context: prefer exactly one source markdown_report path below as input. "
+            "Run the report-html-v2 workflow, do not redo research unless the source report "
+            "is missing, generate a standalone HTML report, and explicitly return "
+            "artifact_paths, artifact_type=html_page, source_dir, run_id, and title."
         )
     if skill_key == "u1_image":
         return (

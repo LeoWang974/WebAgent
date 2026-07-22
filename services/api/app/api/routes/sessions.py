@@ -2,6 +2,8 @@ import asyncio
 import hashlib
 import json
 import logging
+import re
+import shutil
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -34,6 +36,7 @@ from app.services.artifact_discovery import (
     create_pptx_from_html_artifacts,
     discover_artifact_paths_from_hermes_sessions,
     discover_artifacts_since,
+    discover_related_artifact_paths,
 )
 from app.services.persistence import (
     get_conversation_or_404,
@@ -78,11 +81,37 @@ def sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+def is_low_value_runtime_update(content: str, event_payload: dict) -> bool:
+    normalized = re.sub(r"\s+", " ", content).strip().lower()
+    if event_payload.get("rawActivityHeartbeat"):
+        return True
+    low_value_messages = {
+        "openclaw cli task status: running.",
+        "openclaw is still working; waiting for task progress.",
+        "openclaw is still working; watching the report directory.",
+        "openclaw is still working; waiting for report files.",
+    }
+    return normalized in low_value_messages
+
+
 def resolve_skill_key(content: str, explicit_skill_key: str | None) -> str | None:
     if explicit_skill_key:
         return explicit_skill_key
 
     normalized = content.lower()
+    html_generation_aliases = (
+        "report-html-v2",
+        "report html",
+        "html report",
+        "html文件",
+        "输出html",
+        "生成html",
+        "生成 html",
+        "输出 html",
+    )
+    if any(alias in normalized for alias in html_generation_aliases):
+        return "html_generation"
+
     skill_aliases = [
         ("deep_research", ["sn-deep-research", "deep research", "深度调研", "调研", "研究报告"]),
         ("data_analysis", ["sn-da", "data analysis", "数据分析", "分析数据", "表格分析"]),
@@ -102,6 +131,40 @@ async def discover_artifacts_with_retry(
     run_id: str | None,
     explicit_artifacts: list[object] | None = None,
 ) -> list[schemas.Artifact]:
+    def dedupe_discovered_artifacts(
+        artifacts: list[schemas.Artifact],
+    ) -> list[schemas.Artifact]:
+        deduped: list[schemas.Artifact] = []
+        seen: set[str] = set()
+        for artifact in artifacts:
+            metadata = artifact.metadata or {}
+            keys = [
+                artifact.id,
+                str(metadata.get("contentHash") or ""),
+                str(metadata.get("normalizedPath") or ""),
+                str(metadata.get("originalNormalizedPath") or ""),
+                str(metadata.get("path") or ""),
+                str(metadata.get("originalPath") or ""),
+            ]
+            present_keys = {item for item in keys if item}
+            if present_keys & seen:
+                continue
+            seen.update(present_keys)
+            deduped.append(artifact)
+        return deduped
+
+    def explicit_source_dirs() -> list[str]:
+        source_dirs: list[str] = []
+        for artifact_ref in explicit_artifacts or []:
+            value = (
+                artifact_ref.get("source_dir") or artifact_ref.get("sourceDir")
+                if isinstance(artifact_ref, dict)
+                else getattr(artifact_ref, "source_dir", None)
+            )
+            if isinstance(value, str) and value:
+                source_dirs.append(value)
+        return source_dirs
+
     for attempt in range(5):
         discovered_artifacts = create_artifacts_from_refs(
             session_id,
@@ -114,6 +177,17 @@ async def discover_artifacts_with_retry(
                 explicit_artifact_paths,
                 run_id,
             )
+        if discovered_artifacts:
+            related_paths = discover_related_artifact_paths(
+                explicit_artifact_paths,
+                since,
+                source_dirs=explicit_source_dirs(),
+            )
+            if related_paths:
+                discovered_artifacts.extend(
+                    create_artifacts_from_paths(session_id, related_paths, run_id)
+                )
+                discovered_artifacts = dedupe_discovered_artifacts(discovered_artifacts)
         if not discovered_artifacts:
             session_artifact_paths = discover_artifact_paths_from_hermes_sessions(since)
             discovered_artifacts = create_artifacts_from_paths(
@@ -124,7 +198,7 @@ async def discover_artifacts_with_retry(
         if not discovered_artifacts:
             discovered_artifacts = discover_artifacts_since(session_id, since, run_id)
         if discovered_artifacts or attempt == 4:
-            return discovered_artifacts
+            return dedupe_discovered_artifacts(discovered_artifacts)
         await asyncio.sleep(2)
     return []
 
@@ -205,6 +279,70 @@ def artifact_dedupe_keys(metadata: dict) -> tuple[str, list[str]]:
         if isinstance(value, str) and value
     ]
     return content_hash, candidate_paths
+
+
+def metadata_path_key(path: str | Path) -> str:
+    value = str(path).strip().strip(".,;:)]}\"'").replace("\\", "/")
+    lower_value = value.lower()
+    if lower_value.startswith("//wsl.localhost/ubuntu/"):
+        return "/" + value.split("/Ubuntu/", maxsplit=1)[1].lower()
+    if lower_value.startswith("//wsl$/ubuntu/"):
+        return "/" + value.split("/Ubuntu/", maxsplit=1)[1].lower()
+    match = re.match(r"^([a-zA-Z]):/(.*)$", value)
+    if match:
+        return f"/mnt/{match.group(1).lower()}/{match.group(2).lower()}"
+    return lower_value
+
+
+def safe_storage_name(value: str, fallback: str) -> str:
+    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "-", value).strip(" .-")
+    return cleaned[:80] or fallback
+
+
+def organize_artifact_schema(
+    artifact_schema: schemas.Artifact,
+    conversation: Conversation,
+) -> schemas.Artifact:
+    if not settings.artifact_storage_enabled:
+        return artifact_schema
+
+    metadata = dict(artifact_schema.metadata or {})
+    raw_path = metadata.get("path")
+    if not isinstance(raw_path, str) or not raw_path:
+        return artifact_schema
+
+    source = Path(raw_path)
+    if not source.exists() or not source.is_file():
+        return artifact_schema
+
+    storage_root = Path(settings.artifact_storage_root)
+    folder_label = safe_storage_name(conversation.title or "conversation", "conversation")
+    conversation_dir = storage_root / f"{folder_label}-{conversation.id[:8]}"
+    conversation_dir.mkdir(parents=True, exist_ok=True)
+
+    digest = hashlib.sha1(str(source).encode("utf-8", errors="ignore")).hexdigest()[:10]
+    destination = conversation_dir / f"{source.stem}-{digest}{source.suffix.lower()}"
+    if destination.exists() and destination.stat().st_mtime >= source.stat().st_mtime:
+        stored_path = destination
+    else:
+        runtime_root = Path(__file__).resolve().parents[5] / "runtime"
+        try:
+            source.relative_to(runtime_root)
+            shutil.move(str(source), destination)
+        except ValueError:
+            shutil.copy2(source, destination)
+        stored_path = destination
+
+    if not metadata.get("originalPath"):
+        metadata["originalPath"] = str(source)
+        metadata["originalNormalizedPath"] = metadata_path_key(source)
+    metadata["path"] = str(stored_path)
+    metadata["normalizedPath"] = metadata_path_key(stored_path)
+    metadata["storageRoot"] = str(storage_root)
+    metadata["storageConversationDir"] = str(conversation_dir)
+    metadata["organizedAt"] = datetime.now().isoformat()
+    artifact_schema.metadata = metadata
+    return artifact_schema
 
 
 async def find_existing_artifact(
@@ -299,8 +437,10 @@ async def persist_discovered_artifacts(
     run_id: str | None = None,
 ) -> list[Artifact]:
     stored_artifacts: list[Artifact] = []
+    conversation = await refresh_conversation(db, session_id)
 
     for artifact_schema in discovered_artifacts:
+        artifact_schema = organize_artifact_schema(artifact_schema, conversation)
         metadata = artifact_schema.metadata or {}
         existing_artifact = await find_existing_artifact(
             db,
@@ -839,6 +979,18 @@ async def stream_session_message(
                         event_payload = {}
                         progress = 0
                     if not content:
+                        continue
+
+                    if is_low_value_runtime_update(content, event_payload):
+                        await record_db_agent_run_event(
+                            db,
+                            run,
+                            event_type="raw_activity",
+                            label=content,
+                            status="running",
+                            progress=progress or min(90, 10 + assistant_event_count * 8),
+                            payload=event_payload,
+                        )
                         continue
 
                     if event_type == "artifact_found":

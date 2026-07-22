@@ -74,9 +74,12 @@ def _candidate_roots() -> list[Path]:
         user_home / "deep-research-reports",
         user_home / "ppt_decks",
         user_home / ".hermes" / "images",
+        user_home / ".hermes" / "deep-research-reports",
         Path(r"\\wsl.localhost\Ubuntu\home\zhuchangbiaozhu_xyl\.hermes\reports"),
+        Path(r"\\wsl.localhost\Ubuntu\home\zhuchangbiaozhu_xyl\.hermes\deep-research-reports"),
         Path(r"\\wsl.localhost\Ubuntu\home\zhuchangbiaozhu_xyl\.hermes\images"),
         Path(r"\\wsl$\Ubuntu\home\zhuchangbiaozhu_xyl\.hermes\reports"),
+        Path(r"\\wsl$\Ubuntu\home\zhuchangbiaozhu_xyl\.hermes\deep-research-reports"),
         Path(r"\\wsl$\Ubuntu\home\zhuchangbiaozhu_xyl\.hermes\images"),
         Path(
             r"\\wsl.localhost\Ubuntu\home\zhuchangbiaozhu_xyl\hermes-aws-ai-agent\deep-research-reports"
@@ -585,6 +588,58 @@ def create_artifacts_from_refs(
         reverse=True,
     )
     return artifacts
+
+
+def discover_related_artifact_paths(
+    paths: list[str],
+    since: datetime,
+    *,
+    source_dirs: list[str] | None = None,
+) -> list[str]:
+    since = _as_local_naive(since)
+    directories: list[Path] = []
+    seen_dirs: set[str] = set()
+
+    for raw_path in paths:
+        path = _normalize_path(raw_path)
+        parent = path.parent
+        key = _normalized_path_key(parent)
+        if key not in seen_dirs:
+            seen_dirs.add(key)
+            directories.append(parent)
+
+    for raw_dir in source_dirs or []:
+        directory = _normalize_path(raw_dir)
+        key = _normalized_path_key(directory)
+        if key not in seen_dirs:
+            seen_dirs.add(key)
+            directories.append(directory)
+
+    related_paths: list[str] = []
+    seen_paths: set[str] = set()
+    for directory in directories:
+        if not directory.exists() or not directory.is_dir():
+            continue
+        for path in directory.rglob("*"):
+            if not path.is_file() or _is_ignored(path):
+                continue
+            if path.name.lower() in IGNORED_FILENAMES:
+                continue
+            if path.suffix.lower() not in SUPPORTED_SUFFIXES:
+                continue
+            try:
+                updated_at = datetime.fromtimestamp(path.stat().st_mtime)
+            except OSError:
+                continue
+            if updated_at < since:
+                continue
+            key = _normalized_path_key(path)
+            if key in seen_paths:
+                continue
+            seen_paths.add(key)
+            related_paths.append(str(path))
+
+    return related_paths
 
 
 def create_pptx_from_html_artifacts(

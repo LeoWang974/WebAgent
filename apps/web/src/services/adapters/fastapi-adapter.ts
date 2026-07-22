@@ -259,35 +259,53 @@ export const fastApiAdapter: WebAgentApiAdapter = {
     }
   },
   subscribeAgentRun(runId, onEvent) {
-    const token = getAccessToken();
-    const searchParams = new URLSearchParams();
-    if (token) {
-      searchParams.set("access_token", token);
-    }
-    const query = searchParams.toString();
-    const source = new EventSource(
-      `${API_BASE_URL}/api/agent-runs/${runId}/events${query ? `?${query}` : ""}`,
-    );
+    let reconnectTimer: number | undefined;
+    let source: EventSource | undefined;
+    let stopped = false;
 
-    source.onmessage = (message) => {
-      const event = parseSseJson<AgentRunEvent>(message.data, "message");
-      if (event) {
-        onEvent(event);
+    const connect = () => {
+      const token = getAccessToken();
+      const searchParams = new URLSearchParams();
+      if (token) {
+        searchParams.set("access_token", token);
       }
+      const query = searchParams.toString();
+      source = new EventSource(
+        `${API_BASE_URL}/api/agent-runs/${runId}/events${query ? `?${query}` : ""}`,
+      );
+
+      source.onmessage = (message) => {
+        const event = parseSseJson<AgentRunEvent>(message.data, "message");
+        if (event) {
+          onEvent(event);
+        }
+      };
+
+      source.addEventListener("agent_run_event", (message) => {
+        const event = parseSseJson<AgentRunEvent>(message.data, "agent_run_event");
+        if (event) {
+          onEvent(event);
+        }
+      });
+
+      source.onerror = () => {
+        source?.close();
+        source = undefined;
+        if (!stopped) {
+          reconnectTimer = window.setTimeout(connect, 1500);
+        }
+      };
     };
 
-    source.addEventListener("agent_run_event", (message) => {
-      const event = parseSseJson<AgentRunEvent>(message.data, "agent_run_event");
-      if (event) {
-        onEvent(event);
+    connect();
+
+    return () => {
+      stopped = true;
+      if (reconnectTimer !== undefined) {
+        window.clearTimeout(reconnectTimer);
       }
-    });
-
-    source.onerror = () => {
-      source.close();
+      source?.close();
     };
-
-    return () => source.close();
   },
   updateSession(sessionId: string, input: UpdateSessionInput) {
     return apiClient<Session>(`/api/sessions/${sessionId}`, {

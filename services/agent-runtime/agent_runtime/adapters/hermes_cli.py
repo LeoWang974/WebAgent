@@ -1,19 +1,19 @@
 import asyncio
+import json
 import logging
 import os
 import re
 import shlex
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import AsyncGenerator, Optional, Tuple
-
 
 logger = logging.getLogger(__name__)
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 ARTIFACT_PATH_RE = re.compile(
-    r"(?P<path>(?:[A-Za-z]:\\|/mnt/[a-zA-Z]/|/home/|/tmp/)[^\"'<>|`\r\n]+?\.(?:md|html?|pptx|png|jpe?g|csv|xlsx))",
+    r"(?P<path>(?:[A-Za-z]:\\|/mnt/[a-zA-Z]/|/home/|/tmp/)[^\"'<>|`\r\n]+?\.(?:md|html?|pptx|png|jpe?g|csv|xlsx|json))",
     re.IGNORECASE,
 )
 BOX_CODEPOINTS = {
@@ -39,6 +39,18 @@ BOX_CODEPOINTS = {
     0x256F,
     0x2570,
 }
+MOJIBAKE_BOX_PREFIXES = ("\u923a", "\u9239", "\u923a\ue75b", "\u923a\ue75b\u6522")
+MOJIBAKE_MARKERS = (
+    "\u923a",
+    "\u9239",
+    "\u9396",
+    "\u5b80",
+    "\u830c",
+    "\u6573",
+    "\u93b4",
+    "\u611b",
+    "\u9365",
+)
 
 
 @dataclass(frozen=True)
@@ -127,7 +139,7 @@ class HermesCliWrapper:
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         return log_dir / f"hermes-raw-{timestamp}.log"
 
-    def _prompt_file_path(self, question: str, run_id: Optional[str] = None) -> tuple[Path, str]:
+    def _prompt_file_path(self, question: str, run_id: str | None = None) -> tuple[Path, str]:
         prompt_dir = Path(__file__).resolve().parents[4] / "runtime" / "hermes-prompts"
         prompt_dir.mkdir(parents=True, exist_ok=True)
         prompt_name = run_id or datetime.now().strftime("%Y%m%d-%H%M%S-%f")
@@ -142,64 +154,148 @@ class HermesCliWrapper:
         self,
         question: str,
         *,
-        session_id: Optional[str] = None,
-        toolsets: Optional[str] = None,
-        skills: Optional[str] = None,
-        model: Optional[str] = None,
+        session_id: str | None = None,
+        toolsets: str | None = None,
+        skills: str | None = None,
+        model: str | None = None,
         quiet: bool = True,
         quiet_query: bool = False,
         use_pty: bool = False,
-        run_id: Optional[str] = None,
+        run_id: str | None = None,
+    ) -> str:
+        command = self._build_chat_bash_command(
+            question,
+            session_id=session_id,
+            toolsets=toolsets,
+            skills=skills,
+            model=model,
+            quiet=quiet,
+            quiet_query=quiet_query,
+            use_pty=use_pty,
+            run_id=run_id,
+        )
+        return f"wsl -d {shlex.quote(self.wsl_distribution)} -- bash -lc {shlex.quote(command)}"
+
+    def _build_chat_exec_args(
+        self,
+        question: str,
+        *,
+        session_id: str | None = None,
+        toolsets: str | None = None,
+        skills: str | None = None,
+        model: str | None = None,
+        quiet: bool = True,
+        quiet_query: bool = False,
+        use_pty: bool = False,
+        run_id: str | None = None,
+    ) -> list[str]:
+        command = self._build_chat_bash_command(
+            question,
+            session_id=session_id,
+            toolsets=toolsets,
+            skills=skills,
+            model=model,
+            quiet=quiet,
+            quiet_query=quiet_query,
+            use_pty=use_pty,
+            run_id=run_id,
+        )
+        return ["wsl.exe", "-d", self.wsl_distribution, "--", "bash", "-lc", command]
+
+    def _build_chat_bash_command(
+        self,
+        question: str,
+        *,
+        session_id: str | None = None,
+        toolsets: str | None = None,
+        skills: str | None = None,
+        model: str | None = None,
+        quiet: bool = True,
+        quiet_query: bool = False,
+        use_pty: bool = False,
+        run_id: str | None = None,
     ) -> str:
         prompt_path, wsl_prompt_path = self._prompt_file_path(question, run_id)
-        args = [
+        pre_prompt_args = [
             self.hermes_path,
             "chat",
             "-q",
-            f"$(cat {shlex.quote(wsl_prompt_path)})",
         ]
+        post_prompt_args: list[str] = []
 
         if session_id:
-            args.extend(["--resume", session_id])
+            post_prompt_args.extend(["--resume", session_id])
         if toolsets:
-            args.extend(["-t", toolsets])
+            post_prompt_args.extend(["-t", toolsets])
         if skills:
-            args.extend(["-s", skills])
+            post_prompt_args.extend(["-s", skills])
         if model:
-            args.extend(["-m", model])
+            post_prompt_args.extend(["-m", model])
         if quiet_query:
-            args.append("-Q")
+            post_prompt_args.append("-Q")
+
+        python_code = (
+            "import json, subprocess, sys\n"
+            f"__prompt_path = {json.dumps(wsl_prompt_path, ensure_ascii=False)}\n"
+            f"__pre = {json.dumps(pre_prompt_args, ensure_ascii=False)}\n"
+            f"__post = {json.dumps(post_prompt_args, ensure_ascii=False)}\n"
+            "with open(__prompt_path, 'r', encoding='utf-8') as __f:\n"
+            "    __prompt = __f.read()\n"
+            "sys.exit(subprocess.call([*__pre, __prompt, *__post]))\n"
+        )
 
         env = dict(self._env)
         if not quiet:
             env.pop("HERMES_QUIET", None)
         env_str = " ".join(f"{key}={shlex.quote(value)}" for key, value in env.items())
-        quoted_args = []
-        for index, arg in enumerate(args):
-            if index >= 3 and args[index - 1] == "-q":
-                quoted_args.append(f'"{arg}"')
-            else:
-                quoted_args.append(shlex.quote(arg))
-        command = self._with_runtime_env(f"{env_str} {' '.join(quoted_args)}".strip())
+        command = self._with_runtime_env(
+            f"{env_str} python3 -c {shlex.quote(python_code)}".strip()
+        )
         if use_pty:
             command = f"script -q -e -c {shlex.quote(command)} /dev/null"
         logger.info("Hermes prompt file: %s", prompt_path)
-        return f"wsl -d {shlex.quote(self.wsl_distribution)} -- bash -lc {shlex.quote(command)}"
+        return command
 
     @staticmethod
     def _clean_line(line: str) -> str:
         return ANSI_RE.sub("", line).replace("\r", "").strip()
 
     @staticmethod
+    def _decode_stream_chunk(chunk: bytes) -> str:
+        candidates = [
+            chunk.decode("utf-8", errors="replace"),
+            chunk.decode("gb18030", errors="replace"),
+        ]
+
+        def score(text: str) -> int:
+            replacement_penalty = text.count("\ufffd") * 20
+            mojibake_penalty = sum(text.count(marker) * 4 for marker in MOJIBAKE_MARKERS)
+            box_reward = sum(1 for char in text if ord(char) in BOX_CODEPOINTS) * 3
+            return box_reward - replacement_penalty - mojibake_penalty
+
+        return max(candidates, key=score)
+
+    @staticmethod
     def _is_box_line(line: str) -> bool:
-        return bool(line) and ord(line[0]) in BOX_CODEPOINTS
+        return bool(line) and (
+            ord(line[0]) in BOX_CODEPOINTS or line.startswith(MOJIBAKE_BOX_PREFIXES)
+        )
 
     @staticmethod
     def _strip_box_edges(line: str) -> str:
         chars = line.strip()
         while chars and ord(chars[0]) in BOX_CODEPOINTS:
             chars = chars[1:].strip()
+        while chars.startswith(MOJIBAKE_BOX_PREFIXES):
+            for prefix in MOJIBAKE_BOX_PREFIXES:
+                if chars.startswith(prefix):
+                    chars = chars[len(prefix) :].strip()
+                    break
+        while chars.startswith("?"):
+            chars = chars[1:].strip()
         while chars and ord(chars[-1]) in BOX_CODEPOINTS:
+            chars = chars[:-1].strip()
+        while chars.endswith(MOJIBAKE_BOX_PREFIXES):
             chars = chars[:-1].strip()
         return chars
 
@@ -240,6 +336,8 @@ class HermesCliWrapper:
             return "image_result"
         if suffix in {".csv", ".xlsx"}:
             return "data_table"
+        if suffix == ".json":
+            return "debug_json"
         return "file"
 
     @staticmethod
@@ -268,7 +366,7 @@ class HermesCliWrapper:
         *,
         content: str,
         raw_log_path: Path | None,
-        run_id: Optional[str],
+        run_id: str | None,
         completion_detected: bool,
         artifact_found: bool = False,
         payload: dict[str, object] | None = None,
@@ -353,7 +451,7 @@ class HermesCliWrapper:
 
         try:
             await asyncio.wait_for(process.wait(), timeout=5)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             process.kill()
             await process.wait()
 
@@ -373,6 +471,7 @@ class HermesCliWrapper:
         completion_markers = [
             "\u62a5\u544a\u5df2\u5b8c\u6210",
             "\u62a5\u544a\u5df2\u751f\u6210",
+            "\u62a5\u544a\u5b8c\u6210",
             "\u4efb\u52a1\u5df2\u5b8c\u6210",
             "\u4efb\u52a1\u5b8c\u6210",
             "\u6700\u7ec8\u62a5\u544a\u5df2\u5b8c\u6210",
@@ -383,6 +482,8 @@ class HermesCliWrapper:
             "\u8f6c\u6362\u5b8c\u6210",
             "finalreportcompleted",
             "reportcompleted",
+            "duration:",
+            "resumethissessionwith:",
         ]
         return any(marker in normalized for marker in completion_markers)
 
@@ -406,10 +507,39 @@ class HermesCliWrapper:
         if any(marker in lower for marker in noisy_markers):
             return False
 
-        if len(lines) > 4:
-            return False
-
         return True
+
+    @staticmethod
+    def _summarize_box_text(text: str, max_lines: int = 4) -> str | None:
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        if not lines:
+            return None
+        if len(lines) <= max_lines:
+            return "\n".join(lines)
+
+        important_markers = [
+            "\u62a5\u544a",
+            "\u5df2\u751f\u6210",
+            "\u5df2\u5b8c\u6210",
+            "\u8f93\u51fa\u6587\u4ef6",
+            "\u4fdd\u5b58\u5728",
+            "ppt",
+            "pptx",
+            ".md",
+            ".html",
+            ".pptx",
+            ".png",
+            ".jpg",
+            ".csv",
+            ".xlsx",
+        ]
+        important_lines = [
+            line
+            for line in lines
+            if any(marker.lower() in line.lower() for marker in important_markers)
+        ]
+        selected = important_lines[:max_lines] if important_lines else lines[:max_lines]
+        return "\n".join(selected)
 
     def _extract_hermes_box_text(self, line: str) -> tuple[bool, str | None]:
         cleaned = self._clean_line(line)
@@ -433,13 +563,13 @@ class HermesCliWrapper:
     async def ask(
         self,
         question: str,
-        session_id: Optional[str] = None,
-        toolsets: Optional[str] = None,
-        skills: Optional[str] = None,
-        model: Optional[str] = None,
-    ) -> Tuple[str, str]:
-        process = await asyncio.create_subprocess_shell(
-            self._build_chat_command(
+        session_id: str | None = None,
+        toolsets: str | None = None,
+        skills: str | None = None,
+        model: str | None = None,
+    ) -> tuple[str, str]:
+        process = await asyncio.create_subprocess_exec(
+            *self._build_chat_exec_args(
                 question,
                 session_id=session_id,
                 toolsets=toolsets,
@@ -477,11 +607,11 @@ class HermesCliWrapper:
     async def ask_stream(
         self,
         question: str,
-        session_id: Optional[str] = None,
-        toolsets: Optional[str] = None,
-        skills: Optional[str] = None,
-        model: Optional[str] = None,
-        run_id: Optional[str] = None,
+        session_id: str | None = None,
+        toolsets: str | None = None,
+        skills: str | None = None,
+        model: str | None = None,
+        run_id: str | None = None,
     ) -> AsyncGenerator[str, None]:
         async for event in self.ask_stream_events(
             question=question,
@@ -498,11 +628,11 @@ class HermesCliWrapper:
     async def ask_stream_events(
         self,
         question: str,
-        session_id: Optional[str] = None,
-        toolsets: Optional[str] = None,
-        skills: Optional[str] = None,
-        model: Optional[str] = None,
-        run_id: Optional[str] = None,
+        session_id: str | None = None,
+        toolsets: str | None = None,
+        skills: str | None = None,
+        model: str | None = None,
+        run_id: str | None = None,
     ) -> AsyncGenerator[HermesStreamEvent, None]:
         self.last_artifact_paths = []
         self.last_artifacts = []
@@ -517,7 +647,8 @@ class HermesCliWrapper:
         }
 
         logger.info(
-            "Starting Hermes stream: question_chars=%s session_id=%s toolsets=%s skills=%s model=%s",
+            "Starting Hermes stream: question_chars=%s session_id=%s "
+            "toolsets=%s skills=%s model=%s",
             len(question),
             session_id or "",
             toolsets or "",
@@ -537,8 +668,8 @@ class HermesCliWrapper:
         )
         logger.info("Hermes raw output log: %s", raw_log_path)
 
-        process = await asyncio.create_subprocess_shell(
-            self._build_chat_command(
+        process = await asyncio.create_subprocess_exec(
+            *self._build_chat_exec_args(
                 question,
                 session_id=session_id,
                 toolsets=toolsets,
@@ -565,6 +696,8 @@ class HermesCliWrapper:
         stderr_chunks: list[str] = []
         line_queue: asyncio.Queue[str | None] = asyncio.Queue()
         completion_detected = False
+        last_raw_activity_emit = datetime.now()
+        raw_activity_interval_seconds = 120
 
         async def stop_after_completion() -> None:
             if process.returncode is not None:
@@ -579,7 +712,7 @@ class HermesCliWrapper:
             box_lines.clear()
             if not text or not self._should_emit_box(text):
                 return None
-            return text
+            return self._summarize_box_text(text)
 
         def parse_box_line(raw_line: str) -> tuple[bool, bool, str | None]:
             cleaned = self._clean_line(raw_line)
@@ -611,7 +744,7 @@ class HermesCliWrapper:
                 if not chunk:
                     break
 
-                decoded = chunk.decode("utf-8", errors="replace")
+                decoded = self._decode_stream_chunk(chunk)
                 with raw_log_path.open("a", encoding="utf-8", errors="replace") as raw_log:
                     raw_log.write(("STDERR " if is_stderr else "STDOUT ") + decoded)
                 self._remember_artifact_paths(decoded)
@@ -648,7 +781,7 @@ class HermesCliWrapper:
                         line_queue.get(),
                         timeout=8 if completion_detected else None,
                     )
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     await stop_after_completion()
                     break
 
@@ -705,6 +838,42 @@ class HermesCliWrapper:
 
                 if in_hermes_box and is_box_line:
                     continue
+
+                if not in_hermes_box and text:
+                    if self._is_completion_signal(text):
+                        fallback_content = "Hermes completed. Discovering generated artifacts."
+                        emitted_output = True
+                        last_emitted = fallback_content
+                        self.last_diagnostics["last_stage"] = fallback_content
+                        completion_detected = True
+                        artifact_found = len(self.last_artifact_paths) > emitted_artifact_count
+                        emitted_artifact_count = len(self.last_artifact_paths)
+                        yield self._build_stream_event(
+                            content=fallback_content,
+                            raw_log_path=raw_log_path,
+                            run_id=run_id,
+                            completion_detected=True,
+                            artifact_found=artifact_found,
+                            payload={"fallbackCompletion": True, "rawFooter": text[:500]},
+                        )
+                        await stop_after_completion()
+                        break
+
+                    now = datetime.now()
+                    if (
+                        now - last_raw_activity_emit
+                    ).total_seconds() >= raw_activity_interval_seconds:
+                        last_raw_activity_emit = now
+                        activity_content = "Hermes is still running; raw output is being received."
+                        self.last_diagnostics["last_stage"] = activity_content
+                        yield self._build_stream_event(
+                            content=activity_content,
+                            raw_log_path=raw_log_path,
+                            run_id=run_id,
+                            completion_detected=False,
+                            artifact_found=False,
+                            payload={"rawActivityHeartbeat": True},
+                        )
         except asyncio.CancelledError:
             if run_id:
                 self.cancelled_run_ids.add(run_id)
@@ -753,28 +922,41 @@ class HermesCliWrapper:
             if run_id and self.active_processes.get(run_id) is process:
                 self.active_processes.pop(run_id, None)
 
+        if process.returncode == 0 and not emitted_output:
+            fallback_content = "Hermes completed. Discovering generated artifacts."
+            self.last_diagnostics["last_stage"] = fallback_content
+            yield self._build_stream_event(
+                content=fallback_content,
+                raw_log_path=raw_log_path,
+                run_id=run_id,
+                completion_detected=True,
+                artifact_found=bool(self.last_artifact_paths),
+                payload={"fallbackCompletion": True},
+            )
+
         if run_id and run_id in self.cancelled_run_ids:
             self.cancelled_run_ids.discard(run_id)
             return
 
         if process.returncode != 0:
             stderr_str = "".join(stderr_chunks).strip()
-            if completion_detected and emitted_output:
+            if completion_detected or self.last_artifact_paths:
                 logger.warning(
-                    "Hermes process was stopped after a completion signal; treating as completed."
-                )
-                return
-            if process.returncode == 134 and (emitted_output or self.last_artifact_paths):
-                logger.warning(
-                    "Hermes exited with code 134 after emitting output; treating as completed."
+                    "Hermes exited with code %s after completion/artifact signal; "
+                    "treating as completed.",
+                    process.returncode,
                 )
                 return
 
             diagnostic_tail = (stderr_tail or stdout_tail).strip()
-            error_msg = diagnostic_tail or stderr_str or f"Hermes exited with code {process.returncode}"
+            error_msg = (
+                diagnostic_tail
+                or stderr_str
+                or f"Hermes exited with code {process.returncode}"
+            )
             raise RuntimeError(f"Hermes CLI error: {error_msg}")
 
-    def _parse_output(self, output: str) -> Tuple[str, str]:
+    def _parse_output(self, output: str) -> tuple[str, str]:
         lines = output.split("\n")
         session_id = ""
         response_lines = []
