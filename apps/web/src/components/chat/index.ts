@@ -7,5 +7,4 @@ export * from "./route-session-sync";
 export * from "./workspace-state";
 export * from "./assistant-message";
 export * from "./user-message";
-export * from "./tool-call-card";
 export * from "./agent-status";

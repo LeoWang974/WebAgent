@@ -4,7 +4,16 @@ import { create } from "zustand";
 import { shouldSelectCreatedArtifact } from "@/lib/artifact-selection";
 import { settingsApi, webAgentApi } from "@/services";
 import type { AgentRunUnsubscribe } from "@/services/adapters/types";
-import { useUiStore } from "./ui-store";
+import {
+  createId,
+  createPendingAssistantMessage,
+  detectRequestedSkill,
+  generateSessionTitle,
+  hasPendingAssistantMessage,
+  isDefaultSessionTitle,
+  isTerminalRunStatus,
+  pendingMessageForRun,
+} from "./chat-store-helpers";
 import type {
   AgentRun,
   AgentRunEvent,
@@ -17,17 +26,8 @@ import type {
   SkillKey,
 } from "@/types";
 
-interface AgentFeedback {
-  detail: string;
-  modelName: string;
-  sessionId: string;
-  stage: string;
-  startedAt: string;
-}
-
 interface ChatState {
   activeAgentRunId?: string;
-  agentFeedback?: AgentFeedback;
   agentRuns: AgentRun[];
   artifacts: Artifact[];
   currentSessionId: string;
@@ -80,28 +80,8 @@ interface ChatState {
   updateSkillVersion: (skillKey: SkillKey, direction: "update" | "rollback") => Promise<void>;
 }
 
-function createId(prefix: string) {
-  return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
-}
-
 let activeRequestAbortController: AbortController | undefined;
-let feedbackTimers: number[] = [];
 const agentRunUnsubscribers = new Map<string, AgentRunUnsubscribe>();
-const TERMINAL_RUN_STATUSES: AgentRun["status"][] = [
-  "completed",
-  "failed",
-  "cancelled",
-  "disconnected",
-];
-
-function clearFeedbackTimers() {
-  feedbackTimers.forEach((timer) => window.clearTimeout(timer));
-  feedbackTimers = [];
-}
-
-function isTerminalRunStatus(status: AgentRun["status"]) {
-  return TERMINAL_RUN_STATUSES.includes(status);
-}
 
 function unsubscribeAgentRun(runId: string) {
   agentRunUnsubscribers.get(runId)?.();
@@ -124,46 +104,6 @@ function subscribeAgentRunEvents(
     }
   });
   agentRunUnsubscribers.set(runId, unsubscribe);
-}
-
-function detectRequestedSkill(content: string, explicitSkillKey?: SkillKey): SkillKey | undefined {
-  if (explicitSkillKey) {
-    return explicitSkillKey;
-  }
-
-  const normalized = content.toLowerCase();
-  const skillAliases: Array<[SkillKey, string[]]> = [
-    ["deep_research", ["sn-deep-research", "deep research", "深度调研", "调研", "研究报告"]],
-    ["data_analysis", ["sn-da", "data analysis", "数据分析", "分析数据", "表格分析"]],
-    ["ppt_generation", ["sn-ppt", "ppt", "幻灯片", "演示文稿"]],
-    ["u1_image", ["u1", "生图", "生成图片", "图片生成"]],
-  ];
-
-  return skillAliases.find(([, aliases]) =>
-    aliases.some((alias) => normalized.includes(alias.toLowerCase())),
-  )?.[0];
-}
-
-function isDefaultSessionTitle(title?: string) {
-  const normalized = (title ?? "").trim().toLowerCase();
-  return !normalized || normalized === "新对话" || normalized === "new conversation";
-}
-
-function generateSessionTitle(content: string, skillKey?: SkillKey) {
-  const skillPrefix: Record<SkillKey, string> = {
-    data_analysis: "数据分析",
-    deep_research: "深度调研",
-    ppt_generation: "PPT生成",
-    u1_image: "图像生成",
-  };
-  const cleaned = content
-    .replace(/[`*_>#\[\]{}()（）《》"“”'‘’]/g, " ")
-    .replace(/\s+/g, " ")
-    .replace(/^(请|帮我|帮我一下|麻烦|使用|基于|最后|现在|接下来|生成|分析|写一份|做一份)+/i, "")
-    .trim();
-  const compact = cleaned.length > 22 ? `${cleaned.slice(0, 22)}...` : cleaned;
-  const fallback = skillKey ? skillPrefix[skillKey] : "新任务";
-  return compact ? `${skillKey ? `${skillPrefix[skillKey]}：` : ""}${compact}` : fallback;
 }
 
 function setSwitchingState(
@@ -199,53 +139,8 @@ function bindBackendRunId(
   return backendRunId;
 }
 
-function createPendingAssistantMessage(
-  sessionId: string,
-  modelName: string,
-  requestedSkill?: string,
-): Message {
-  const now = new Date().toISOString();
-  const language = useUiStore.getState().language;
-  const pendingLabel = requestedSkill
-    ? language === "zh-CN"
-      ? `${modelName} 正在执行 ${requestedSkill}，等待阶段反馈...`
-      : `${modelName} is running ${requestedSkill} and waiting for runtime updates...`
-    : language === "zh-CN"
-      ? `${modelName} 正在工作，等待运行状态...`
-      : `${modelName} is working and waiting for runtime updates...`;
-
-  return {
-    id: createId("message_assistant_pending"),
-    sessionId,
-    role: "assistant",
-    content: "",
-    createdAt: now,
-    isPending: true,
-    pendingLabel,
-    waitStartedAt: now,
-  };
-}
-
-function pendingMessageForRun(run: AgentRun, modelName = "Agent"): Message {
-  return createPendingAssistantMessage(
-    run.sessionId,
-    run.adapterKey ?? modelName,
-    run.title === "Agent request" ? undefined : run.title,
-  );
-}
-
-function hasPendingAssistantMessage(messages: Message[], sessionId: string) {
-  return messages.some(
-    (message) =>
-      message.sessionId === sessionId &&
-      message.role === "assistant" &&
-      message.isPending,
-  );
-}
-
 export const useChatStore = create<ChatState>((set, get) => ({
   activeAgentRunId: undefined,
-  agentFeedback: undefined,
   agentRuns: [],
   artifacts: [],
   currentSessionId: "",
@@ -413,8 +308,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
           sessionId
             ? undefined
             : state.activeAgentRunId,
-        agentFeedback:
-          state.agentFeedback?.sessionId === sessionId ? undefined : state.agentFeedback,
         agentRuns: state.agentRuns.filter((run) => run.sessionId !== sessionId),
         artifacts: state.artifacts.filter((artifact) => artifact.sessionId !== sessionId),
         currentSessionId,
@@ -514,13 +407,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
   resetWorkspace: () => {
     activeRequestAbortController?.abort();
     activeRequestAbortController = undefined;
-    clearFeedbackTimers();
     agentRunUnsubscribers.forEach((unsubscribe) => unsubscribe());
     agentRunUnsubscribers.clear();
 
     set({
       activeAgentRunId: undefined,
-      agentFeedback: undefined,
       agentRuns: [],
       artifacts: [],
       currentSessionId: "",
@@ -727,11 +618,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     activeRequestAbortController?.abort();
     activeRequestAbortController = new AbortController();
-    clearFeedbackTimers();
 
     set((state) => ({
       activeAgentRunId: runId,
-      agentFeedback: undefined,
       agentRuns: [run, ...state.agentRuns],
       error: undefined,
       messages: [...state.messages, optimisticUserMessage, pendingAssistantMessage],
@@ -797,8 +686,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
               return;
             }
 
-            clearFeedbackTimers();
-
             set((state) => {
               const now = new Date().toISOString();
               const currentRun = state.agentRuns.find((runItem) => runItem.id === currentRunId);
@@ -829,7 +716,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
               if (pendingIndex >= 0) {
                 return {
-                  agentFeedback: undefined,
                   agentRuns: state.agentRuns.map((runItem) =>
                     runItem.id === currentRunId
                       ? {
@@ -863,7 +749,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
               }
 
               return {
-                agentFeedback: undefined,
                 agentRuns: state.agentRuns.map((runItem) =>
                   runItem.id === currentRunId
                     ? {
@@ -986,8 +871,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
               return {
                 activeAgentRunId:
                   state.activeAgentRunId === currentRunId ? undefined : state.activeAgentRunId,
-                agentFeedback:
-                  state.activeAgentRunId === currentRunId ? undefined : state.agentFeedback,
                 agentRuns: state.agentRuns.map((runItem) =>
                   runItem.id === currentRunId
                     ? {
@@ -1028,7 +911,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const aborted = error instanceof DOMException && error.name === "AbortError";
       set({
         activeAgentRunId: undefined,
-        agentFeedback: undefined,
         agentRuns: get().agentRuns.map((runItem) =>
           runItem.id === currentRunId
             ? {
@@ -1058,7 +940,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
         ),
       });
     } finally {
-      clearFeedbackTimers();
       if (get().activeAgentRunId !== currentRunId) {
         activeRequestAbortController = undefined;
       }
@@ -1101,11 +982,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         activeRequestAbortController?.abort();
         activeRequestAbortController = undefined;
       });
-    clearFeedbackTimers();
 
     set((state) => ({
       activeAgentRunId: undefined,
-      agentFeedback: undefined,
       agentRuns: state.agentRuns.map((run) =>
         run.id === runId
           ? { ...run, completedAt: new Date().toISOString(), status: "cancelled" }

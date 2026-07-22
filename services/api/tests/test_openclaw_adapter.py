@@ -3,6 +3,12 @@ from pathlib import Path
 
 import pytest
 from agent_runtime.adapters.openclaw_adapter import OpenClawAdapter
+from agent_runtime.adapters.openclaw_utils import (
+    artifact_to_payload,
+    extract_output,
+    extract_structured_artifact_paths,
+    extract_structured_artifacts,
+)
 from agent_runtime.schemas import AgentRunCreate
 
 
@@ -106,7 +112,7 @@ def test_openclaw_adapter_leaves_plain_chat_prompt_unchanged():
 
 
 def test_openclaw_adapter_extracts_json_output():
-    output = OpenClawAdapter._extract_output(
+    output = extract_output(
         '{"reply":"OpenClaw connected"}',
         "",
     )
@@ -115,7 +121,7 @@ def test_openclaw_adapter_extracts_json_output():
 
 
 def test_openclaw_adapter_extracts_payload_text_from_stderr_json():
-    output = OpenClawAdapter._extract_output(
+    output = extract_output(
         "",
         '{"payloads":[{"text":"connected","mediaUrl":null}],"meta":{"durationMs":10}}',
     )
@@ -156,7 +162,7 @@ def test_openclaw_adapter_extracts_report_dir_search_needles():
 
 
 def test_openclaw_adapter_extracts_gateway_result_payload_text():
-    output = OpenClawAdapter._extract_output(
+    output = extract_output(
         '{"runId":"run_1","status":"ok","result":{"payloads":[{"text":"gateway connected"}]}}',
         "",
     )
@@ -165,7 +171,7 @@ def test_openclaw_adapter_extracts_gateway_result_payload_text():
 
 
 def test_openclaw_adapter_cleans_text_output_and_skips_warnings():
-    output = OpenClawAdapter._extract_output(
+    output = extract_output(
         "OpenClaw\n\x1b[36m[skills]\x1b[39m Skipping path\n",
         "",
     )
@@ -192,7 +198,7 @@ def test_openclaw_adapter_extracts_artifact_refs():
 
 
 def test_openclaw_adapter_extracts_structured_artifact_paths():
-    paths = OpenClawAdapter._extract_structured_artifact_paths(
+    paths = extract_structured_artifact_paths(
         "",
         '{"payloads":[{"text":"done","mediaUrl":"/mnt/c/Users/demo/image.png"}],'
         '"artifact_paths":["/mnt/c/Users/demo/report.md"]}',
@@ -202,7 +208,7 @@ def test_openclaw_adapter_extracts_structured_artifact_paths():
 
 
 def test_openclaw_adapter_extracts_structured_artifact_refs():
-    refs = OpenClawAdapter._extract_structured_artifacts(
+    refs = extract_structured_artifacts(
         "",
         (
             '{"run_id":"openclaw_run_1","source_dir":"/mnt/c/Users/demo/output",'
@@ -220,8 +226,8 @@ def test_openclaw_adapter_extracts_structured_artifact_refs():
 
 
 def test_openclaw_adapter_artifact_payload_uses_standard_protocol_fields():
-    payload = OpenClawAdapter._artifact_to_payload(
-        OpenClawAdapter._extract_structured_artifacts(
+    payload = artifact_to_payload(
+        extract_structured_artifacts(
             "",
             (
                 '{"artifact_path":"/mnt/c/Users/demo/output/chart.png",'

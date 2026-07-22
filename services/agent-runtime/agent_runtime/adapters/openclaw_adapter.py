@@ -4,68 +4,25 @@ import os
 import re
 import shlex
 from collections.abc import AsyncGenerator
-from datetime import UTC, datetime
 from pathlib import Path
 from time import monotonic
 
 from ..schemas import AgentArtifactRef, AgentRun, AgentRunCreate, AgentRunEvent, AgentRunStep
 from .base import AgentRuntimeAdapter
-
-
-def now_iso() -> str:
-    return datetime.now(UTC).isoformat()
-
-
-OPENCLAW_SKILL_MAPPING = {
-    "data_analysis": {
-        "name": "OpenClaw data analysis",
-        "capability": "data_analysis",
-        "instruction": (
-            "Run OpenClaw's data analysis workflow. Prefer attached or referenced CSV/XLSX/table "
-            "artifacts, inspect the data, summarize findings, and create a concise report or table."
-        ),
-        "artifact_type_hint": "data_table or markdown_report",
-    },
-    "deep_research": {
-        "name": "OpenClaw research",
-        "capability": "research",
-        "instruction": (
-            "Run OpenClaw's research workflow. Search and synthesize evidence, "
-            "keep citations clear, "
-            "and produce one final report instead of scattering the answer across sub-reports."
-        ),
-        "artifact_type_hint": "markdown_report or html_page",
-    },
-    "ppt_generation": {
-        "name": "OpenClaw presentation generation",
-        "capability": "presentation",
-        "instruction": (
-            "Run OpenClaw's presentation generation workflow. Use the most relevant source report "
-            "or HTML content, generate slide pages, and export a PPTX deliverable when possible."
-        ),
-        "artifact_type_hint": "ppt_deck and optional html_page fallback",
-    },
-    "html_generation": {
-        "name": "OpenClaw HTML report generation",
-        "capability": "html_report_generation",
-        "instruction": (
-            "Run OpenClaw's report-html-v2 workflow. Use the most relevant source Markdown "
-            "report path from the WebAgent runtime context, generate a standalone HTML report, "
-            "and do not redo research unless the source report is missing."
-        ),
-        "artifact_type_hint": "html_page",
-    },
-    "u1_image": {
-        "name": "OpenClaw image generation",
-        "capability": "image_generation",
-        "instruction": (
-            "Run OpenClaw's image generation workflow. Treat U1 as the image "
-            "generation capability, "
-            "not as a reference image name. Generate image files matching the user's request."
-        ),
-        "artifact_type_hint": "image_result",
-    },
-}
+from .openclaw_utils import (
+    OPENCLAW_SKILL_MAPPING,
+    artifact_to_payload,
+    clean_text_output,
+    extract_output,
+    extract_paths,
+    extract_structured_artifacts,
+    guess_artifact_type,
+    is_openclaw_bootstrap_path,
+    now_iso,
+    safe_file_stem,
+    source_dir_from_path,
+    title_from_path,
+)
 
 
 class OpenClawAdapter(AgentRuntimeAdapter):
@@ -281,8 +238,8 @@ class OpenClawAdapter(AgentRuntimeAdapter):
         raw_stderr = stderr.decode("utf-8", errors="replace")
         self._remember_artifact_paths(raw_stdout)
         self._remember_artifact_paths(raw_stderr)
-        output = self._extract_output(raw_stdout, raw_stderr)
-        structured_artifacts = self._extract_structured_artifacts(
+        output = extract_output(raw_stdout, raw_stderr)
+        structured_artifacts = extract_structured_artifacts(
             raw_stdout,
             raw_stderr,
         )
@@ -337,7 +294,7 @@ class OpenClawAdapter(AgentRuntimeAdapter):
                     "protocol": "openclaw.cli.v1",
                     "mode": self.mode,
                     "artifact_paths": list(self.last_artifact_paths),
-                    "artifact": self._artifact_to_payload(artifact),
+                    "artifact": artifact_to_payload(artifact),
                 },
                 step=AgentRunStep(
                     id=f"{run_id}_openclaw_artifact_{index}",
@@ -358,7 +315,7 @@ class OpenClawAdapter(AgentRuntimeAdapter):
                 "protocol": "openclaw.cli.v1",
                 "mode": self.mode,
                 "artifact_paths": list(self.last_artifact_paths),
-                "artifacts": [self._artifact_to_payload(item) for item in self.last_artifacts],
+                "artifacts": [artifact_to_payload(item) for item in self.last_artifacts],
             },
             step=AgentRunStep(
                 id=f"{run_id}_openclaw_completed",
@@ -519,7 +476,7 @@ class OpenClawAdapter(AgentRuntimeAdapter):
         self.last_diagnostics = {}
 
     def _remember_artifact_paths(self, text: str) -> None:
-        for path in self._extract_paths(text):
+        for path in extract_paths(text):
             self._remember_artifact_path(path)
 
     def _remember_artifact_path(self, path: str) -> None:
@@ -527,7 +484,7 @@ class OpenClawAdapter(AgentRuntimeAdapter):
 
     def _remember_artifact_ref(self, artifact: AgentArtifactRef) -> None:
         path = artifact.path
-        if self._is_openclaw_bootstrap_path(path):
+        if is_openclaw_bootstrap_path(path):
             return
         existing_index = next(
             (index for index, item in enumerate(self.last_artifacts) if item.path == path),
@@ -544,10 +501,10 @@ class OpenClawAdapter(AgentRuntimeAdapter):
         self.last_artifacts.append(
             AgentArtifactRef(
                 path=path,
-                artifact_type=artifact.artifact_type or self._guess_artifact_type(path),
+                artifact_type=artifact.artifact_type or guess_artifact_type(path),
                 run_id=artifact.run_id,
-                source_dir=artifact.source_dir or self._source_dir_from_path(path),
-                title=artifact.title or self._title_from_path(path),
+                source_dir=artifact.source_dir or source_dir_from_path(path),
+                title=artifact.title or title_from_path(path),
             )
         )
 
@@ -734,7 +691,7 @@ for item in sorted(matches):
 
     @staticmethod
     def _repair_mojibake(text: str) -> str:
-        if not any(marker in text for marker in ("å", "ç", "æ", "ä", "è", "é", "ï")):
+        if not any(marker in text for marker in ("氓", "莽", "忙", "盲", "猫", "茅", "茂")):
             return text
         try:
             repaired = text.encode("latin1").decode("utf-8")
@@ -856,7 +813,7 @@ for item in sorted(matches):
         status = str(task.get("status") or "running")
         dimension_match = re.search(r"dimension_id\s*:\s*([A-Za-z0-9_-]+)", task_text)
         dimension_name_match = re.search(
-            r"(?:\u7ef4\u5ea6\u540d\u79f0|缁村害鍚嶇О)\s*[:：]\s*([^\n\r]+)",
+            r"(?:\u7ef4\u5ea6\u540d\u79f0|维度名称)\s*[:：]\s*([^\n\r]+)",
             task_text,
         )
         result_match = re.search(
@@ -893,6 +850,7 @@ for item in sorted(matches):
             value = task.get(key)
             if isinstance(value, str) and value.strip():
                 return OpenClawAdapter._compact_label(OpenClawAdapter._repair_mojibake(value))
+
         runtime = str(task.get("runtime") or "task")
         if "webagent_skill=html_generation" in task_text and status in {"queued", "running"}:
             source_match = re.search(
@@ -910,50 +868,9 @@ for item in sorted(matches):
             return f"OpenClaw {runtime} task completed; waiting for child tasks or artifacts."
         return f"OpenClaw {runtime} task status: {status}."
 
-        dimension_match = re.search(r"dimension_id\s*:\s*([A-Za-z0-9_-]+)", task_text)
-        dimension_name_match = re.search(r"维度名称\s*[:：]\s*([^\n\r]+)", task_text)
-        result_match = re.search(
-            r"<<<BEGIN_UNTRUSTED_CHILD_RESULT>>>\s*(.*?)\s*<<<END_UNTRUSTED_CHILD_RESULT>>>",
-            task_text,
-            re.DOTALL,
-        )
-        dimension = dimension_match.group(1) if dimension_match else ""
-        dimension_name = (
-            OpenClawAdapter._compact_label(dimension_name_match.group(1), max_chars=80)
-            if dimension_name_match
-            else ""
-        )
-        result = (
-            OpenClawAdapter._compact_label(result_match.group(1), max_chars=140)
-            if result_match
-            else ""
-        )
-
-        if dimension and status == "running":
-            if "status: timed out" in task_text.lower():
-                return f"OpenClaw 正在重试或补写 {dimension} 证据文件。"
-            if dimension_name:
-                return f"OpenClaw 正在调研 {dimension}：{dimension_name}"
-            return f"OpenClaw 正在调研 {dimension}。"
-        if dimension and status == "succeeded":
-            if result:
-                return f"OpenClaw 已完成 {dimension}：{result}"
-            if dimension_name:
-                return f"OpenClaw 已完成 {dimension}：{dimension_name}"
-            return f"OpenClaw 已完成 {dimension}。"
-
-        for key in ("progressSummary", "label"):
-            value = task.get(key)
-            if isinstance(value, str) and value.strip():
-                return OpenClawAdapter._compact_label(OpenClawAdapter._repair_mojibake(value))
-        runtime = str(task.get("runtime") or "task")
-        if status == "succeeded":
-            return f"OpenClaw {runtime} 任务已完成，正在等待子任务或最终产物。"
-        return f"OpenClaw {runtime} 任务状态：{status}。"
-
     @staticmethod
     def _compact_label(value: str, max_chars: int = 360) -> str:
-        cleaned = OpenClawAdapter._clean_text_output(value)
+        cleaned = clean_text_output(value)
         cleaned = re.sub(r"\s+", " ", cleaned).strip()
         if len(cleaned) <= max_chars:
             return cleaned
@@ -1061,7 +978,7 @@ for item in sorted(matches):
                             "mode": self.mode,
                             "artifact_paths": list(self.last_artifact_paths),
                             "artifacts": [
-                                self._artifact_to_payload(item) for item in self.last_artifacts
+                                artifact_to_payload(item) for item in self.last_artifacts
                             ],
                             "reportDirs": sorted(report_dirs),
                             "taskFamily": self._task_family_summary(matching_tasks),
@@ -1186,147 +1103,6 @@ for item in sorted(matches):
             f"timeout ({wait_seconds} seconds)."
         )
 
-        report_dirs = self._extract_report_dirs(initial_output)
-        wait_seconds = self._background_wait_timeout_seconds(input_data.skill_key)
-        deadline = monotonic() + wait_seconds
-        last_label = ""
-        last_artifact_count = 0
-        last_visible_emit_at = 0.0
-        progress = 20
-        poll_interval = 8
-        heartbeat_interval = 60
-
-        yield self._stage_event(
-            run_id,
-            "stage_started",
-            "OpenClaw 已进入后台长任务，正在跟踪子任务和产物目录。",
-            progress,
-        )
-        last_visible_emit_at = monotonic()
-
-        while monotonic() < deadline:
-            tasks_payload = await self._run_openclaw_json_command(
-                ["tasks", "list", "--json"],
-                timeout_seconds=20,
-            )
-            tasks = []
-            if isinstance(tasks_payload, dict):
-                raw_tasks = tasks_payload.get("tasks")
-                tasks = raw_tasks if isinstance(raw_tasks, list) else []
-
-            matching_tasks = self._matching_task_family(
-                [task for task in tasks if isinstance(task, dict)],
-                input_data,
-                report_dirs,
-            )
-            for task in matching_tasks:
-                report_dirs.update(self._extract_report_dirs(self._task_text(task)))
-
-            failed_task_label = self._failed_background_task_label(matching_tasks)
-            if failed_task_label:
-                raise RuntimeError(
-                    "OpenClaw background workflow failed before producing a final artifact: "
-                    f"{failed_task_label}"
-                )
-
-            artifact_paths = await self._find_report_artifacts(report_dirs)
-            for path in artifact_paths:
-                self._remember_artifact_path(path)
-
-            if len(self.last_artifact_paths) > last_artifact_count:
-                last_artifact_count = len(self.last_artifact_paths)
-                debug_count = sum(
-                    1
-                    for path in self.last_artifact_paths
-                    if Path(path).suffix.lower() == ".json"
-                )
-                if debug_count:
-                    progress = min(88, progress + 6)
-                    yield self._stage_event(
-                        run_id,
-                        "stage_update",
-                        f"OpenClaw generated {debug_count} intermediate evidence file(s).",
-                        progress,
-                    )
-
-            primary_artifacts = [
-                path for path in self.last_artifact_paths if self._is_primary_output_artifact(path)
-            ]
-            if primary_artifacts:
-                for artifact in self.last_artifacts:
-                    artifact.run_id = artifact.run_id or run_id
-                yield AgentRunEvent(
-                    run_id=run_id,
-                    event_type="artifact_found",
-                    status="running",
-                    progress=90,
-                    payload={
-                        "protocol": "openclaw.cli.v1",
-                        "mode": self.mode,
-                        "artifact_paths": list(self.last_artifact_paths),
-                        "artifacts": [
-                            self._artifact_to_payload(item) for item in self.last_artifacts
-                        ],
-                        "reportDirs": sorted(report_dirs),
-                        "backgroundWait": True,
-                    },
-                    step=AgentRunStep(
-                        id=f"{run_id}_openclaw_background_artifacts",
-                        label=f"OpenClaw generated artifact: {primary_artifacts[-1]}",
-                        status="completed",
-                        timestamp=now_iso(),
-                    ),
-                )
-                return
-
-            running_tasks = [
-                task
-                for task in matching_tasks
-                if task.get("status") in {"queued", "running"}
-            ]
-            if matching_tasks:
-                running_or_latest_task = next(
-                    (
-                        task
-                        for task in matching_tasks
-                        if task.get("status") in {"queued", "running"}
-                    ),
-                    matching_tasks[0],
-                )
-                label = self._summarize_task_label(running_or_latest_task)
-            elif report_dirs:
-                label = "OpenClaw is still working; waiting for report files."
-            else:
-                label = "OpenClaw is still working; waiting for task progress."
-
-            now = monotonic()
-            should_emit_heartbeat = now - last_visible_emit_at >= heartbeat_interval
-            if label != last_label or should_emit_heartbeat:
-                last_label = label
-                last_visible_emit_at = now
-                progress = min(85, progress + 8)
-                if should_emit_heartbeat and label == last_label:
-                    evidence_count = sum(
-                        1
-                        for path in self.last_artifact_paths
-                        if Path(path).suffix.lower() == ".json"
-                    )
-                    if evidence_count:
-                        label = (
-                            f"{label} 已发现 {evidence_count} 个中间证据文件，"
-                            "继续等待最终 Markdown 报告。"
-                        )
-                yield self._stage_event(run_id, "stage_update", label, progress)
-
-            if matching_tasks and not running_tasks and report_dirs:
-                await asyncio.sleep(poll_interval)
-            else:
-                await asyncio.sleep(poll_interval)
-
-        raise RuntimeError(
-            "OpenClaw background workflow did not produce a final artifact before "
-            f"timeout ({wait_seconds} seconds)."
-        )
 
     def _background_wait_timeout_seconds(self, skill_key: str | None) -> int:
         minimum_by_skill = {
@@ -1351,264 +1127,6 @@ for item in sorted(matches):
                 return label or status or "unknown OpenClaw task failure"
         return None
 
-    @staticmethod
-    def _extract_output(stdout: str, stderr: str) -> str:
-        for data in (stdout, stderr):
-            cleaned = OpenClawAdapter._clean_text_output(data)
-            if not cleaned:
-                continue
-            parsed_output = OpenClawAdapter._extract_json_output(cleaned)
-            if parsed_output:
-                return parsed_output
-            return cleaned
-        return ""
-
-    @staticmethod
-    def _extract_json_output(text: str) -> str | None:
-        try:
-            parsed = json.loads(text)
-        except json.JSONDecodeError:
-            return None
-        if not isinstance(parsed, dict):
-            return None
-
-        result = parsed.get("result")
-        if isinstance(result, dict):
-            result_output = OpenClawAdapter._extract_json_output(
-                json.dumps(result, ensure_ascii=False)
-            )
-            if result_output:
-                return result_output
-
-        for key in ("output", "reply", "message", "content", "text"):
-            value = parsed.get(key)
-            if isinstance(value, str) and value.strip():
-                return value.strip()
-
-        payloads = parsed.get("payloads")
-        if isinstance(payloads, list):
-            parts = []
-            for payload in payloads:
-                if not isinstance(payload, dict):
-                    continue
-                text_value = payload.get("text")
-                if isinstance(text_value, str) and text_value.strip():
-                    parts.append(text_value.strip())
-            if parts:
-                return "\n".join(parts)
-
-        return json.dumps(parsed, ensure_ascii=False)
-
-    @staticmethod
-    def _extract_structured_artifact_paths(stdout: str, stderr: str) -> list[str]:
-        return [
-            artifact.path
-            for artifact in OpenClawAdapter._extract_structured_artifacts(stdout, stderr)
-        ]
-
-    @staticmethod
-    def _extract_structured_artifacts(stdout: str, stderr: str) -> list[AgentArtifactRef]:
-        artifacts: list[AgentArtifactRef] = []
-        seen: set[str] = set()
-        for text in (stdout, stderr):
-            cleaned = OpenClawAdapter._clean_text_output(text)
-            if not cleaned:
-                continue
-            try:
-                parsed = json.loads(cleaned)
-            except json.JSONDecodeError:
-                continue
-            OpenClawAdapter._collect_artifact_refs(parsed, artifacts, seen)
-        return artifacts
-
-    @staticmethod
-    def _extract_structured_artifact_paths_legacy(stdout: str, stderr: str) -> list[str]:
-        paths: list[str] = []
-        for text in (stdout, stderr):
-            cleaned = OpenClawAdapter._clean_text_output(text)
-            if not cleaned:
-                continue
-            try:
-                parsed = json.loads(cleaned)
-            except json.JSONDecodeError:
-                continue
-            OpenClawAdapter._collect_artifact_paths(parsed, paths)
-        return paths
-
-    @staticmethod
-    def _collect_artifact_refs(
-        value: object,
-        artifacts: list[AgentArtifactRef],
-        seen: set[str],
-        inherited: dict[str, str | None] | None = None,
-    ) -> None:
-        inherited = inherited or {}
-        if isinstance(value, dict):
-            artifact_type = OpenClawAdapter._string_value(
-                value,
-                "artifact_type",
-                "artifactType",
-                "type",
-            ) or inherited.get("artifact_type")
-            source_dir = OpenClawAdapter._string_value(
-                value,
-                "source_dir",
-                "sourceDir",
-            ) or inherited.get("source_dir")
-            run_id = OpenClawAdapter._string_value(value, "run_id", "runId") or inherited.get(
-                "run_id"
-            )
-            title = OpenClawAdapter._string_value(value, "title", "name") or inherited.get("title")
-            context = {
-                "artifact_type": artifact_type,
-                "source_dir": source_dir,
-                "run_id": run_id,
-                "title": title,
-            }
-
-            direct_paths = OpenClawAdapter._artifact_paths_from_mapping(value)
-            for path in direct_paths:
-                if path in seen:
-                    continue
-                seen.add(path)
-                artifacts.append(
-                    AgentArtifactRef(
-                        path=path,
-                        artifact_type=artifact_type,
-                        run_id=run_id,
-                        source_dir=source_dir,
-                        title=title,
-                    )
-                )
-
-            for item in value.values():
-                OpenClawAdapter._collect_artifact_refs(item, artifacts, seen, context)
-        elif isinstance(value, list):
-            for item in value:
-                OpenClawAdapter._collect_artifact_refs(item, artifacts, seen, inherited)
-
-    @staticmethod
-    def _artifact_paths_from_mapping(value: dict) -> list[str]:
-        paths: list[str] = []
-        for key, item in value.items():
-            normalized_key = key.lower()
-            if normalized_key in {
-                "artifact_path",
-                "artifact_paths",
-                "artifactpath",
-                "path",
-                "paths",
-                "filepath",
-                "file_path",
-                "mediaurl",
-                "media_url",
-            }:
-                paths.extend(OpenClawAdapter._extract_paths_from_value(item))
-        return paths
-
-    @staticmethod
-    def _extract_paths_from_value(value: object) -> list[str]:
-        if isinstance(value, str):
-            return OpenClawAdapter._extract_paths(value)
-        if isinstance(value, list):
-            paths: list[str] = []
-            for item in value:
-                paths.extend(OpenClawAdapter._extract_paths_from_value(item))
-            return paths
-        if isinstance(value, dict):
-            paths: list[str] = []
-            for item in value.values():
-                paths.extend(OpenClawAdapter._extract_paths_from_value(item))
-            return paths
-        return []
-
-    @staticmethod
-    def _string_value(value: dict, *keys: str) -> str | None:
-        for key in keys:
-            item = value.get(key)
-            if isinstance(item, str) and item.strip():
-                return item.strip()
-        return None
-
-    @staticmethod
-    def _collect_artifact_paths(value: object, paths: list[str]) -> None:
-        if isinstance(value, dict):
-            for key, item in value.items():
-                normalized_key = key.lower()
-                if normalized_key in {
-                    "artifact_path",
-                    "artifact_paths",
-                    "artifactpath",
-                    "path",
-                    "paths",
-                    "filepath",
-                    "file_path",
-                    "mediaurl",
-                    "media_url",
-                } and isinstance(item, str):
-                    paths.extend(OpenClawAdapter._extract_paths(item))
-                elif normalized_key in {"artifact_paths", "paths"} and isinstance(item, list):
-                    for path in item:
-                        if isinstance(path, str):
-                            paths.extend(OpenClawAdapter._extract_paths(path))
-                else:
-                    OpenClawAdapter._collect_artifact_paths(item, paths)
-        elif isinstance(value, list):
-            for item in value:
-                OpenClawAdapter._collect_artifact_paths(item, paths)
-
-    @staticmethod
-    def _clean_text_output(text: str) -> str:
-        lines = []
-        ansi_pattern = re.compile(r"\x1b\[[0-9;]*m")
-        for line in text.splitlines():
-            cleaned = ansi_pattern.sub("", line).strip()
-            if not cleaned:
-                continue
-            if cleaned.startswith("[skills]"):
-                continue
-            lines.append(cleaned)
-        return "\n".join(lines).strip()
-
-    @staticmethod
-    def _extract_paths(text: str) -> list[str]:
-        pattern = re.compile(
-            r"(?P<path>(?:[A-Za-z]:\\|/mnt/[a-z]/|/)[^\s'\"<>]+"
-            r"\.(?:md|markdown|html|htm|pptx|ppt|png|jpg|jpeg|webp|csv|xlsx|json))",
-            re.IGNORECASE,
-        )
-        return [match.group("path").rstrip(".,;:") for match in pattern.finditer(text)]
-
-    @staticmethod
-    def _guess_artifact_type(path: str) -> str | None:
-        suffix = Path(path).suffix.lower()
-        if suffix in {".md", ".markdown"}:
-            return "markdown_report"
-        if suffix in {".html", ".htm"}:
-            return "html_page"
-        if suffix in {".ppt", ".pptx"}:
-            return "ppt_deck"
-        if suffix in {".png", ".jpg", ".jpeg", ".webp"}:
-            return "image_result"
-        if suffix in {".csv", ".xlsx"}:
-            return "data_table"
-        if suffix == ".json":
-            return "debug_json"
-        return None
-
-    @staticmethod
-    def _source_dir_from_path(path: str) -> str | None:
-        return str(Path(path).parent)
-
-    @staticmethod
-    def _title_from_path(path: str) -> str:
-        return Path(path).stem
-
-    @staticmethod
-    def _safe_file_stem(value: str) -> str:
-        cleaned = re.sub(r"[\\/:*?\"<>|\s]+", "-", value.strip()).strip("-")
-        return cleaned[:80] or "openclaw-report"
-
     def _create_fallback_artifact_from_output(
         self,
         input_data: AgentRunCreate,
@@ -1629,7 +1147,7 @@ for item in sorted(matches):
         title = "OpenClaw research report"
         if input_data.skill_key == "data_analysis":
             title = "OpenClaw data analysis"
-        file_path = artifact_dir / f"{self._safe_file_stem(title)}.md"
+        file_path = artifact_dir / f"{safe_file_stem(title)}.md"
         file_path.write_text(content, encoding="utf-8")
         self._remember_artifact_ref(
             AgentArtifactRef(
@@ -1640,33 +1158,6 @@ for item in sorted(matches):
                 title=title,
             )
         )
-
-    @staticmethod
-    def _is_openclaw_bootstrap_path(path: str) -> bool:
-        normalized = path.replace("\\", "/")
-        bootstrap_names = {
-            "AGENTS.md",
-            "SOUL.md",
-            "TOOLS.md",
-            "IDENTITY.md",
-            "USER.md",
-            "HEARTBEAT.md",
-            "BOOTSTRAP.md",
-        }
-        if "/.openclaw/workspace/" not in normalized:
-            return False
-        return normalized.rsplit("/", 1)[-1] in bootstrap_names
-
-    @staticmethod
-    def _artifact_to_payload(artifact: AgentArtifactRef) -> dict[str, object]:
-        return {
-            "artifact_paths": [artifact.path],
-            "artifact_path": artifact.path,
-            "artifact_type": artifact.artifact_type,
-            "run_id": artifact.run_id,
-            "source_dir": artifact.source_dir,
-            "title": artifact.title,
-        }
 
     def _stage_event(
         self,
