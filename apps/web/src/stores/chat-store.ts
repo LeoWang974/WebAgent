@@ -202,7 +202,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 )
               ),
           )
-        : state.messages,
+        : state.messages.map((message) => {
+            if (
+              message.role !== "assistant" ||
+              !message.isPending ||
+              !event.step?.label
+            ) {
+              return message;
+            }
+            const run = state.agentRuns.find((item) => item.id === event.runId);
+            if (!run || run.sessionId !== message.sessionId) {
+              return message;
+            }
+            return {
+              ...message,
+              pendingLabel: event.step.label,
+              waitStartedAt: message.waitStartedAt ?? run.startedAt,
+            };
+          }),
     }));
   },
   addModel: async (input) => {

@@ -146,6 +146,7 @@ class OpenClawAdapter(AgentRuntimeAdapter):
         final_artifact_found = False
         poll_state = self._new_poll_state()
         report_dirs = self._extract_report_dirs(input_data.content)
+        report_dirs.update(self._extract_file_parent_dirs(input_data.content))
 
         if input_data.skill_key:
             skill_name = self._skill_mapping(input_data.skill_key).get(
@@ -198,7 +199,7 @@ class OpenClawAdapter(AgentRuntimeAdapter):
                         )
                         for event in events:
                             yield event
-                        if self._primary_output_artifact_paths():
+                        if self._primary_output_artifact_paths(input_data.skill_key):
                             final_artifact_found = True
                             stdout, stderr = await self._kill_and_collect_output(
                                 process,
@@ -261,7 +262,7 @@ class OpenClawAdapter(AgentRuntimeAdapter):
                 poll_state,
             ):
                 yield event
-            final_artifact_found = bool(self._primary_output_artifact_paths())
+            final_artifact_found = bool(self._primary_output_artifact_paths(input_data.skill_key))
 
         if not self.last_artifacts:
             self._create_fallback_artifact_from_output(input_data, run_id, output)
@@ -589,6 +590,49 @@ class OpenClawAdapter(AgentRuntimeAdapter):
             if Path(path).suffix.lower() == ".json" or self._is_primary_output_artifact(path)
         ]
 
+    async def _find_recent_openclaw_artifacts(self, skill_key: str | None) -> list[str]:
+        suffix_expr = (
+            r"\( -iname '*.md' -o -iname '*.html' -o -iname '*.htm' "
+            r"-o -iname '*.pptx' -o -iname '*.png' -o -iname '*.jpg' "
+            r"-o -iname '*.jpeg' -o -iname '*.webp' -o -iname '*.csv' "
+            r"-o -iname '*.xlsx' -o -iname '*.json' \)"
+        )
+        command = (
+            "for __dir in \"$HOME/.openclaw/workspace\" \"$HOME/.openclaw/artifacts\"; do "
+            "[ -d \"$__dir\" ] || continue; "
+            f"find \"$__dir\" -maxdepth 6 -type f -mmin -240 {suffix_expr} -print; "
+            "done"
+        )
+        process = await asyncio.create_subprocess_exec(
+            *self._build_shell_args(command),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, _ = await asyncio.wait_for(process.communicate(), timeout=20)
+        except TimeoutError:
+            process.kill()
+            await process.wait()
+            return []
+        paths = [
+            line.strip()
+            for line in stdout.decode("utf-8", errors="replace").splitlines()
+            if line.strip()
+        ]
+        if skill_key == "ppt_generation":
+            preferred = [
+                path
+                for path in paths
+                if Path(path).suffix.lower() in {".ppt", ".pptx", ".html", ".htm"}
+            ]
+            if preferred:
+                return preferred
+        return [
+            path
+            for path in paths
+            if Path(path).suffix.lower() == ".json" or self._is_primary_output_artifact(path)
+        ]
+
     async def _discover_report_dirs_from_input(self, input_data: AgentRunCreate) -> set[str]:
         needles = self._report_dir_search_needles(input_data.content)
         if not needles:
@@ -684,6 +728,25 @@ for item in sorted(matches):
         return dirs
 
     @staticmethod
+    def _normalize_shell_path(path: str) -> str:
+        value = path.strip().strip(".,;:)`\"'")
+        match = re.match(r"^([A-Za-z]):[\\/](.*)$", value)
+        if match:
+            drive = match.group(1).lower()
+            rest = match.group(2).replace("\\", "/")
+            return f"/mnt/{drive}/{rest}"
+        return value.replace("\\", "/")
+
+    @classmethod
+    def _extract_file_parent_dirs(cls, text: str) -> set[str]:
+        dirs: set[str] = set()
+        for path in extract_paths(text):
+            normalized = cls._normalize_shell_path(path)
+            if Path(normalized).suffix and "/" in normalized:
+                dirs.add(normalized.rsplit("/", maxsplit=1)[0])
+        return dirs
+
+    @staticmethod
     def _task_text(task: dict[str, object]) -> str:
         return OpenClawAdapter._repair_mojibake(
             json.dumps(task, ensure_ascii=False),
@@ -739,7 +802,9 @@ for item in sorted(matches):
         while previous_count != len(family_tasks):
             previous_count = len(family_tasks)
             for task in family_tasks:
-                report_dirs.update(self._extract_report_dirs(self._task_text(task)))
+                task_text = self._task_text(task)
+                report_dirs.update(self._extract_report_dirs(task_text))
+                report_dirs.update(self._extract_file_parent_dirs(task_text))
             for task in tasks:
                 if task in family_tasks:
                     continue
@@ -852,6 +917,8 @@ for item in sorted(matches):
                 return OpenClawAdapter._compact_label(OpenClawAdapter._repair_mojibake(value))
 
         runtime = str(task.get("runtime") or "task")
+        if "webagent_skill=ppt_generation" in task_text and status in {"queued", "running"}:
+            return "OpenClaw is generating slides and watching for PPT/HTML artifacts."
         if "webagent_skill=html_generation" in task_text and status in {"queued", "running"}:
             source_match = re.search(
                 r"path=([^\s]+(?:\.md|\.markdown))",
@@ -866,6 +933,19 @@ for item in sorted(matches):
             return f"OpenClaw is researching {title} and collecting report artifacts."
         if status == "succeeded":
             return f"OpenClaw {runtime} task completed; waiting for child tasks or artifacts."
+        useful_lines = [
+            line.strip(" -")
+            for line in task_text.splitlines()
+            if line.strip()
+            and "webagent_run_id=" not in line
+            and "webagent_skill=" not in line
+            and not line.strip().startswith("[")
+        ]
+        if useful_lines:
+            return (
+                "OpenClaw is working on: "
+                f"{OpenClawAdapter._compact_label(useful_lines[0], max_chars=220)}"
+            )
         return f"OpenClaw {runtime} task status: {status}."
 
     @staticmethod
@@ -903,6 +983,7 @@ for item in sorted(matches):
             "last_artifact_count": 0,
             "last_visible_emit_at": 0.0,
             "progress": 20,
+            "recoverable_failure_reported": False,
         }
 
     @staticmethod
@@ -911,10 +992,20 @@ for item in sorted(matches):
             return 10
         return 6
 
-    def _primary_output_artifact_paths(self) -> list[str]:
-        return [
-            path for path in self.last_artifact_paths if self._is_primary_output_artifact(path)
-        ]
+    def _primary_output_artifact_paths(self, skill_key: str | None = None) -> list[str]:
+        primary_paths: list[str] = []
+        for path in self.last_artifact_paths:
+            if not self._is_primary_output_artifact(path):
+                continue
+            suffix = Path(path).suffix.lower()
+            if skill_key == "ppt_generation" and suffix not in {".ppt", ".pptx", ".html", ".htm"}:
+                continue
+            if skill_key == "html_generation" and suffix not in {".html", ".htm"}:
+                continue
+            if skill_key == "u1_image" and suffix not in {".png", ".jpg", ".jpeg", ".webp"}:
+                continue
+            primary_paths.append(path)
+        return primary_paths
 
     async def _poll_task_family_snapshot(
         self,
@@ -939,20 +1030,39 @@ for item in sorted(matches):
             report_dirs,
         )
         for task in matching_tasks:
-            report_dirs.update(self._extract_report_dirs(self._task_text(task)))
-        if not self._primary_output_artifact_paths():
+            task_text = self._task_text(task)
+            report_dirs.update(self._extract_report_dirs(task_text))
+            report_dirs.update(self._extract_file_parent_dirs(task_text))
+        if not self._primary_output_artifact_paths(input_data.skill_key):
             report_dirs.update(await self._discover_report_dirs_from_input(input_data))
 
-        failed_task_label = self._failed_background_task_label(matching_tasks)
-        if failed_task_label:
-            raise RuntimeError(
-                "OpenClaw task family failed before producing a final artifact: "
-                f"{failed_task_label}"
-            )
-
         artifact_paths = await self._find_report_artifacts(report_dirs)
+        if not artifact_paths and not self._primary_output_artifact_paths(input_data.skill_key):
+            artifact_paths = await self._find_recent_openclaw_artifacts(input_data.skill_key)
         for path in artifact_paths:
             self._remember_artifact_path(path)
+
+        failed_task_label = self._failed_background_task_label(matching_tasks)
+        if failed_task_label and not self._primary_output_artifact_paths(input_data.skill_key):
+            if self._is_recoverable_failed_task(input_data.skill_key, failed_task_label):
+                if not bool(poll_state.get("recoverable_failure_reported")):
+                    poll_state["recoverable_failure_reported"] = True
+                    events.append(
+                        self._stage_event(
+                            run_id,
+                            "stage_update",
+                            (
+                                "OpenClaw HTML 幻灯片生成子任务异常；继续监听 PPTX 或 HTML "
+                                "兜底产物。"
+                            ),
+                            min(88, int(poll_state.get("progress", 20)) + 4),
+                        )
+                    )
+            else:
+                raise RuntimeError(
+                    "OpenClaw task family failed before producing a final artifact: "
+                    f"{failed_task_label}"
+                )
 
         progress = int(poll_state.get("progress", 20))
         last_artifact_count = int(poll_state.get("last_artifact_count", 0))
@@ -961,7 +1071,7 @@ for item in sorted(matches):
             debug_count = sum(
                 1 for path in self.last_artifact_paths if Path(path).suffix.lower() == ".json"
             )
-            primary_paths = self._primary_output_artifact_paths()
+            primary_paths = self._primary_output_artifact_paths(input_data.skill_key)
             progress = 90 if primary_paths else min(88, progress + 6)
             poll_state["progress"] = progress
             if primary_paths:
@@ -1094,7 +1204,7 @@ for item in sorted(matches):
             )
             for event in events:
                 yield event
-            if self._primary_output_artifact_paths():
+            if self._primary_output_artifact_paths(input_data.skill_key):
                 return
             await asyncio.sleep(poll_interval)
 
@@ -1126,6 +1236,13 @@ for item in sorted(matches):
                     label = OpenClawAdapter._compact_label(raw_task, max_chars=240)
                 return label or status or "unknown OpenClaw task failure"
         return None
+
+    @staticmethod
+    def _is_recoverable_failed_task(skill_key: str | None, label: str) -> bool:
+        normalized = label.lower()
+        if skill_key == "ppt_generation" and "html-generator" in normalized:
+            return True
+        return False
 
     def _create_fallback_artifact_from_output(
         self,

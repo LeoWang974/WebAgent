@@ -65,6 +65,7 @@ export function createPendingAssistantMessage(
   sessionId: string,
   modelName: string,
   requestedSkill?: string,
+  waitStartedAt?: string,
 ): Message {
   const now = new Date().toISOString();
   const language = useUiStore.getState().language;
@@ -84,7 +85,7 @@ export function createPendingAssistantMessage(
     createdAt: now,
     isPending: true,
     pendingLabel,
-    waitStartedAt: now,
+    waitStartedAt: waitStartedAt ?? now,
   };
 }
 
@@ -93,6 +94,7 @@ export function pendingMessageForRun(run: AgentRun, modelName = "Agent"): Messag
     run.sessionId,
     run.adapterKey ?? modelName,
     run.title === "Agent request" ? undefined : run.title,
+    run.startedAt,
   );
 }
 

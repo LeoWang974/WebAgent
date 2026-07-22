@@ -1,3 +1,5 @@
+import base64
+import html
 import re
 from pathlib import Path
 from urllib.parse import quote
@@ -32,6 +34,9 @@ MEDIA_TYPES = {
 }
 
 DEBUG_ARTIFACT_TYPES = {"debug_json"}
+HTML_SLIDE_SUFFIXES = {".htm", ".html"}
+IMAGE_SLIDE_SUFFIXES = {".jpeg", ".jpg", ".png", ".webp"}
+DECK_SLIDE_SUFFIXES = HTML_SLIDE_SUFFIXES | IMAGE_SLIDE_SUFFIXES
 
 
 def is_debug_artifact(artifact: Artifact) -> bool:
@@ -72,7 +77,7 @@ def artifact_file_path(artifact: Artifact) -> Path | None:
         raw_path = metadata.get(key)
         if not isinstance(raw_path, str) or not raw_path:
             continue
-        path = Path(raw_path)
+        path = normalize_artifact_path(raw_path)
         if path.exists() and path.is_file():
             return path
     return None
@@ -85,40 +90,116 @@ def slide_sort_key(artifact: Artifact) -> tuple[int, str]:
     return (int(match.group(1)) if match else 9999, filename)
 
 
-def html_slide_path_sort_key(path: Path) -> tuple[int, str]:
+def slide_path_sort_key(path: Path) -> tuple[int, str]:
     match = re.search(r"page[_-]?(\d+)", path.stem, re.IGNORECASE)
     return (int(match.group(1)) if match else 9999, path.name)
 
 
-def discover_html_slide_paths_for_deck(artifact: Artifact) -> list[Path]:
+def is_deck_slide_path(path: Path) -> bool:
+    return re.search(r"page[_-]?\d+", path.stem, re.IGNORECASE) is not None
+
+
+def normalize_artifact_path(raw_path: str) -> Path:
+    cleaned = raw_path.strip().strip(".,;:)]}\"'")
+    normalized = cleaned.replace("\\", "/")
+    if normalized.startswith("/mnt/") and len(normalized) > 6 and normalized[6] == "/":
+        drive = normalized[5].upper()
+        rest = normalized[7:].replace("/", "\\")
+        return Path(f"{drive}:\\{rest}")
+    if normalized.startswith("/home/"):
+        return Path(r"\\wsl.localhost\Ubuntu") / normalized.lstrip("/").replace("/", "\\")
+    return Path(cleaned)
+
+
+def deck_slide_directories(artifact: Artifact) -> list[Path]:
     metadata = artifact.artifact_metadata or {}
     directories: list[Path] = []
     seen: set[str] = set()
-    for key in ("path", "originalPath", "adapterSourceDir", "storageConversationDir"):
+    for key in (
+        "path",
+        "originalPath",
+        "adapterSourceDir",
+        "sourceDir",
+        "storageConversationDir",
+    ):
         raw_path = metadata.get(key)
         if not isinstance(raw_path, str) or not raw_path:
             continue
-        path = Path(raw_path)
+        path = normalize_artifact_path(raw_path)
         directory = path if path.is_dir() else path.parent
-        directory_key = str(directory).lower()
-        if directory_key in seen or not directory.exists() or not directory.is_dir():
-            continue
-        seen.add(directory_key)
-        directories.append(directory)
+        candidate_dirs = [directory, directory / "pages"]
+        for candidate in candidate_dirs:
+            directory_key = str(candidate).lower()
+            if directory_key in seen or not candidate.exists() or not candidate.is_dir():
+                continue
+            seen.add(directory_key)
+            directories.append(candidate)
+    return directories
 
+
+def discover_deck_slide_paths(artifact: Artifact) -> list[Path]:
     slide_paths: list[Path] = []
     seen_paths: set[str] = set()
-    for directory in directories:
-        for path in directory.glob("*.htm*"):
-            if not path.is_file():
+    for directory in deck_slide_directories(artifact):
+        for path in directory.glob("*"):
+            if not path.is_file() or path.suffix.lower() not in DECK_SLIDE_SUFFIXES:
                 continue
-            key = str(path).lower()
-            if key in seen_paths:
+            if not is_deck_slide_path(path):
                 continue
-            seen_paths.add(key)
+            path_key = str(path).lower()
+            if path_key in seen_paths:
+                continue
+            seen_paths.add(path_key)
             slide_paths.append(path)
 
-    return sorted(slide_paths, key=html_slide_path_sort_key)
+    return sorted(slide_paths, key=slide_path_sort_key)
+
+
+def slide_content_from_path(path: Path) -> tuple[str, str] | None:
+    suffix = path.suffix.lower()
+    if suffix in HTML_SLIDE_SUFFIXES:
+        try:
+            return path.read_text(encoding="utf-8", errors="replace"), "text/html"
+        except OSError:
+            return None
+    if suffix in IMAGE_SLIDE_SUFFIXES:
+        try:
+            encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+        except OSError:
+            return None
+        media_type = MEDIA_TYPES.get(suffix, "image/png")
+        escaped_title = html.escape(path.stem)
+        content = (
+            "<!doctype html><html><head><meta charset=\"utf-8\">"
+            "<style>"
+            "html,body{margin:0;width:1280px;height:720px;overflow:hidden;background:#fff;}"
+            "body{display:flex;align-items:center;justify-content:center;}"
+            "img{width:100%;height:100%;object-fit:contain;display:block;}"
+            "</style></head><body>"
+            f"<img alt=\"{escaped_title}\" src=\"data:{media_type};base64,{encoded}\">"
+            "</body></html>"
+        )
+        return content, "text/html"
+    return None
+
+
+def slides_from_paths(artifact: Artifact, paths: list[Path]) -> list[schemas.SlidePreview]:
+    slides: list[schemas.SlidePreview] = []
+    for index, path in enumerate(paths, start=1):
+        slide_content = slide_content_from_path(path)
+        if slide_content is None:
+            continue
+        content, content_type = slide_content
+        slides.append(
+            schemas.SlidePreview(
+                content=content,
+                content_type=content_type,
+                id=f"{artifact.id}_path_{index}",
+                index=index,
+                title=path.stem,
+            )
+        )
+    return slides
 
 
 @router.get("", response_model=list[schemas.Artifact])
@@ -179,6 +260,15 @@ async def get_artifact_slides(
         raise HTTPException(status_code=400, detail="Artifact is not a PPT deck")
 
     metadata = artifact.artifact_metadata or {}
+    deck_slide_paths = discover_deck_slide_paths(artifact)
+    deck_slides = slides_from_paths(artifact, deck_slide_paths)
+    if deck_slides:
+        return schemas.ArtifactSlides(
+            artifact_id=artifact.id,
+            slides=deck_slides,
+            source="deck_slide_paths",
+        )
+
     metadata_slides = metadata.get("slides")
     if isinstance(metadata_slides, list) and metadata_slides:
         slides = [
@@ -217,25 +307,6 @@ async def get_artifact_slides(
             return schemas.ArtifactSlides(
                 artifact_id=artifact.id, slides=slides, source="html_artifacts"
             )
-
-    html_paths = discover_html_slide_paths_for_deck(artifact)
-    slides = []
-    for index, path in enumerate(html_paths, start=1):
-        try:
-            content = path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            continue
-        slides.append(
-            schemas.SlidePreview(
-                content=content,
-                content_type="text/html",
-                id=f"{artifact.id}_path_{index}",
-                index=index,
-                title=path.stem,
-            )
-        )
-    if slides:
-        return schemas.ArtifactSlides(artifact_id=artifact.id, slides=slides, source="html_paths")
 
     return schemas.ArtifactSlides(artifact_id=artifact.id, slides=[], source="unavailable")
 

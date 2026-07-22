@@ -273,6 +273,26 @@ def test_openclaw_adapter_primary_output_excludes_debug_json():
     assert OpenClawAdapter._is_primary_output_artifact("/home/demo/report.md")
 
 
+def test_openclaw_adapter_ppt_primary_output_ignores_source_markdown():
+    adapter = OpenClawAdapter()
+    adapter._remember_artifact_paths(
+        "Use C:\\Users\\demo\\Downloads\\report.md and generated "
+        "C:\\Users\\demo\\Downloads\\deck.pptx"
+    )
+
+    assert adapter._primary_output_artifact_paths("ppt_generation") == [
+        "C:\\Users\\demo\\Downloads\\deck.pptx"
+    ]
+
+
+def test_openclaw_adapter_extracts_windows_input_parent_dirs():
+    dirs = OpenClawAdapter._extract_file_parent_dirs(
+        "C:\\Users\\demo\\Downloads\\report-50ffa786ad.md报告，生成PPT"
+    )
+
+    assert "/mnt/c/Users/demo/Downloads" in dirs
+
+
 def test_openclaw_adapter_uses_longer_background_timeout_for_deep_research():
     adapter = OpenClawAdapter(command_timeout_seconds=600)
 
@@ -306,6 +326,17 @@ def test_openclaw_adapter_detects_failed_background_task_status():
     )
 
     assert label == "research-d4-virtual"
+
+
+def test_openclaw_adapter_treats_ppt_html_generator_failure_as_recoverable():
+    assert OpenClawAdapter._is_recoverable_failed_task(
+        "ppt_generation",
+        "html-generator",
+    )
+    assert not OpenClawAdapter._is_recoverable_failed_task(
+        "deep_research",
+        "html-generator",
+    )
 
 
 def test_openclaw_adapter_does_not_match_old_failed_task_by_skill_only():
