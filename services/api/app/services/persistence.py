@@ -161,7 +161,13 @@ def to_message(message: Message) -> schemas.Message:
     )
 
 
-def to_artifact(artifact: Artifact) -> schemas.Artifact:
+def to_artifact(artifact: Artifact, *, include_payload: bool = True) -> schemas.Artifact:
+    metadata = artifact.artifact_metadata
+    if metadata is not None and not include_payload:
+        metadata = dict(metadata)
+        metadata.pop("images", None)
+        metadata.pop("rows", None)
+
     return schemas.Artifact(
         created_at=artifact.created_at.isoformat(),
         id=artifact.id,
@@ -170,8 +176,8 @@ def to_artifact(artifact: Artifact) -> schemas.Artifact:
         type=artifact.type,
         title=artifact.title,
         status=artifact.status,
-        content=artifact.content,
-        metadata=artifact.artifact_metadata,
+        content=artifact.content if include_payload else None,
+        metadata=metadata,
     )
 
 

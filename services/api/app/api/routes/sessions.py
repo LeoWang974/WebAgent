@@ -1076,15 +1076,38 @@ async def stream_session_message(
             if run is not None:
                 from app.api.routes.agent_runs import finish_db_agent_run
 
-                if adapter is not None and hasattr(adapter, "cancel_run"):
-                    await adapter.cancel_run(run.id)
-                await finish_db_agent_run(
-                    db,
-                    run,
-                    status="disconnected",
-                    label="Agent stream disconnected",
-                    error="Agent stream disconnected before completion.",
+                artifact_result = await db.execute(
+                    select(Artifact.id)
+                    .where(Artifact.run_id == run.id, Artifact.type != "debug_json")
+                    .limit(1)
                 )
+                has_artifact = artifact_result.scalar_one_or_none() is not None
+                latest_assistant_message = assistant_messages[-1] if assistant_messages else None
+                if has_artifact:
+                    await finish_db_agent_run(
+                        db,
+                        run,
+                        status="completed",
+                        label="Agent run completed after client disconnected",
+                        output=(
+                            latest_assistant_message.content
+                            if latest_assistant_message is not None
+                            else None
+                        ),
+                    )
+                else:
+                    if adapter is not None and hasattr(adapter, "cancel_run"):
+                        await adapter.cancel_run(run.id)
+                    await finish_db_agent_run(
+                        db,
+                        run,
+                        status="disconnected",
+                        label="Agent stream disconnected",
+                        error="Agent stream disconnected before completion.",
+                    )
+                conversation = await refresh_conversation(db, session_id)
+                conversation.status = "active"
+                await db.commit()
             raise
         except Exception as error:
             logger.exception("Agent stream failed")

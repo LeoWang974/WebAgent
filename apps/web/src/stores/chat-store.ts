@@ -55,6 +55,7 @@ interface ChatState {
   deleteConversationFolder: (folderId: string) => Promise<void>;
   deleteModel: (modelId: string) => Promise<void>;
   deleteSession: (sessionId: string) => void;
+  ensureArtifactLoaded: (artifactId: string) => Promise<void>;
   hydrate: () => Promise<void>;
   refreshArtifacts: () => Promise<void>;
   resetWorkspace: () => void;
@@ -524,6 +525,28 @@ export const useChatStore = create<ChatState>((set, get) => ({
             )
           : state.sessions,
       }));
+    }
+  },
+  ensureArtifactLoaded: async (artifactId) => {
+    const artifact = get().artifacts.find((item) => item.id === artifactId);
+    const hasPreviewPayload =
+      !!artifact?.content ||
+      !!(artifact?.metadata?.images as unknown[] | undefined)?.length ||
+      !!(artifact?.metadata?.rows as unknown[] | undefined)?.length ||
+      !!(artifact?.metadata?.slides as unknown[] | undefined)?.length;
+    if (!artifact || hasPreviewPayload) {
+      return;
+    }
+
+    try {
+      const detailedArtifact = await webAgentApi.getArtifact(artifactId);
+      set((state) => ({
+        artifacts: state.artifacts.map((item) =>
+          item.id === artifactId ? { ...item, ...detailedArtifact } : item,
+        ),
+      }));
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : "Failed to load artifact." });
     }
   },
   selectArtifact: (artifactId) => set({ selectedArtifactId: artifactId }),

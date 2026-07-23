@@ -5,7 +5,7 @@ import { ArtifactGroupedList } from "./artifact-grouped-list";
 import { downloadArtifact } from "@/lib/artifact-actions";
 import { useChatStore, useUiStore } from "@/stores";
 import { Check, Download, Maximize2, MoreHorizontal, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useI18n } from "@/lib/i18n";
 
 interface ArtifactPanelProps {
@@ -38,10 +38,17 @@ export function ArtifactPanel({ dragging = false, width }: ArtifactPanelProps) {
   const selectedArtifactId = useChatStore((state) => state.selectedArtifactId);
   const selectArtifact = useChatStore((state) => state.selectArtifact);
   const deleteArtifact = useChatStore((state) => state.deleteArtifact);
+  const ensureArtifactLoaded = useChatStore((state) => state.ensureArtifactLoaded);
   const panelOpen = useUiStore((state) => state.artifactPanelOpen);
   const openFullscreen = useUiStore((state) => state.openArtifactFullscreen);
   const artifact = artifacts.find((item) => item.id === selectedArtifactId);
   const sessionArtifacts = artifacts.filter((item) => item.sessionId === currentSessionId);
+
+  useEffect(() => {
+    if (selectedArtifactId) {
+      void ensureArtifactLoaded(selectedArtifactId);
+    }
+  }, [ensureArtifactLoaded, selectedArtifactId]);
 
   if (!panelOpen) {
     return null;

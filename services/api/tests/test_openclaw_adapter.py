@@ -542,3 +542,110 @@ def test_openclaw_adapter_creates_fallback_markdown_artifact(tmp_path, monkeypat
     assert artifacts[0].artifact_type == "markdown_report"
     assert artifacts[0].run_id == "run_123"
     assert Path(artifacts[0].path).read_text(encoding="utf-8") == content.strip()
+
+
+def test_openclaw_adapter_remembers_run_task_ids():
+    adapter = OpenClawAdapter()
+
+    adapter._remember_run_task_ids(
+        "run_123",
+        [
+            {"taskId": "task-main", "status": "running"},
+            {"taskId": "task-child", "status": "queued"},
+            {"taskId": None, "status": "running"},
+        ],
+    )
+
+    assert adapter.run_task_ids["run_123"] == {"task-main", "task-child"}
+
+
+@pytest.mark.asyncio
+async def test_openclaw_adapter_cancels_cached_and_matching_gateway_tasks(monkeypatch):
+    adapter = OpenClawAdapter()
+    adapter.run_task_ids["run_123"] = {"cached-task"}
+    cancelled = []
+
+    async def fake_json_command(args, timeout_seconds=20):
+        assert args == ["tasks", "list", "--json"]
+        return {
+            "tasks": [
+                {
+                    "taskId": "matching-task",
+                    "status": "running",
+                    "task": "webagent_run_id=run_123\nresearch",
+                },
+                {
+                    "taskId": "old-task",
+                    "status": "running",
+                    "task": "webagent_run_id=old_run\nresearch",
+                },
+            ]
+        }
+
+    async def fake_command(args, timeout_seconds=20):
+        cancelled.append(args)
+        return 0, "", ""
+
+    monkeypatch.setattr(adapter, "_run_openclaw_json_command", fake_json_command)
+    monkeypatch.setattr(adapter, "_run_openclaw_command", fake_command)
+
+    await adapter._cancel_openclaw_tasks("run_123")
+
+    assert cancelled == [
+        ["tasks", "cancel", "cached-task"],
+        ["tasks", "cancel", "matching-task"],
+    ]
+    assert "run_123" not in adapter.run_task_ids
+
+
+@pytest.mark.asyncio
+async def test_openclaw_adapter_emits_visible_heartbeat_for_unchanged_running_task(monkeypatch):
+    adapter = OpenClawAdapter()
+    input_data = AgentRunCreate(
+        content="请输出中文 Markdown 报告",
+        session_id="session_123",
+        run_id="run_123",
+        skill_key="deep_research",
+    )
+    task = {
+        "taskId": "task-main",
+        "runtime": "cli",
+        "status": "running",
+        "task": "webagent_skill=deep_research\nwebagent_run_id=run_123\n",
+    }
+    poll_state = {
+        "last_label": "OpenClaw is researching report and collecting report artifacts.",
+        "last_artifact_count": 0,
+        "last_visible_emit_at": 0.0,
+        "progress": 28,
+        "recoverable_failure_reported": False,
+    }
+
+    async def fake_json_command(args, timeout_seconds=20):
+        return {"tasks": [task]}
+
+    async def fake_find_report_artifacts(report_dirs):
+        return []
+
+    async def fake_discover_report_dirs(input_data):
+        return set()
+
+    monkeypatch.setattr(adapter, "_run_openclaw_json_command", fake_json_command)
+    monkeypatch.setattr(adapter, "_find_report_artifacts", fake_find_report_artifacts)
+    monkeypatch.setattr(adapter, "_discover_report_dirs_from_input", fake_discover_report_dirs)
+    monkeypatch.setattr(
+        adapter,
+        "_summarize_task_label",
+        lambda task: "OpenClaw is researching report and collecting report artifacts.",
+    )
+
+    events = await adapter._poll_task_family_snapshot(
+        input_data,
+        "run_123",
+        set(),
+        poll_state,
+    )
+
+    assert len(events) == 1
+    assert events[0].step
+    assert events[0].step.label.startswith("OpenClaw 长任务仍在执行")

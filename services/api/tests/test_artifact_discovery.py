@@ -7,6 +7,7 @@ from app.services import mock_store
 from app.services.artifact_discovery import (
     _candidate_roots,
     _normalized_path_key,
+    _repo_root,
     create_artifacts_from_paths,
     create_artifacts_from_refs,
     discover_related_artifact_paths,
@@ -64,6 +65,22 @@ def test_create_artifacts_from_paths_supports_debug_json(tmp_path: Path):
         assert artifacts[0].metadata["filename"] == "briefing.json"
     finally:
         mock_store.artifacts[:] = original_artifacts
+
+
+def test_create_artifacts_from_paths_ignores_runtime_temp_json():
+    original_artifacts = list(mock_store.artifacts)
+    runtime_file = _repo_root() / "runtime" / "openclaw_smoke_snapshot.json"
+    try:
+        mock_store.artifacts.clear()
+        runtime_file.parent.mkdir(parents=True, exist_ok=True)
+        runtime_file.write_text('{"status":"running"}', encoding="utf-8")
+
+        artifacts = create_artifacts_from_paths("session_1", [str(runtime_file)])
+
+        assert artifacts == []
+    finally:
+        mock_store.artifacts[:] = original_artifacts
+        runtime_file.unlink(missing_ok=True)
 
 
 def test_create_artifacts_from_refs_preserves_openclaw_protocol_metadata(tmp_path: Path):

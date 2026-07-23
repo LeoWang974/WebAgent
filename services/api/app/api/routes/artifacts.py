@@ -223,7 +223,7 @@ async def list_artifacts(
     )
     developer_mode = await user_developer_mode(db, current_user)
     return [
-        to_artifact(item)
+        to_artifact(item, include_payload=False)
         for item in result.scalars().unique().all()
         if developer_mode or not is_debug_artifact(item)
     ]

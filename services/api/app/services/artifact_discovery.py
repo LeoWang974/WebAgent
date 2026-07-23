@@ -121,6 +121,18 @@ def _is_ignored(path: Path) -> bool:
     return any(part in IGNORED_PARTS for part in path.parts)
 
 
+def _is_repo_runtime_temp_path(path: Path) -> bool:
+    try:
+        relative_path = path.resolve().relative_to((_repo_root() / "runtime").resolve())
+    except ValueError:
+        return False
+
+    parts = relative_path.parts
+    if len(parts) >= 3 and parts[0] in {"hermes-runs", "openclaw-runs"}:
+        return "artifacts" not in parts
+    return True
+
+
 def _is_likely_output_path(path: str) -> bool:
     normalized = path.replace("\\", "/").lower()
     if any(marker.replace("\\", "/") in normalized for marker in NON_ARTIFACT_MARKERS):
@@ -466,6 +478,8 @@ def create_artifacts_from_paths(
 
     for raw_path in paths:
         path = _normalize_path(raw_path)
+        if _is_repo_runtime_temp_path(path):
+            continue
         archived_path = _archive_artifact_path(path, run_id)
         artifact = _artifact_from_path(
             session_id,
@@ -544,6 +558,8 @@ def create_artifacts_from_refs(
         )
 
         path = _normalize_path(path_value)
+        if _is_repo_runtime_temp_path(path):
+            continue
         archived_path = _archive_artifact_path(path, run_id)
         artifact = _artifact_from_path(
             session_id,
@@ -622,6 +638,8 @@ def discover_related_artifact_paths(
             continue
         for path in directory.rglob("*"):
             if not path.is_file() or _is_ignored(path):
+                continue
+            if _is_repo_runtime_temp_path(path):
                 continue
             if path.name.lower() in IGNORED_FILENAMES:
                 continue
@@ -710,6 +728,8 @@ def discover_artifacts_since(
 
         for path in root.rglob("*"):
             if not path.is_file() or _is_ignored(path):
+                continue
+            if _is_repo_runtime_temp_path(path):
                 continue
             if path.suffix.lower() not in SUPPORTED_SUFFIXES:
                 continue

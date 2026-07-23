@@ -52,6 +52,7 @@ class OpenClawAdapter(AgentRuntimeAdapter):
         self.skills_dir = skills_dir
         self.active_processes: dict[str, asyncio.subprocess.Process] = {}
         self.cancelled_run_ids: set[str] = set()
+        self.run_task_ids: dict[str, set[str]] = {}
         self.last_artifact_paths: list[str] = []
         self.last_artifacts: list[AgentArtifactRef] = []
         self.last_diagnostics: dict[str, object] = {}
@@ -105,6 +106,7 @@ class OpenClawAdapter(AgentRuntimeAdapter):
             except TimeoutError:
                 process.kill()
                 await process.wait()
+        await self._cancel_openclaw_tasks(run_id)
         return AgentRun(
             id=run_id,
             session_id="",
@@ -537,6 +539,56 @@ class OpenClawAdapter(AgentRuntimeAdapter):
         except json.JSONDecodeError:
             return None
         return parsed if isinstance(parsed, dict) else None
+
+    async def _run_openclaw_command(
+        self,
+        args: list[str],
+        timeout_seconds: int = 20,
+    ) -> tuple[int | None, str, str]:
+        process = await asyncio.create_subprocess_exec(
+            *self._build_cli_args(args),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=timeout_seconds,
+            )
+        except TimeoutError:
+            process.kill()
+            await process.wait()
+            return None, "", "OpenClaw command timed out."
+        return (
+            process.returncode,
+            stdout.decode("utf-8", errors="replace"),
+            stderr.decode("utf-8", errors="replace"),
+        )
+
+    async def _cancel_openclaw_tasks(self, run_id: str) -> None:
+        task_ids = set(self.run_task_ids.pop(run_id, set()))
+        tasks_payload = await self._run_openclaw_json_command(
+            ["tasks", "list", "--json"],
+            timeout_seconds=20,
+        )
+        raw_tasks = []
+        if isinstance(tasks_payload, dict):
+            raw = tasks_payload.get("tasks")
+            raw_tasks = raw if isinstance(raw, list) else []
+        for task in raw_tasks:
+            if not isinstance(task, dict):
+                continue
+            task_text = self._task_text(task)
+            if f"webagent_run_id={run_id}" not in task_text:
+                continue
+            task_id = task.get("taskId")
+            if isinstance(task_id, str) and task.get("status") in {"queued", "running"}:
+                task_ids.add(task_id)
+        for task_id in sorted(task_ids):
+            await self._run_openclaw_command(
+                ["tasks", "cancel", task_id],
+                timeout_seconds=20,
+            )
 
     @staticmethod
     def _first_json_like_text(*chunks: bytes) -> str:
@@ -1029,6 +1081,7 @@ for item in sorted(matches):
             input_data,
             report_dirs,
         )
+        self._remember_run_task_ids(run_id, matching_tasks)
         for task in matching_tasks:
             task_text = self._task_text(task)
             report_dirs.update(self._extract_report_dirs(task_text))
@@ -1133,7 +1186,7 @@ for item in sorted(matches):
             1 for path in self.last_artifact_paths if Path(path).suffix.lower() == ".json"
         )
         should_emit_evidence_heartbeat = should_emit_heartbeat and evidence_count > 0
-        if label != last_label or should_emit_evidence_heartbeat:
+        if label != last_label or should_emit_heartbeat:
             poll_state["last_label"] = label
             poll_state["last_visible_emit_at"] = now
             progress = min(85, int(poll_state.get("progress", 20)) + 8)
@@ -1142,6 +1195,13 @@ for item in sorted(matches):
                 label = (
                     f"{label} Found {evidence_count} intermediate evidence file(s); "
                     "still waiting for the final deliverable."
+                )
+            elif should_emit_heartbeat and label == last_label:
+                running_count = len(running_tasks)
+                label = (
+                    "OpenClaw 长任务仍在执行；"
+                    f"正在跟踪 {running_count or len(matching_tasks) or 1} 个任务，"
+                    "等待下一阶段反馈或最终产物。"
                 )
             events.append(self._stage_event(run_id, "stage_update", label, progress))
 
@@ -1156,6 +1216,19 @@ for item in sorted(matches):
             }
         )
         return events
+
+    def _remember_run_task_ids(
+        self,
+        run_id: str,
+        tasks: list[dict[str, object]],
+    ) -> None:
+        if not tasks:
+            return
+        task_ids = self.run_task_ids.setdefault(run_id, set())
+        for task in tasks:
+            task_id = task.get("taskId")
+            if isinstance(task_id, str):
+                task_ids.add(task_id)
 
     @staticmethod
     def _task_family_summary(tasks: list[dict[str, object]]) -> list[dict[str, object]]:
