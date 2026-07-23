@@ -1,8 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { FileText, Image, Presentation, Table2 } from "lucide-react";
+import { FileJson, FileText, Image, Presentation, Table2 } from "lucide-react";
 import type { Artifact, ArtifactType } from "@/types";
+import { compareArtifactsForPreview } from "@/lib/artifact-selection";
 
 interface ArtifactGroupedListProps {
   artifacts: Artifact[];
@@ -25,7 +26,7 @@ const typeLabel: Record<ArtifactType, string> = {
 const typeIcon: Record<ArtifactType, typeof FileText> = {
   chart: Table2,
   data_table: Table2,
-  debug_json: FileText,
+  debug_json: FileJson,
   html_page: FileText,
   image_result: Image,
   markdown_report: FileText,
@@ -52,15 +53,12 @@ function timeGroupLabel(artifact: Artifact) {
 }
 
 function runGroupLabel(artifact: Artifact) {
-  if (!artifact.runId) {
-    return "未关联 Run";
-  }
-  return `Run ${artifact.runId.slice(0, 8)}`;
+  return artifact.runId ? `Run ${artifact.runId.slice(0, 8)}` : "未关联 Run";
 }
 
 function buildGroups(artifacts: Artifact[], mode: GroupMode) {
   const groups = new Map<string, Artifact[]>();
-  const sortedArtifacts = [...artifacts].sort((a, b) => artifactTime(b) - artifactTime(a));
+  const sortedArtifacts = [...artifacts].sort(compareArtifactsForPreview);
 
   for (const artifact of sortedArtifacts) {
     const key =

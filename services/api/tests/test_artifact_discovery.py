@@ -83,6 +83,21 @@ def test_create_artifacts_from_paths_ignores_runtime_temp_json():
         runtime_file.unlink(missing_ok=True)
 
 
+def test_create_artifacts_from_paths_ignores_runtime_skill_docs(tmp_path: Path):
+    original_artifacts = list(mock_store.artifacts)
+    try:
+        mock_store.artifacts.clear()
+        skill_doc = tmp_path / ".hermes" / "skills" / "SenseNova-Skills" / "docs" / "skill.md"
+        skill_doc.parent.mkdir(parents=True, exist_ok=True)
+        skill_doc.write_text("# Skill docs\n", encoding="utf-8")
+
+        artifacts = create_artifacts_from_paths("session_1", [str(skill_doc)])
+
+        assert artifacts == []
+    finally:
+        mock_store.artifacts[:] = original_artifacts
+
+
 def test_create_artifacts_from_refs_preserves_openclaw_protocol_metadata(tmp_path: Path):
     original_artifacts = list(mock_store.artifacts)
     try:

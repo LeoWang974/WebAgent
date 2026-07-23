@@ -5,9 +5,11 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   Boxes,
+  CheckCircle2,
   Clock3,
   FileWarning,
   Loader2,
+  RadioTower,
   TriangleAlert,
 } from "lucide-react";
 import { webAgentApi } from "@/services";
@@ -35,16 +37,19 @@ const terminalStatuses: AgentRun["status"][] = [
 ];
 
 const eventLabels: Record<string, string> = {
-  artifact_created: "产物创建",
+  artifact_created: "产物入库",
   artifact_found: "发现产物",
   cancelled: "已取消",
   completed: "已完成",
   diagnostic: "诊断",
-  disconnected: "已断开",
+  disconnected: "已断连",
   failed: "失败",
   queued: "排队",
+  raw_activity: "运行活动",
   stage_started: "阶段开始",
+  stage_update: "阶段更新",
   started: "开始",
+  step: "步骤",
   tool_call: "工具调用",
 };
 
@@ -64,6 +69,21 @@ function formatDuration(startedAt?: string, completedAt?: string) {
   return minutes > 0 ? `${minutes} 分 ${seconds} 秒` : `${seconds} 秒`;
 }
 
+function stringifyJson(value: unknown) {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function getDisplayValue(value: unknown) {
+  if (value === null || value === undefined || value === "") {
+    return "-";
+  }
+  return typeof value === "object" ? stringifyJson(value) : String(value);
+}
+
 function getArtifactSummary(event: AgentRunEvent): RunArtifactSummary | undefined {
   if (event.eventType !== "artifact_created" || !event.payload) {
     return undefined;
@@ -81,21 +101,6 @@ function getArtifactSummary(event: AgentRunEvent): RunArtifactSummary | undefine
   };
 }
 
-function getDisplayValue(value: unknown) {
-  if (value === null || value === undefined || value === "") {
-    return "-";
-  }
-  return typeof value === "object" ? stringifyJson(value) : String(value);
-}
-
-function stringifyJson(value: unknown) {
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-}
-
 function eventBadgeClass(eventType: string) {
   if (eventType === "diagnostic" || eventType === "failed") {
     return "border-red-200 bg-red-50 text-red-700";
@@ -106,7 +111,38 @@ function eventBadgeClass(eventType: string) {
   if (eventType === "tool_call") {
     return "border-blue-200 bg-blue-50 text-blue-700";
   }
+  if (eventType === "completed") {
+    return "border-zinc-200 bg-zinc-50 text-zinc-700";
+  }
   return "border bg-white text-muted-foreground";
+}
+
+function statusBadgeClass(status: AgentRun["status"]) {
+  if (status === "completed") {
+    return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  }
+  if (status === "failed" || status === "disconnected") {
+    return "border-red-200 bg-red-50 text-red-700";
+  }
+  if (status === "cancelled") {
+    return "border-zinc-200 bg-zinc-50 text-zinc-600";
+  }
+  return "border-amber-200 bg-amber-50 text-amber-700";
+}
+
+function latestMeaningfulEvents(events: AgentRunEvent[]) {
+  const ignoredLabels = new Set([
+    "Agent run started",
+    "Agent run completed",
+    "Agent runtime failure diagnostics",
+  ]);
+  return events.filter((event) => {
+    if (event.eventType === "diagnostic") {
+      return false;
+    }
+    const label = event.step.label.trim();
+    return label && !ignoredLabels.has(label);
+  });
 }
 
 function DiagnosticsPanel({ events, run }: { events: AgentRunEvent[]; run: AgentRun }) {
@@ -267,10 +303,7 @@ export function AgentRunDetailView({ runId }: AgentRunDetailViewProps) {
     return Array.from(new Map(summaries.map((artifact) => [artifact.id, artifact])).values());
   }, [events]);
 
-  const timelineEvents = useMemo(
-    () => events.filter((event) => event.eventType !== "diagnostic"),
-    [events],
-  );
+  const timelineEvents = useMemo(() => latestMeaningfulEvents(events), [events]);
 
   if (loading) {
     return (
@@ -310,18 +343,21 @@ export function AgentRunDetailView({ runId }: AgentRunDetailViewProps) {
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <h1 className="text-lg font-semibold">{run.title}</h1>
-              <p className="mt-1 text-xs text-muted-foreground">{run.id}</p>
+              <p className="mt-1 break-all text-xs text-muted-foreground">{run.id}</p>
             </div>
-            <span className="rounded-full border bg-[#f7f7f5] px-3 py-1 text-xs">
+            <span className={`rounded-full border px-3 py-1 text-xs ${statusBadgeClass(run.status)}`}>
               {run.status} / {run.progress}%
             </span>
           </div>
           <div className="mt-4 h-2 overflow-hidden rounded-full bg-muted">
             <div className="h-full rounded-full bg-[#242424]" style={{ width: `${run.progress}%` }} />
           </div>
-          <div className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
+          <div className="mt-4 grid gap-3 text-sm sm:grid-cols-4">
             <div className="rounded-lg border bg-[#fbfbfa] p-3">
-              <div className="text-xs text-muted-foreground">适配器</div>
+              <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                <RadioTower className="size-3.5" />
+                适配器
+              </div>
               <div className="mt-1 font-medium">{adapterLabel(run.adapterKey)}</div>
             </div>
             <div className="rounded-lg border bg-[#fbfbfa] p-3">
@@ -332,7 +368,17 @@ export function AgentRunDetailView({ runId }: AgentRunDetailViewProps) {
               <div className="mt-1 font-medium">{formatDuration(run.startedAt, run.completedAt)}</div>
             </div>
             <div className="rounded-lg border bg-[#fbfbfa] p-3">
-              <div className="text-xs text-muted-foreground">事件数</div>
+              <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                <Boxes className="size-3.5" />
+                产物
+              </div>
+              <div className="mt-1 font-medium">{artifacts.length}</div>
+            </div>
+            <div className="rounded-lg border bg-[#fbfbfa] p-3">
+              <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                <CheckCircle2 className="size-3.5" />
+                事件
+              </div>
               <div className="mt-1 font-medium">{events.length}</div>
             </div>
           </div>
@@ -349,7 +395,7 @@ export function AgentRunDetailView({ runId }: AgentRunDetailViewProps) {
         <section className="rounded-xl border bg-white p-5 shadow-sm">
           <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
             <Boxes className="size-4" />
-            产物
+            本次 Run 产物
           </div>
           {artifacts.length > 0 ? (
             <div className="grid gap-3 sm:grid-cols-2">
@@ -374,7 +420,7 @@ export function AgentRunDetailView({ runId }: AgentRunDetailViewProps) {
         </section>
 
         <section className="rounded-xl border bg-white p-5 shadow-sm">
-          <div className="mb-3 text-sm font-semibold">事件时间线</div>
+          <div className="mb-3 text-sm font-semibold">运行时间线</div>
           <div className="space-y-3">
             {timelineEvents.map((event, index) => (
               <div className="rounded-lg border bg-[#fbfbfa] p-3" key={event.step.id}>

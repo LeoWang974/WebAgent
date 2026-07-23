@@ -121,6 +121,11 @@ def _is_ignored(path: Path) -> bool:
     return any(part in IGNORED_PARTS for part in path.parts)
 
 
+def _is_non_artifact_path(path: str | Path) -> bool:
+    normalized = str(path).replace("\\", "/").lower()
+    return any(marker.replace("\\", "/") in normalized for marker in NON_ARTIFACT_MARKERS)
+
+
 def _is_repo_runtime_temp_path(path: Path) -> bool:
     try:
         relative_path = path.resolve().relative_to((_repo_root() / "runtime").resolve())
@@ -135,7 +140,7 @@ def _is_repo_runtime_temp_path(path: Path) -> bool:
 
 def _is_likely_output_path(path: str) -> bool:
     normalized = path.replace("\\", "/").lower()
-    if any(marker.replace("\\", "/") in normalized for marker in NON_ARTIFACT_MARKERS):
+    if _is_non_artifact_path(path):
         return False
     return any(marker.replace("\\", "/") in normalized for marker in OUTPUT_PATH_MARKERS)
 
@@ -478,6 +483,8 @@ def create_artifacts_from_paths(
 
     for raw_path in paths:
         path = _normalize_path(raw_path)
+        if _is_non_artifact_path(raw_path) or _is_non_artifact_path(path):
+            continue
         if _is_repo_runtime_temp_path(path):
             continue
         archived_path = _archive_artifact_path(path, run_id)
@@ -558,6 +565,8 @@ def create_artifacts_from_refs(
         )
 
         path = _normalize_path(path_value)
+        if _is_non_artifact_path(path_value) or _is_non_artifact_path(path):
+            continue
         if _is_repo_runtime_temp_path(path):
             continue
         archived_path = _archive_artifact_path(path, run_id)
@@ -618,6 +627,8 @@ def discover_related_artifact_paths(
 
     for raw_path in paths:
         path = _normalize_path(raw_path)
+        if _is_non_artifact_path(raw_path) or _is_non_artifact_path(path):
+            continue
         parent = path.parent
         key = _normalized_path_key(parent)
         if key not in seen_dirs:
@@ -626,6 +637,8 @@ def discover_related_artifact_paths(
 
     for raw_dir in source_dirs or []:
         directory = _normalize_path(raw_dir)
+        if _is_non_artifact_path(raw_dir) or _is_non_artifact_path(directory):
+            continue
         key = _normalized_path_key(directory)
         if key not in seen_dirs:
             seen_dirs.add(key)

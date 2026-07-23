@@ -1,7 +1,10 @@
 ﻿"use client";
 
 import { create } from "zustand";
-import { shouldSelectCreatedArtifact } from "@/lib/artifact-selection";
+import {
+  selectPreferredArtifact,
+  shouldSelectCreatedArtifact,
+} from "@/lib/artifact-selection";
 import { settingsApi, webAgentApi } from "@/services";
 import type { AgentRunUnsubscribe } from "@/services/adapters/types";
 import {
@@ -372,8 +375,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const activeRun = agentRuns.find(
         (run) => run.sessionId === currentSessionId && !isTerminalRunStatus(run.status),
       );
-      const selectedArtifactId =
-        artifacts.find((artifact) => artifact.sessionId === currentSessionId)?.id;
+      const selectedArtifactId = selectPreferredArtifact(artifacts, currentSessionId)?.id;
       const selectedModelId = models.find((model) => model.isDefault)?.id ?? models[0]?.id;
       const hydratedMessages =
         activeRun && !hasPendingAssistantMessage(messages, activeRun.sessionId)
@@ -416,7 +418,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const artifacts = await webAgentApi.listArtifacts();
       const selectedArtifactId = artifacts.some((artifact) => artifact.id === get().selectedArtifactId)
         ? get().selectedArtifactId
-        : artifacts.find((artifact) => artifact.sessionId === get().currentSessionId)?.id;
+        : selectPreferredArtifact(artifacts, get().currentSessionId)?.id;
       set({ artifacts, selectedArtifactId });
     } catch (error) {
       set({ error: error instanceof Error ? error.message : "Failed to refresh artifacts." });
@@ -552,7 +554,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   selectArtifact: (artifactId) => set({ selectedArtifactId: artifactId }),
   selectModel: (modelId) => set({ selectedModelId: modelId }),
   selectSession: (sessionId) => {
-    const artifact = get().artifacts.find((item) => item.sessionId === sessionId);
+    const artifact = selectPreferredArtifact(get().artifacts, sessionId);
     const activeRun = get().agentRuns.find(
       (run) => run.sessionId === sessionId && !isTerminalRunStatus(run.status),
     );
