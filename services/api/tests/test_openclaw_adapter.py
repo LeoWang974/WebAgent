@@ -4,8 +4,10 @@ from pathlib import Path
 import pytest
 from agent_runtime.adapters.openclaw_adapter import OpenClawAdapter
 from agent_runtime.adapters.openclaw_utils import (
+    OPENCLAW_EVENT_PROTOCOL,
     artifact_to_payload,
     extract_output,
+    extract_protocol_events,
     extract_structured_artifact_paths,
     extract_structured_artifacts,
 )
@@ -136,6 +138,46 @@ def test_openclaw_adapter_reads_json_from_stderr_bytes():
     )
 
     assert payload == '{"tasks":[{"status":"succeeded"}]}'
+
+
+def test_openclaw_adapter_extracts_standard_protocol_events():
+    payload = {
+        "taskId": "task-main",
+        "status": "running",
+        "events": [
+            {
+                "protocol": OPENCLAW_EVENT_PROTOCOL,
+                "event_type": "tool_call",
+                "label": "正在检索便利店鲜食案例",
+                "progress": 32,
+            },
+            {
+                "protocol": OPENCLAW_EVENT_PROTOCOL,
+                "event_type": "artifact_found",
+                "label": "报告已生成",
+                "artifact_paths": [
+                    "/home/demo/.openclaw/workspace/reports/topic/report.md"
+                ],
+                "artifact_type": "markdown_report",
+                "source_dir": "/home/demo/.openclaw/workspace/reports/topic",
+                "title": "便利店鲜食报告",
+                "progress": 90,
+            },
+        ],
+    }
+
+    events = extract_protocol_events(payload)
+
+    assert [event["event_type"] for event in events] == [
+        "tool_call",
+        "artifact_found",
+    ]
+    assert events[0]["label"] == "正在检索便利店鲜食案例"
+    assert events[0]["source"]["taskId"] == "task-main"
+    artifacts = events[1]["artifacts"]
+    assert len(artifacts) == 1
+    assert artifacts[0].path.endswith("/report.md")
+    assert artifacts[0].artifact_type == "markdown_report"
 
 
 def test_openclaw_adapter_ignores_auxiliary_markdown_as_primary_artifacts():
@@ -596,6 +638,89 @@ async def test_openclaw_adapter_cancels_cached_and_matching_gateway_tasks(monkey
         ["tasks", "cancel", "matching-task"],
     ]
     assert "run_123" not in adapter.run_task_ids
+
+
+@pytest.mark.asyncio
+async def test_openclaw_adapter_emits_protocol_events_and_artifacts(monkeypatch):
+    adapter = OpenClawAdapter()
+    input_data = AgentRunCreate(
+        content="请使用 sn-deep-research 调研《便利店战争》，输出中文 Markdown 报告",
+        session_id="session_123",
+        run_id="run_123",
+        skill_key="deep_research",
+    )
+    task = {
+        "taskId": "task-main",
+        "runtime": "cli",
+        "status": "running",
+        "task": "webagent_skill=deep_research\nwebagent_run_id=run_123\n",
+        "events": [
+            {
+                "protocol": OPENCLAW_EVENT_PROTOCOL,
+                "event_type": "tool_call",
+                "label": "正在检索便利店鲜食案例",
+                "progress": 32,
+            },
+            {
+                "protocol": OPENCLAW_EVENT_PROTOCOL,
+                "event_type": "artifact_found",
+                "label": "报告已生成",
+                "artifact_paths": [
+                    "/home/demo/.openclaw/workspace/reports/topic/report.md"
+                ],
+                "artifact_type": "markdown_report",
+                "source_dir": "/home/demo/.openclaw/workspace/reports/topic",
+                "title": "便利店鲜食报告",
+                "progress": 90,
+                "status": "completed",
+            },
+        ],
+    }
+    poll_state = {
+        "last_label": "",
+        "last_artifact_count": 0,
+        "last_visible_emit_at": 0.0,
+        "progress": 20,
+        "recoverable_failure_reported": False,
+    }
+
+    async def fake_json_command(args, timeout_seconds=20):
+        return {"tasks": [task]}
+
+    async def fake_find_report_artifacts(report_dirs):
+        return []
+
+    async def fake_discover_report_dirs(input_data):
+        return set()
+
+    monkeypatch.setattr(adapter, "_run_openclaw_json_command", fake_json_command)
+    monkeypatch.setattr(adapter, "_find_report_artifacts", fake_find_report_artifacts)
+    monkeypatch.setattr(adapter, "_discover_report_dirs_from_input", fake_discover_report_dirs)
+
+    events = await adapter._poll_task_family_snapshot(
+        input_data,
+        "run_123",
+        set(),
+        poll_state,
+    )
+
+    protocol_events = [
+        event
+        for event in events
+        if event.payload.get("protocol") == OPENCLAW_EVENT_PROTOCOL
+    ]
+    assert [event.event_type for event in protocol_events] == [
+        "tool_call",
+        "artifact_found",
+    ]
+    assert protocol_events[0].step.label == "正在检索便利店鲜食案例"
+    assert protocol_events[1].step.status == "completed"
+    assert adapter.get_last_artifact_paths() == [
+        "/home/demo/.openclaw/workspace/reports/topic/report.md"
+    ]
+    assert adapter._primary_output_artifact_paths("deep_research") == [
+        "/home/demo/.openclaw/workspace/reports/topic/report.md"
+    ]
 
 
 @pytest.mark.asyncio

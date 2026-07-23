@@ -5,6 +5,8 @@ from pathlib import Path
 
 from ..schemas import AgentArtifactRef
 
+OPENCLAW_EVENT_PROTOCOL = "openclaw.event.v1"
+
 OPENCLAW_SKILL_MAPPING = {
     "data_analysis": {
         "name": "OpenClaw data analysis",
@@ -296,3 +298,134 @@ def artifact_to_payload(artifact: AgentArtifactRef) -> dict[str, object]:
         "source_dir": artifact.source_dir,
         "title": artifact.title,
     }
+
+
+def _int_value(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
+
+
+def _event_type(value: dict) -> str | None:
+    raw = string_value(
+        value,
+        "event_type",
+        "eventType",
+        "openclaw_event",
+        "openclawEvent",
+        "type",
+    )
+    if not raw:
+        return None
+    normalized = raw.strip().lower().replace("-", "_").replace(".", "_")
+    aliases = {
+        "artifact": "artifact_found",
+        "artifact_created": "artifact_found",
+        "artifact_found": "artifact_found",
+        "complete": "completed",
+        "completed": "completed",
+        "done": "completed",
+        "failed": "failed",
+        "failure": "failed",
+        "stage": "stage_update",
+        "stage_started": "stage_started",
+        "stage_update": "stage_update",
+        "tool": "tool_call",
+        "tool_call": "tool_call",
+    }
+    return aliases.get(normalized, normalized)
+
+
+def _explicit_event_type(value: dict) -> str | None:
+    raw = string_value(
+        value,
+        "event_type",
+        "eventType",
+        "openclaw_event",
+        "openclawEvent",
+    )
+    if not raw:
+        return None
+    return _event_type({"event_type": raw})
+
+
+def _event_label(value: dict) -> str | None:
+    return string_value(
+        value,
+        "label",
+        "message",
+        "progressSummary",
+        "progress_summary",
+        "summary",
+        "text",
+        "content",
+    )
+
+
+def _looks_like_protocol_event(value: dict) -> bool:
+    protocol = string_value(value, "protocol")
+    if protocol and protocol.startswith("openclaw."):
+        return True
+    if _explicit_event_type(value) and (
+        _event_label(value)
+        or _int_value(value.get("progress")) is not None
+        or artifact_paths_from_mapping(value)
+    ):
+        return True
+    return False
+
+
+def collect_protocol_events(
+    value: object,
+    events: list[dict[str, object]],
+    inherited: dict[str, object] | None = None,
+) -> None:
+    inherited = inherited or {}
+    if isinstance(value, dict):
+        context = {
+            **inherited,
+            **{
+                key: value.get(key)
+                for key in (
+                    "taskId",
+                    "runId",
+                    "sourceId",
+                    "parentFlowId",
+                    "runtime",
+                    "status",
+                )
+                if value.get(key) is not None
+            },
+        }
+        if _looks_like_protocol_event(value):
+            artifacts: list[AgentArtifactRef] = []
+            collect_artifact_refs(value, artifacts, set())
+            event_type = _event_type(value) or (
+                "artifact_found" if artifacts else "stage_update"
+            )
+            events.append(
+                {
+                    "event_type": event_type,
+                    "label": _event_label(value),
+                    "status": string_value(value, "status") or context.get("status"),
+                    "progress": _int_value(value.get("progress")),
+                    "artifacts": artifacts,
+                    "source": context,
+                    "raw": value,
+                }
+            )
+        for item in value.values():
+            collect_protocol_events(item, events, context)
+    elif isinstance(value, list):
+        for item in value:
+            collect_protocol_events(item, events, inherited)
+
+
+def extract_protocol_events(value: object) -> list[dict[str, object]]:
+    events: list[dict[str, object]] = []
+    collect_protocol_events(value, events)
+    return events
