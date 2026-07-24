@@ -1,6 +1,6 @@
 $ErrorActionPreference = "Continue"
 
-$ports = @(3002, 8010)
+$ports = @(3002, 8010, 18789)
 
 foreach ($port in $ports) {
   $listeners = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue |
