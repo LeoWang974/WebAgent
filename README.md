@@ -91,17 +91,111 @@ pnpm --filter web run clean
 
 ## mac Server Migration Notes
 
-On macOS, use the same repo structure and environment variables, but replace Windows PowerShell launch scripts with shell/system service equivalents:
+The next development phase is expected to move the project from the current
+Windows + WSL2 workstation to a macOS machine that also acts as the development
+server. Keep the application contract the same, but replace Windows-specific
+launching, WSL paths, and local runtime folders with mac-native equivalents.
+
+Recommended migration order:
+
+1. Clone the repository on the mac server.
+2. Install Node.js, pnpm, Python 3.12, PostgreSQL, Redis, Hermes, and OpenClaw.
+3. Create `services/api/.env` from `services/api/.env.example`.
+4. Create `apps/web/.env.local` from `apps/web/.env.local.example`.
+5. Update all runtime paths in `services/api/.env` to mac paths.
+6. Run Alembic migrations.
+7. Start FastAPI, the frontend, and the selected agent runtime.
+8. Verify login, conversations, Agent Run SSE, artifacts, and permissions before
+   developing new multi-user or multi-thread features.
+
+macOS development commands:
 
 ```bash
 cd services/api
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install -U pip
+python -m pip install -e ".[dev]"
+alembic upgrade head
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8010
 
-cd apps/web
-pnpm exec next start --port 3002
+cd ../..
+pnpm install
+pnpm --filter web dev -- --port 3002
 ```
 
-For production, run the frontend after `pnpm --filter web build`, place FastAPI and Next.js behind nginx/Caddy, and point Hermes paths in `services/api/.env` to the mac/server filesystem layout. Keep runtime outputs outside git-tracked directories and preserve the `.next` / `.next-build` separation.
+For production, run the frontend after `pnpm --filter web build`, place FastAPI
+and Next.js behind nginx/Caddy, and point Hermes/OpenClaw paths in
+`services/api/.env` to the mac/server filesystem layout. Keep runtime outputs
+outside git-tracked directories and preserve the `.next` / `.next-build`
+separation.
+
+Do not use the Windows PowerShell scripts as the long-term mac service runner.
+They are still useful as documentation for the intended process layout:
+
+- `scripts/dev-api.ps1`: starts FastAPI on `127.0.0.1:8010`.
+- `scripts/dev-web.ps1`: starts Next.js on `localhost:3002`.
+- `scripts/dev-openclaw-gateway.ps1`: starts OpenClaw Gateway on
+  `ws://127.0.0.1:18789`.
+- `scripts/stop-dev.ps1`: stops `3002`, `8010`, and `18789`.
+
+On macOS, replace these with shell scripts, launchd services, tmux sessions, or
+systemd-equivalent process supervision depending on how the server is managed.
+
+## Agent Runtime And Search Configuration
+
+WebAgent currently supports two runtime adapters:
+
+- Hermes: stable path for long research, PPT, image, and artifact workflows.
+- OpenClaw: integrated through the adapter pattern and gateway mode; long-task
+  protocol work is ongoing.
+
+The OpenClaw event contract expected by WebAgent is documented in:
+
+```text
+docs/OPENCLAW_EVENT_PROTOCOL.md
+```
+
+When the project moves to the mac server, deploy a Hermes/OpenClaw installation
+that uses the same runtime contract. For OpenClaw, either keep the current
+fallback behavior or deploy a protocol-capable fork/branch that emits
+`openclaw.event.v1` events from `openclaw tasks list --json`.
+
+Search configuration:
+
+- Hermes should use `web.backend: serper` in its config.
+- Hermes should have `SERPER_API_KEY` available in its runtime environment.
+- OpenClaw should use `tools.web.search.provider = "serper"`.
+- OpenClaw Gateway must be restarted after search provider changes.
+- Tavily may remain configured for local experiments, but do not leave it as the
+  default backend when validating Serper behavior.
+
+Before testing long research on a new machine, verify Serper directly from the
+same user account that runs the agent runtime:
+
+```bash
+python - <<'PY'
+import json
+import os
+import urllib.request
+
+key = os.environ["SERPER_API_KEY"]
+req = urllib.request.Request(
+    "https://google.serper.dev/search",
+    data=json.dumps({"q": "WebAgent Serper connectivity test", "num": 1}).encode(),
+    headers={"X-API-KEY": key, "Content-Type": "application/json"},
+    method="POST",
+)
+with urllib.request.urlopen(req, timeout=20) as response:
+    print(response.status)
+PY
+```
+
+Expected output:
+
+```text
+200
+```
 
 ## Production Configuration
 
@@ -149,3 +243,18 @@ create `test/test` and `admin/admin`. These accounts are local-only fixtures:
 do not seed or keep them in production.
 
 See `docs/PRODUCTION.md` for the deployment checklist.
+
+## Next Development Focus
+
+After migration, the next planned development areas are:
+
+- User multi-threading: allow users to run and observe multiple Agent Runs without
+  blocking unrelated conversations.
+- mac server adaptation: replace WSL assumptions, normalize runtime paths, and
+  add mac-native service scripts.
+- OpenClaw protocolization: move from fallback text/directory discovery toward
+  explicit `openclaw.event.v1` events.
+- Permission hardening: continue validating private, shared, and public session
+  behavior across users.
+- Artifact stability: keep run-scoped artifact selection deterministic when a
+  run generates Markdown, HTML, PPTX, images, tables, and debug JSON.
