@@ -620,16 +620,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return;
     }
 
-    const sessionId = get().currentSessionId;
     const modelId = get().selectedModelId;
     const modelName = get().models.find((model) => model.id === modelId)?.name ?? "Agent";
     const requestedSkill = detectRequestedSkill(trimmed, skillKey);
+    let sessionId = get().currentSessionId;
+    if (!sessionId) {
+      const session = await get().createSession(requestedSkill);
+      if (!session) {
+        return;
+      }
+      sessionId = session.id;
+    }
+
     const currentSession = get().sessions.find((session) => session.id === sessionId);
     const shouldAutoRename = isDefaultSessionTitle(currentSession?.title);
     const autoTitle = generateSessionTitle(trimmed, requestedSkill);
-    if (!sessionId) {
-      return;
-    }
 
     const now = new Date().toISOString();
     const runId = createId("run");

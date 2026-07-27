@@ -31,7 +31,7 @@ export function detectRequestedSkill(
     ["deep_research", ["sn-deep-research", "deep research", "深度调研", "调研", "研究报告"]],
     ["data_analysis", ["sn-da", "data analysis", "数据分析", "分析数据", "表格分析"]],
     ["ppt_generation", ["sn-ppt", "ppt", "幻灯片", "演示文稿"]],
-    ["u1_image", ["u1", "生图", "生成图片", "图片生成"]],
+    ["u1_image", ["u1", "生图", "生成图片", "图像生成"]],
   ];
 
   return skillAliases.find(([, aliases]) =>
@@ -52,9 +52,9 @@ export function generateSessionTitle(content: string, skillKey?: SkillKey) {
     u1_image: "图像生成",
   };
   const cleaned = content
-    .replace(/[`*_>#\[\]{}()（）《》"“”'‘’]/g, " ")
+    .replace(/[`*_>#\[\]{}()（）《》“”‘’]/g, " ")
     .replace(/\s+/g, " ")
-    .replace(/^(请|帮我|帮我一下|麻烦|使用|基于|最后|现在|接下来|生成|分析|写一份|做一份)+/i, "")
+    .replace(/^(请|帮我|麻烦|使用|基于|最后|现在|接下来|生成|分析|写一份|做一份)+/i, "")
     .trim();
   const compact = cleaned.length > 22 ? `${cleaned.slice(0, 22)}...` : cleaned;
   const fallback = skillKey ? skillPrefix[skillKey] : "新任务";

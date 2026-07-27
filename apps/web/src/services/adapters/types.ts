@@ -28,13 +28,17 @@ export interface LoginInput {
 }
 
 export interface RegisterInput extends LoginInput {
-  email: string;
+  email?: string;
   nickname?: string;
   username?: string;
 }
 
-export interface AdminUserCreateInput extends RegisterInput {
+export interface AdminUserCreateInput {
+  email: string;
+  nickname?: string;
+  password: string;
   role: "admin" | "user";
+  username?: string;
 }
 
 export interface AuthResult {

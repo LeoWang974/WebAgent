@@ -1,3 +1,5 @@
+from os import name as os_name
+
 from agent_runtime.adapters.hermes_cli import HermesCliWrapper
 
 
@@ -38,7 +40,10 @@ def test_hermes_chat_exec_args_avoid_windows_shell_quoting():
         run_id="run_exec_quote_test",
     )
 
-    assert args[:6] == ["wsl.exe", "-d", "Ubuntu", "--", "bash", "-lc"]
+    if os_name == "nt":
+        assert args[:6] == ["wsl.exe", "-d", "Ubuntu", "--", "bash", "-lc"]
+    else:
+        assert args[:2] == ["bash", "-lc"]
     assert "Disney's model" not in " ".join(args)
     assert "python3 -c" in args[-1]
     assert "run_exec_quote_test.txt" in args[-1]

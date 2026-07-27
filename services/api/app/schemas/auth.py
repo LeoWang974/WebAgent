@@ -10,7 +10,7 @@ class LoginInput(ApiModel):
 
 
 class RegisterInput(LoginInput):
-    email: str
+    email: str | None = None
     username: str | None = None
     nickname: str | None = None
 

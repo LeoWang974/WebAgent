@@ -20,8 +20,9 @@ export default function RegisterPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const normalizedEmail = email.trim();
     const ok = await register({
-      email: email.trim(),
+      email: normalizedEmail || undefined,
       nickname: nickname.trim() || undefined,
       password,
       username: username.trim() || undefined,
@@ -66,16 +67,17 @@ export default function RegisterPage() {
               onChange={(event) => setUsername(event.target.value)}
               pattern="[A-Za-z0-9_.-]{3,80}"
               placeholder="test"
+              required
               value={username}
             />
           </label>
           <label className="block space-y-1.5">
-            <span className="text-xs font-medium">{t("email")}</span>
+            <span className="text-xs font-medium">{t("email")}（可选）</span>
             <input
               autoComplete="email"
               className="h-10 w-full rounded-md border px-3 text-sm outline-none focus:ring-1 focus:ring-[#242424]"
               onChange={(event) => setEmail(event.target.value)}
-              required
+              placeholder="name@example.com"
               type="email"
               value={email}
             />

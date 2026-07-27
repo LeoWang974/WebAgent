@@ -16,7 +16,7 @@ interface UserState {
   hydrate: () => Promise<void>;
   login: (input: { email?: string; identifier?: string; password: string; username?: string }) => Promise<boolean>;
   logout: () => Promise<void>;
-  register: (input: { email: string; nickname?: string; password: string; username?: string }) => Promise<boolean>;
+  register: (input: { email?: string; nickname?: string; password: string; username?: string }) => Promise<boolean>;
   updateProfile: (input: Pick<User, "nickname" | "email" | "avatarUrl" | "username">) => Promise<void>;
 }
 
@@ -27,6 +27,9 @@ function userFacingAuthError(error: unknown, fallback: string) {
     }
     if (error.status === 409 && error.message.includes("Email")) {
       return "邮箱已被注册。";
+    }
+    if (error.status === 400 && error.message.includes("Username or email")) {
+      return "请填写用户名或邮箱。";
     }
   }
 
@@ -54,8 +57,7 @@ export const useUserStore = create<UserState>((set, get) => ({
       }
 
       set({
-        error:
-          error instanceof Error ? error.message : "Failed to load user data.",
+        error: error instanceof Error ? error.message : "Failed to load user data.",
         hydrated: true,
       });
     }
@@ -110,8 +112,7 @@ export const useUserStore = create<UserState>((set, get) => ({
       });
     } catch (error) {
       set({
-        error:
-          error instanceof Error ? error.message : "Failed to save profile.",
+        error: error instanceof Error ? error.message : "Failed to save profile.",
         saving: false,
       });
     }

@@ -32,6 +32,15 @@ def login_identifier(input_data: schemas.LoginInput) -> str:
     return (input_data.identifier or input_data.username or input_data.email or "").strip()
 
 
+def registration_email(input_data: schemas.RegisterInput, username: str | None) -> str:
+    raw_email = (input_data.email or "").strip()
+    if raw_email:
+        return normalize_email(raw_email)
+    if not username:
+        raise HTTPException(status_code=400, detail="Username or email is required")
+    return normalize_email(f"{username}@webagent.local")
+
+
 @router.post("/login", response_model=schemas.AuthResult)
 async def login(
     input_data: schemas.LoginInput,
@@ -69,16 +78,17 @@ async def register(
     if len(input_data.password) < 4:
         raise HTTPException(status_code=400, detail="Password must be at least 4 characters")
 
-    if await get_user_by_email(db, input_data.email) is not None:
-        raise HTTPException(status_code=409, detail="Email is already registered")
     normalized_username = normalize_username(input_data.username)
+    email = registration_email(input_data, normalized_username)
+    if await get_user_by_email(db, email) is not None:
+        raise HTTPException(status_code=409, detail="Email is already registered")
     if normalized_username and await get_user_by_username(db, normalized_username) is not None:
         raise HTTPException(status_code=409, detail="Username is already registered")
 
     try:
         user = await ensure_user(
             db,
-            normalize_email(input_data.email),
+            email,
             input_data.password,
             input_data.nickname,
             username=normalized_username,

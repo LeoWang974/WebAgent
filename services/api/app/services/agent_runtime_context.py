@@ -40,7 +40,9 @@ def _copy_skills_once(source: Path, destination: Path) -> Path:
 
 
 def _copy_file_once(source: Path, destination: Path) -> None:
-    if destination.exists() or not source.exists() or not source.is_file():
+    if not source.exists() or not source.is_file():
+        return
+    if destination.exists() and destination.read_bytes() == source.read_bytes():
         return
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, destination)

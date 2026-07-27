@@ -235,9 +235,11 @@ export const mockAdapter: WebAgentApiAdapter = {
     return users;
   },
   async register(input: RegisterInput) {
+    const username = input.username || input.email?.split("@")[0] || "user";
+    const email = input.email || `${username}@webagent.local`;
     return {
-      accessToken: `mock_token_${input.email}`,
-      user: { ...mockUser, email: input.email, username: input.username },
+      accessToken: `mock_token_${email}`,
+      user: { ...mockUser, email, username },
     };
   },
   async resetUserPassword(userId: string) {

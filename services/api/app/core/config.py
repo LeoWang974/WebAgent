@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     sensenova_api_key: str | None = None
     sensenova_base_url: str | None = None
+    sensenova_default_model: str = "sensenova-6.7-flash-lite"
     agent_runtime_default: str = "hermes"
     openclaw_base_url: str = "ws://127.0.0.1:18789"
     openclaw_agent_id: str = "main"

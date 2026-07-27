@@ -172,6 +172,24 @@ class FakeShortChatAdapter:
 
 
 @pytest.mark.asyncio
+async def test_register_accepts_username_without_email(api_client: AsyncClient):
+    response = await api_client.post(
+        "/api/auth/register",
+        json={
+            "nickname": "No Email User",
+            "password": "test",
+            "username": "no-email-user",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["accessToken"]
+    assert payload["user"]["email"] == "no-email-user@webagent.local"
+    assert payload["user"]["username"] == "no-email-user"
+
+
+@pytest.mark.asyncio
 async def test_session_permissions_and_share_access(
     api_client: AsyncClient,
     auth_headers: dict[str, dict[str, str]],

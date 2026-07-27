@@ -3,6 +3,7 @@ import logging
 import subprocess
 from datetime import datetime
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -74,6 +75,71 @@ async def execute_queued_agent_run(run_id: str) -> None:
         await _execute_queued_agent_run(db, run_id)
 
 
+async def _complete_plain_chat_with_sensenova(
+    db: AsyncSession,
+    run: AgentRun,
+    conversation: Conversation,
+    content: str,
+) -> None:
+    if not settings.sensenova_api_key:
+        return
+
+    run.adapter_key = "sensenova"
+    await record_db_agent_run_event(
+        db,
+        run,
+        event_type="started",
+        label="Plain chat started",
+        status="running",
+        progress=10,
+        step_status="running",
+        payload={"adapterKey": "sensenova", "mode": "direct_chat"},
+    )
+    base_url = (settings.sensenova_base_url or "https://token.sensenova.cn/v1").rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=45) as client:
+            response = await client.post(
+                f"{base_url}/chat/completions",
+                headers={"Authorization": f"Bearer {settings.sensenova_api_key}"},
+                json={
+                    "model": settings.sensenova_default_model,
+                    "messages": [{"role": "user", "content": content}],
+                },
+            )
+            response.raise_for_status()
+    except httpx.HTTPStatusError as error:
+        detail = error.response.text[:500]
+        raise RuntimeError(f"SenseNova chat error: {error.response.status_code} {detail}") from error
+    except httpx.HTTPError as error:
+        raise RuntimeError(f"SenseNova chat request failed: {error}") from error
+
+    payload = response.json()
+    reply = (
+        payload.get("choices", [{}])[0]
+        .get("message", {})
+        .get("content", "")
+        .strip()
+    )
+    if not reply:
+        raise RuntimeError("SenseNova chat returned an empty response.")
+
+    assistant_message = await persist_message(db, conversation.id, "assistant", reply)
+    await record_db_agent_run_event(
+        db,
+        run,
+        event_type="stage_update",
+        label=reply,
+        status="running",
+        progress=90,
+        payload={
+            "content": reply,
+            "directPlainChat": True,
+            "messageId": assistant_message.id,
+        },
+    )
+    await _complete_run(db, run, conversation.id, assistant_message)
+
+
 async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
     run, conversation, user, queued_payload = await _load_run_context(db, run_id)
     if run.status == "cancelled":
@@ -90,6 +156,10 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
     run_started_monotonic = asyncio.get_running_loop().time()
 
     try:
+        if skill_key is None and settings.sensenova_api_key:
+            await _complete_plain_chat_with_sensenova(db, run, conversation, content)
+            return
+
         user_runtime_context = build_user_runtime_context(user)
         run_workspace = run_workspace_dir(run.id, conversation.id, user.id)
         adapter_key, adapter = await resolve_adapter_for_model(
@@ -243,6 +313,13 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
 
                 progress = progress or min(90, 10 + assistant_event_count * 8)
                 if is_low_value_runtime_update(message_content, event_payload):
+                    if skill_key is None and elapsed_seconds >= 45:
+                        if hasattr(adapter, "cancel_run"):
+                            await adapter.cancel_run(run.id)
+                        raise AgentRunTimeout(
+                            "plain_chat_timeout",
+                            "Plain chat did not return a visible response within 45 seconds.",
+                        )
                     await record_db_agent_run_event(
                         db,
                         run,
