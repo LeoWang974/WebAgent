@@ -11,6 +11,8 @@ celery_app = Celery(
 celery_app.conf.update(
     task_serializer="json",
     accept_content=["json"],
+    imports=("app.workers.agent_run_tasks",),
     result_serializer="json",
     timezone="UTC",
+    task_default_queue=settings.agent_run_queue_name,
 )

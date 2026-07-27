@@ -112,6 +112,7 @@ def safe_storage_name(value: str, fallback: str) -> str:
 def organize_artifact_schema(
     artifact_schema: schemas.Artifact,
     conversation: Conversation,
+    run_id: str | None = None,
 ) -> schemas.Artifact:
     if not settings.artifact_storage_enabled:
         return artifact_schema
@@ -128,10 +129,11 @@ def organize_artifact_schema(
     storage_root = Path(settings.artifact_storage_root)
     folder_label = safe_storage_name(conversation.title or "conversation", "conversation")
     conversation_dir = storage_root / f"{folder_label}-{conversation.id[:8]}"
-    conversation_dir.mkdir(parents=True, exist_ok=True)
+    target_dir = conversation_dir / f"run-{run_id[:8]}" if run_id else conversation_dir
+    target_dir.mkdir(parents=True, exist_ok=True)
 
     digest = hashlib.sha1(str(source).encode("utf-8", errors="ignore")).hexdigest()[:10]
-    destination = conversation_dir / f"{source.stem}-{digest}{source.suffix.lower()}"
+    destination = target_dir / f"{source.stem}-{digest}{source.suffix.lower()}"
     if destination.exists() and destination.stat().st_mtime >= source.stat().st_mtime:
         stored_path = destination
     else:
@@ -150,6 +152,7 @@ def organize_artifact_schema(
     metadata["normalizedPath"] = metadata_path_key(stored_path)
     metadata["storageRoot"] = str(storage_root)
     metadata["storageConversationDir"] = str(conversation_dir)
+    metadata["storageRunDir"] = str(target_dir)
     metadata["organizedAt"] = datetime.now().isoformat()
     artifact_schema.metadata = metadata
     return artifact_schema
@@ -226,7 +229,7 @@ async def persist_discovered_artifacts(
     conversation = await refresh_conversation(db, session_id)
 
     for artifact_schema in discovered_artifacts:
-        artifact_schema = organize_artifact_schema(artifact_schema, conversation)
+        artifact_schema = organize_artifact_schema(artifact_schema, conversation, run_id)
         metadata = artifact_schema.metadata or {}
         existing_artifact = await find_existing_artifact(
             db,

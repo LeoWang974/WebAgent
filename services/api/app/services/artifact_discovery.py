@@ -15,6 +15,7 @@ from app import schemas
 from app.core.config import settings
 from app.schemas.artifact import ArtifactType
 from app.services import mock_store
+from app.services.agent_run_workspace import run_artifacts_dir
 
 SUPPORTED_SUFFIXES = {
     ".csv",
@@ -106,9 +107,9 @@ def _hermes_session_roots() -> list[Path]:
 
 
 def _runtime_artifacts_dir(run_id: str | None) -> Path:
-    repo_root = _repo_root()
-    run_part = run_id or "unbound"
-    path = repo_root / "runtime" / "hermes-runs" / run_part / "artifacts"
+    if run_id:
+        return run_artifacts_dir(run_id)
+    path = _repo_root() / "runtime" / "agent-runs" / "unbound" / "artifacts"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -343,8 +344,10 @@ def _archive_artifact_path(path: Path, run_id: str | None) -> Path:
 def _path_to_wsl(path: Path) -> str:
     resolved = path.resolve()
     drive = resolved.drive.rstrip(":").lower()
+    if not drive:
+        return resolved.as_posix()
     rest = resolved.as_posix().split(":", 1)[1].lstrip("/")
-    return f"/mnt/{drive}/{rest}" if drive else resolved.as_posix()
+    return f"/mnt/{drive}/{rest}"
 
 
 def _run_pptx_export(

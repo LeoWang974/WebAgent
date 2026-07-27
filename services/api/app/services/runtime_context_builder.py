@@ -208,18 +208,18 @@ def instruction_for_skill(skill_key: str, adapter_key: str | None = None) -> str
 def hermes_instruction_for_skill(skill_key: str) -> str:
     if skill_key == "data_analysis":
         return (
-            "如果用户要求继续分析已有数据，请优先从下方少量相关表格、图表或报告中选择输入；"
+            "如果用户要求继续分析已有数据，请优先从下方少量相关表格、图表或报告中选择输入。"
             "不要一次读取所有历史产物。完成时输出生成的数据表、图表或报告文件路径。"
         )
     if skill_key == "deep_research":
         return (
-            "如果用户要求继续调研已有主题，请优先参考下方少量相关报告、HTML 或数据表；"
+            "如果用户要求继续调研已有主题，请优先参考下方少量相关报告、HTML 或数据表。"
             "不要把历史产物全部展开。完成时输出最终 Markdown/HTML 报告文件路径。"
         )
     if skill_key == "ppt_generation":
         return (
-            "如果用户提到已有 Markdown/HTML/图片，请优先从下方会话产物中选择最匹配文件；"
-            "生成 PPT 时需要明确输出最终 PPTX 或可转换的 HTML 页面路径。"
+            "如果用户提到已有 Markdown/HTML/图片，请优先从下方会话产物中选择最匹配文件。"
+            "生成 PPT 时必须明确输出最终 PPTX 或可转换 HTML 页面路径。"
         )
     if skill_key == "html_generation":
         return (
@@ -254,8 +254,7 @@ def openclaw_instruction_for_skill(skill_key: str) -> str:
         return (
             "OpenClaw context: prefer one source Markdown/HTML report below as the deck input. "
             "Generate a PPT deliverable when possible; if HTML slides are produced first, "
-            "return both "
-            "HTML paths and the final PPTX path with artifact_type=ppt_deck/html_page."
+            "return both HTML paths and the final PPTX path with artifact_type=ppt_deck/html_page."
         )
     if skill_key == "html_generation":
         return (
@@ -268,8 +267,7 @@ def openclaw_instruction_for_skill(skill_key: str) -> str:
         return (
             "OpenClaw context: use the relevant report/slide/image paths below only as reference. "
             "Generate image artifacts and explicitly return artifact_paths with "
-            "artifact_type=image_result, "
-            "source_dir, run_id, and title."
+            "artifact_type=image_result, source_dir, run_id, and title."
         )
     return ""
 

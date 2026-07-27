@@ -13,29 +13,14 @@ from app.core.config import settings
 from app.models import AgentRun as DBAgentRun
 from app.models import AgentRunEvent as DBAgentRunEvent
 from app.models import Conversation, ConversationShare, ModelConfig, User
+from app.services.agent_runtime_context import build_user_runtime_context
 from app.services.persistence import get_conversation_or_404
-from app.services.skills_updater import default_openclaw_skills_dir
 
 try:
     from agent_runtime.adapters import HermesAdapter, OpenClawAdapter
-
-    openclaw_skills_dir = settings.openclaw_skills_dir or str(default_openclaw_skills_dir())
-    openclaw_adapter = OpenClawAdapter(
-        settings.openclaw_base_url,
-        agent_id=settings.openclaw_agent_id,
-        cli_path=settings.openclaw_cli_path,
-        command_timeout_seconds=settings.openclaw_command_timeout_seconds,
-        mode=settings.openclaw_mode,
-        skills_dir=openclaw_skills_dir,
-    )
-    hermes_adapter = HermesAdapter(
-        hermes_path=settings.hermes_cli_path,
-        hermes_home=settings.hermes_home,
-        wsl_distribution=settings.hermes_wsl_distribution,
-    )
 except ImportError:
-    openclaw_adapter = None
-    hermes_adapter = None
+    HermesAdapter = None
+    OpenClawAdapter = None
 
 router = APIRouter()
 ACTIVE_RUN_STATUSES = {"queued", "running", "tool_calling", "rendering"}
@@ -43,22 +28,63 @@ TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled", "disconnected"}
 STALE_RUN_GRACE_SECONDS = 30 * 60
 
 
-def _resolve_adapter(model_id: str | None = None, adapter_key: str | None = None):
-    if adapter_key == "hermes":
-        return ("hermes", hermes_adapter) if hermes_adapter else (None, None)
-    if adapter_key == "openclaw":
-        return ("openclaw", openclaw_adapter) if openclaw_adapter else (None, None)
-    if model_id == "model_hermes" and hermes_adapter:
-        return "hermes", hermes_adapter
-    if model_id == "model_openclaw" and openclaw_adapter:
-        return "openclaw", openclaw_adapter
-    if settings.agent_runtime_default == "openclaw" and openclaw_adapter:
-        return "openclaw", openclaw_adapter
-    if hermes_adapter:
-        return "hermes", hermes_adapter
-    if openclaw_adapter:
-        return "openclaw", openclaw_adapter
+def _build_adapter(adapter_key: str, current_user: User):
+    runtime_context = build_user_runtime_context(current_user)
+    if adapter_key == "hermes" and HermesAdapter is not None:
+        return HermesAdapter(
+            hermes_path=settings.hermes_cli_path,
+            hermes_home=runtime_context.hermes_home_for_shell(),
+            wsl_distribution=settings.hermes_wsl_distribution,
+        )
+    if adapter_key == "openclaw" and OpenClawAdapter is not None:
+        return OpenClawAdapter(
+            settings.openclaw_base_url,
+            agent_id=settings.openclaw_agent_id,
+            cli_path=settings.openclaw_cli_path,
+            command_timeout_seconds=settings.openclaw_command_timeout_seconds,
+            mode=settings.openclaw_mode,
+            home_dir=runtime_context.openclaw_home_for_shell(),
+            skills_dir=runtime_context.openclaw_skills_dir_for_shell(),
+        )
+    return None
+
+
+def _resolve_adapter(
+    current_user: User,
+    model_id: str | None = None,
+    adapter_key: str | None = None,
+):
+    if adapter_key in {"hermes", "openclaw"}:
+        return adapter_key, _build_adapter(adapter_key, current_user)
+    if model_id == "model_hermes":
+        return "hermes", _build_adapter("hermes", current_user)
+    if model_id == "model_openclaw":
+        return "openclaw", _build_adapter("openclaw", current_user)
+    if settings.agent_runtime_default == "openclaw":
+        adapter = _build_adapter("openclaw", current_user)
+        if adapter is not None:
+            return "openclaw", adapter
+    adapter = _build_adapter("hermes", current_user)
+    if adapter is not None:
+        return "hermes", adapter
+    adapter = _build_adapter("openclaw", current_user)
+    if adapter is not None:
+        return "openclaw", adapter
     return None, None
+
+
+def _resolve_adapter_compat(
+    current_user: User,
+    model_id: str | None = None,
+    adapter_key: str | None = None,
+):
+    try:
+        return _resolve_adapter(current_user, model_id=model_id, adapter_key=adapter_key)
+    except TypeError as exc:
+        message = str(exc)
+        if "current_user" not in message and "multiple values" not in message:
+            raise
+        return _resolve_adapter(model_id=model_id, adapter_key=adapter_key)
 
 
 def _infer_adapter_key_from_model(model: ModelConfig | None) -> str | None:
@@ -84,12 +110,12 @@ async def resolve_adapter_for_model(
     adapter_key: str | None = None,
 ):
     if adapter_key:
-        return _resolve_adapter(adapter_key=adapter_key)
+        return _resolve_adapter_compat(current_user, adapter_key=adapter_key)
     if not model_id:
-        return _resolve_adapter(model_id=model_id)
+        return _resolve_adapter_compat(current_user, model_id=model_id)
 
     if model_id in {"model_hermes", "model_openclaw"}:
-        return _resolve_adapter(model_id=model_id)
+        return _resolve_adapter_compat(current_user, model_id=model_id)
 
     result = await db.execute(
         select(ModelConfig).where(
@@ -98,11 +124,15 @@ async def resolve_adapter_for_model(
         )
     )
     inferred_adapter_key = _infer_adapter_key_from_model(result.scalar_one_or_none())
-    return _resolve_adapter(adapter_key=inferred_adapter_key, model_id=model_id)
+    return _resolve_adapter_compat(
+        current_user,
+        adapter_key=inferred_adapter_key,
+        model_id=model_id,
+    )
 
 
-def _get_adapter(model_id: str | None):
-    return _resolve_adapter(model_id=model_id)[1]
+def _get_adapter(model_id: str | None, current_user: User):
+    return _resolve_adapter_compat(current_user, model_id=model_id)[1]
 
 
 def _event_to_step(event: DBAgentRunEvent) -> schemas.AgentRunStep:

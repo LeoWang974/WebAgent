@@ -57,6 +57,83 @@ Default URLs:
 
 The dev scripts stop stale listeners on their fixed ports before starting. Close the spawned PowerShell window or press `Ctrl+C` to stop a service.
 
+## Local Docker Packaging
+
+Docker packaging is provided for the WebAgent application services:
+
+- `postgres`: PostgreSQL 16
+- `redis`: Redis 7
+- `api`: FastAPI + Alembic + WebAgent backend
+- `worker`: Celery Agent Run worker that consumes Redis queued long tasks
+- `web`: Next.js production server
+
+Create the Docker environment file:
+
+```powershell
+Copy-Item .env.docker.example .env.docker
+```
+
+Then edit `.env.docker` and fill required secrets such as:
+
+- `JWT_SECRET_KEY`
+- `SENSENOVA_API_KEY`
+- runtime addresses or binary paths for Hermes/OpenClaw
+
+Build and start locally:
+
+```powershell
+docker compose --env-file .env.docker up --build
+```
+
+Open:
+
+- Web app: `http://localhost:3002/app`
+- API health: `http://localhost:8010/api/health`
+
+Stop services:
+
+```powershell
+docker compose --env-file .env.docker down
+```
+
+Reset local Docker database and Redis volumes:
+
+```powershell
+docker compose --env-file .env.docker down -v
+```
+
+Important runtime note: the WebAgent images do not bundle Hermes, OpenClaw, or
+agent_pack. They are expected to be installed on the host/server and exposed to
+the API container through configured CLI paths, mounted directories, or gateway
+URLs such as `OPENCLAW_BASE_URL=ws://host.docker.internal:18789`.
+
+Docker mode enables queued Agent Runs by default:
+
+- `AGENT_RUN_QUEUE_ENABLED=true`
+- `AGENT_RUN_QUEUE_NAME=agent-runs`
+- `AGENT_RUN_WORKSPACE_ROOT=/app/runtime/agent-runs`
+- `WORKER_CONCURRENCY=1`
+- `HERMES_ADAPTER_CONCURRENCY=1`
+- `OPENCLAW_ADAPTER_CONCURRENCY=1`
+
+In this mode the API process accepts the chat/SSE request and writes queued run
+metadata, while the `worker` process executes Hermes/OpenClaw and writes run
+events, messages, and artifacts back to PostgreSQL. Keep Redis and the worker
+running for long tasks.
+
+Start multiple worker containers locally:
+
+```powershell
+docker compose --env-file .env.docker up --build -d --scale worker=2
+```
+
+The recommended first production setting is multiple worker containers with
+`WORKER_CONCURRENCY=1`, plus adapter-level Redis locks. This allows separate
+queued jobs to be picked up quickly while keeping each runtime adapter within
+its configured safe capacity. Increase `HERMES_ADAPTER_CONCURRENCY` or
+`OPENCLAW_ADAPTER_CONCURRENCY` only after validating that the corresponding CLI,
+gateway, credentials, and output directories are safe under parallel long tasks.
+
 ## Tests And Build
 
 Backend:
@@ -89,49 +166,21 @@ pnpm --filter web run clean
 
 `scripts/dev-web.ps1` performs this clean only before starting Next.js.
 
-## mac Server Migration Notes
+## Linux / CCI Server Notes
 
-The next development phase is expected to move the project from the current
-Windows + WSL2 workstation to a macOS machine that also acts as the development
-server. Keep the application contract the same, but replace Windows-specific
-launching, WSL paths, and local runtime folders with mac-native equivalents.
+The next deployment target is a Linux CCI environment. The recommended shape is:
 
-Recommended migration order:
+1. Install and validate agent_pack, Hermes, OpenClaw, SenseNova credentials, and
+   Serper credentials in an isolated host directory.
+2. Build WebAgent images from this repository.
+3. Run WebAgent API/Web containers with PostgreSQL and Redis.
+4. Connect the API container to the host-side Hermes/OpenClaw runtime through
+   mounted paths or gateway URLs.
+5. Verify login, conversations, Agent Run SSE, artifacts, sharing permissions,
+   and long Hermes/OpenClaw tasks.
 
-1. Clone the repository on the mac server.
-2. Install Node.js, pnpm, Python 3.12, PostgreSQL, Redis, Hermes, and OpenClaw.
-3. Create `services/api/.env` from `services/api/.env.example`.
-4. Create `apps/web/.env.local` from `apps/web/.env.local.example`.
-5. Update all runtime paths in `services/api/.env` to mac paths.
-6. Run Alembic migrations.
-7. Start FastAPI, the frontend, and the selected agent runtime.
-8. Verify login, conversations, Agent Run SSE, artifacts, and permissions before
-   developing new multi-user or multi-thread features.
-
-macOS development commands:
-
-```bash
-cd services/api
-python3.12 -m venv .venv
-source .venv/bin/activate
-python -m pip install -U pip
-python -m pip install -e ".[dev]"
-alembic upgrade head
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8010
-
-cd ../..
-pnpm install
-pnpm --filter web dev -- --port 3002
-```
-
-For production, run the frontend after `pnpm --filter web build`, place FastAPI
-and Next.js behind nginx/Caddy, and point Hermes/OpenClaw paths in
-`services/api/.env` to the mac/server filesystem layout. Keep runtime outputs
-outside git-tracked directories and preserve the `.next` / `.next-build`
-separation.
-
-Do not use the Windows PowerShell scripts as the long-term mac service runner.
-They are still useful as documentation for the intended process layout:
+The Windows PowerShell scripts remain local development helpers, not Linux
+service runners:
 
 - `scripts/dev-api.ps1`: starts FastAPI on `127.0.0.1:8010`.
 - `scripts/dev-web.ps1`: starts Next.js on `localhost:3002`.
@@ -139,8 +188,8 @@ They are still useful as documentation for the intended process layout:
   `ws://127.0.0.1:18789`.
 - `scripts/stop-dev.ps1`: stops `3002`, `8010`, and `18789`.
 
-On macOS, replace these with shell scripts, launchd services, tmux sessions, or
-systemd-equivalent process supervision depending on how the server is managed.
+On Linux/CCI, replace them with Docker Compose, platform container settings, or
+systemd/tmux only for host-side Hermes/OpenClaw helper processes.
 
 ## Agent Runtime And Search Configuration
 
@@ -235,8 +284,8 @@ Relevant backend settings:
 - `OPENCLAW_SKILLS_DIR`, defaulting to `runtime/openclaw-skills`
 
 On Windows development machines, Hermes paths such as `/home/.../.hermes/skills`
-are synced through WSL using `HERMES_WSL_DISTRIBUTION`. On a mac server, set
-`HERMES_SKILLS_DIR` and `OPENCLAW_SKILLS_DIR` to normal mac filesystem paths.
+are synced through WSL using `HERMES_WSL_DISTRIBUTION`. On Linux/CCI, set
+`HERMES_SKILLS_DIR` and `OPENCLAW_SKILLS_DIR` to normal Linux filesystem paths.
 
 Local development may use `python services/api/scripts/seed_local_users.py` to
 create `test/test` and `admin/admin`. These accounts are local-only fixtures:
@@ -250,8 +299,8 @@ After migration, the next planned development areas are:
 
 - User multi-threading: allow users to run and observe multiple Agent Runs without
   blocking unrelated conversations.
-- mac server adaptation: replace WSL assumptions, normalize runtime paths, and
-  add mac-native service scripts.
+- Linux/CCI deployment: validate Docker image build, runtime mounts, environment
+  variables, and container networking.
 - OpenClaw protocolization: move from fallback text/directory discovery toward
   explicit `openclaw.event.v1` events.
 - Permission hardening: continue validating private, shared, and public session

@@ -66,8 +66,10 @@ def _git_update(repo_url: str, cache_dir: Path, branch: str | None = None) -> st
 def _windows_path_to_wsl(path: Path) -> str:
     resolved = path.resolve()
     drive = resolved.drive.rstrip(":").lower()
+    if not drive:
+        return resolved.as_posix()
     rest = resolved.as_posix().split(":", maxsplit=1)[1].lstrip("/")
-    return f"/mnt/{drive}/{rest}" if drive else resolved.as_posix()
+    return f"/mnt/{drive}/{rest}"
 
 
 def _is_wsl_absolute_path(path: str) -> bool:

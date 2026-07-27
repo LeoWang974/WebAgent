@@ -1,0 +1,598 @@
+import asyncio
+import logging
+import subprocess
+from datetime import datetime
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.routes.agent_runs import (
+    finish_db_agent_run,
+    record_db_agent_run_event,
+    resolve_adapter_for_model,
+)
+from app.api.routes.sessions import (
+    AgentRunCancelled,
+    AgentRunTimeout,
+    discover_artifacts_with_retry,
+    is_agent_run_cancelled,
+    is_low_value_runtime_update,
+    persist_message,
+    runtime_diagnostics,
+)
+from app.api.routes.settings import user_developer_mode
+from app.core.config import settings
+from app.db.session import AsyncSessionLocal
+from app.models import AgentRun, AgentRunEvent, Conversation, Message, User
+from app.services.adapter_limiter import (
+    AdapterCapacityTimeout,
+    acquire_adapter_capacity,
+)
+from app.services.agent_run_workspace import run_workspace_dir
+from app.services.agent_runtime_context import build_user_runtime_context
+from app.services.artifact_discovery import create_pptx_from_html_artifacts
+from app.services.persistence import to_artifact, to_message, to_session
+from app.services.runtime_context_builder import build_runtime_content
+from app.services.session_artifacts import (
+    artifact_display_priority,
+    is_debug_artifact,
+    persist_discovered_artifacts,
+    refresh_conversation,
+)
+
+logger = logging.getLogger(__name__)
+
+
+async def _load_run_context(
+    db: AsyncSession,
+    run_id: str,
+) -> tuple[AgentRun, Conversation, User, dict]:
+    run = await db.get(AgentRun, run_id)
+    if run is None:
+        raise RuntimeError(f"Agent run not found: {run_id}")
+
+    conversation = await db.get(Conversation, run.conversation_id)
+    if conversation is None:
+        raise RuntimeError(f"Conversation not found for run: {run_id}")
+
+    user = await db.get(User, conversation.user_id)
+    if user is None:
+        raise RuntimeError(f"User not found for conversation: {conversation.id}")
+
+    result = await db.execute(
+        select(AgentRunEvent).where(
+            AgentRunEvent.run_id == run_id,
+            AgentRunEvent.event_type == "queued",
+        )
+    )
+    queued_event = result.scalars().first()
+    payload = queued_event.payload if queued_event is not None else {}
+    return run, conversation, user, payload or {}
+
+async def execute_queued_agent_run(run_id: str) -> None:
+    async with AsyncSessionLocal() as db:
+        await _execute_queued_agent_run(db, run_id)
+
+
+async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
+    run, conversation, user, queued_payload = await _load_run_context(db, run_id)
+    if run.status == "cancelled":
+        return
+    content = str(queued_payload.get("content") or "")
+    model_id = queued_payload.get("modelId")
+    skill_key = queued_payload.get("skillKey")
+    run_started_at = run.created_at or datetime.now()
+    assistant_messages: list[Message] = []
+    assistant_event_count = 0
+    artifact_discovery_summary: dict[str, object] = {}
+    adapter = None
+    adapter_capacity_lease = None
+    run_started_monotonic = asyncio.get_running_loop().time()
+
+    try:
+        user_runtime_context = build_user_runtime_context(user)
+        run_workspace = run_workspace_dir(run.id, conversation.id, user.id)
+        adapter_key, adapter = await resolve_adapter_for_model(
+            db,
+            user,
+            model_id,
+            adapter_key=run.adapter_key,
+        )
+        run.adapter_key = adapter_key or run.adapter_key
+        await record_db_agent_run_event(
+            db,
+            run,
+            event_type="started",
+            label="Agent run started",
+            status="running",
+            progress=5,
+            step_status="running",
+            payload={
+                "content": content,
+                "modelId": model_id,
+                "skillKey": skill_key,
+                "adapterKey": run.adapter_key,
+                "adapterLockScope": user_runtime_context.adapter_lock_scope(),
+                "userRuntimeRoot": str(user_runtime_context.root_dir),
+                "workspaceDir": str(run_workspace),
+            },
+        )
+        if adapter is None:
+            raise RuntimeError("No agent runtime adapter is available.")
+
+        async def on_adapter_capacity_wait(elapsed_seconds: float) -> None:
+            if await is_agent_run_cancelled(db, run.id):
+                raise AgentRunCancelled()
+            await record_db_agent_run_event(
+                db,
+                run,
+                event_type="adapter_capacity_wait",
+                label=(
+                    f"Waiting for {run.adapter_key or 'agent'} adapter capacity "
+                    f"({int(elapsed_seconds)}s)."
+                ),
+                status="running",
+                progress=run.progress,
+                step_status="running",
+                payload={
+                    "adapterKey": run.adapter_key,
+                    "elapsedSeconds": int(elapsed_seconds),
+                },
+            )
+
+        adapter_capacity_lease = await acquire_adapter_capacity(
+            run.adapter_key,
+            run.id,
+            scope=user_runtime_context.adapter_lock_scope(),
+            on_wait=on_adapter_capacity_wait,
+        )
+        await adapter_capacity_lease.__aenter__()
+        await record_db_agent_run_event(
+            db,
+            run,
+            event_type="adapter_capacity_acquired",
+            label=f"Acquired {run.adapter_key or 'agent'} adapter capacity.",
+            status="running",
+            progress=run.progress,
+            payload={
+                "adapterKey": run.adapter_key,
+                "adapterLockScope": user_runtime_context.adapter_lock_scope(),
+            },
+        )
+
+        runtime_content = await build_runtime_content(
+            db,
+            conversation.id,
+            content,
+            skill_key,
+            run.adapter_key,
+        )
+
+        from agent_runtime.schemas import AgentRunCreate as AdapterAgentRunCreate
+
+        adapter_input = AdapterAgentRunCreate(
+            content=runtime_content,
+            session_id=conversation.id,
+            skill_key=skill_key,
+            model_id=model_id,
+            run_id=run.id,
+        )
+
+        if hasattr(adapter, "stream_response_events") or hasattr(adapter, "stream_response"):
+            stream = (
+                adapter.stream_response_events(adapter_input)
+                if hasattr(adapter, "stream_response_events")
+                else adapter.stream_response(adapter_input)
+            )
+            while True:
+                elapsed_seconds = asyncio.get_running_loop().time() - run_started_monotonic
+                overall_remaining = settings.agent_run_overall_timeout_seconds - elapsed_seconds
+                if overall_remaining <= 0:
+                    if hasattr(adapter, "cancel_run"):
+                        await adapter.cancel_run(run.id)
+                    raise AgentRunTimeout(
+                        "overall_timeout",
+                        "Agent run exceeded the overall task timeout.",
+                    )
+
+                wait_timeout = min(
+                    settings.agent_run_idle_timeout_seconds,
+                    max(1, overall_remaining),
+                )
+                timeout_type = (
+                    "overall_timeout"
+                    if wait_timeout < settings.agent_run_idle_timeout_seconds
+                    else "idle_timeout"
+                )
+                try:
+                    chunk = await asyncio.wait_for(stream.__anext__(), timeout=wait_timeout)
+                except StopAsyncIteration:
+                    break
+                except TimeoutError as error:
+                    if hasattr(adapter, "cancel_run"):
+                        await adapter.cancel_run(run.id)
+                    if timeout_type == "overall_timeout":
+                        raise AgentRunTimeout(
+                            "overall_timeout",
+                            "Agent run exceeded the overall task timeout.",
+                        ) from error
+                    raise AgentRunTimeout(
+                        "idle_timeout",
+                        (
+                            "Agent runtime did not emit output within "
+                            f"{settings.agent_run_idle_timeout_seconds} seconds."
+                        ),
+                    ) from error
+
+                if await is_agent_run_cancelled(db, run.id):
+                    raise AgentRunCancelled()
+
+                if hasattr(chunk, "step"):
+                    step = getattr(chunk, "step", None)
+                    message_content = str(getattr(step, "label", "") or "").strip()
+                    event_type = str(getattr(chunk, "event_type", "stage_update"))
+                    event_payload = dict(getattr(chunk, "payload", {}) or {})
+                    progress = int(getattr(chunk, "progress", 0) or 0)
+                else:
+                    message_content = str(chunk).strip()
+                    event_type = "stage_update"
+                    event_payload = {}
+                    progress = 0
+                if not message_content:
+                    continue
+
+                progress = progress or min(90, 10 + assistant_event_count * 8)
+                if is_low_value_runtime_update(message_content, event_payload):
+                    await record_db_agent_run_event(
+                        db,
+                        run,
+                        event_type="raw_activity",
+                        label=message_content,
+                        status="running",
+                        progress=progress,
+                        payload=event_payload,
+                    )
+                    continue
+
+                if event_type == "artifact_found":
+                    await record_db_agent_run_event(
+                        db,
+                        run,
+                        event_type=event_type,
+                        label=message_content,
+                        status="running",
+                        progress=progress,
+                        payload=event_payload,
+                    )
+                    continue
+
+                assistant_message = await persist_message(
+                    db,
+                    conversation.id,
+                    "assistant",
+                    message_content,
+                )
+                assistant_messages.append(assistant_message)
+                assistant_event_count += 1
+                await record_db_agent_run_event(
+                    db,
+                    run,
+                    event_type=event_type,
+                    label=message_content,
+                    status="running",
+                    progress=progress,
+                    payload={
+                        "content": message_content,
+                        "messageId": assistant_message.id,
+                        **event_payload,
+                    },
+                )
+                if skill_key is None:
+                    break
+        else:
+            runtime_run = await adapter.create_run(adapter_input)
+            if await is_agent_run_cancelled(db, run.id):
+                raise AgentRunCancelled()
+            message_content = (
+                getattr(runtime_run, "output", None)
+                or runtime_run.error
+                or "Agent runtime did not return a response."
+            )
+            assistant_message = await persist_message(
+                db,
+                conversation.id,
+                "assistant",
+                message_content,
+            )
+            assistant_messages.append(assistant_message)
+            await record_db_agent_run_event(
+                db,
+                run,
+                event_type="stage_update",
+                label=message_content,
+                status="running",
+                progress=80,
+                payload={"content": message_content, "messageId": assistant_message.id},
+            )
+
+        if await is_agent_run_cancelled(db, run.id):
+            raise AgentRunCancelled()
+
+        if skill_key is None and assistant_messages:
+            await _complete_run(db, run, conversation.id, assistant_messages[-1])
+            return
+
+        response_artifacts = await _discover_and_persist_artifacts(
+            db,
+            run,
+            conversation.id,
+            skill_key,
+            run_started_at,
+            adapter,
+            artifact_discovery_summary,
+            user,
+        )
+        assistant_message = await _final_assistant_message(
+            db,
+            conversation.id,
+            assistant_messages,
+            response_artifacts,
+        )
+        for artifact in sorted(response_artifacts, key=artifact_display_priority):
+            await record_db_agent_run_event(
+                db,
+                run,
+                event_type="artifact_created",
+                label=f"Artifact created: {artifact.title}",
+                status="rendering",
+                progress=95,
+                payload={
+                    "artifact": to_artifact(artifact).model_dump(by_alias=True),
+                    "artifactId": artifact.id,
+                    "artifactType": artifact.type,
+                    "messageId": assistant_message.id,
+                    "sessionId": conversation.id,
+                    "title": artifact.title,
+                },
+            )
+
+        await _complete_run(db, run, conversation.id, assistant_message)
+    except AgentRunCancelled:
+        await finish_db_agent_run(db, run, status="cancelled", label="Agent run cancelled")
+        conversation = await refresh_conversation(db, conversation.id)
+        conversation.status = "active"
+        await db.commit()
+    except AgentRunTimeout as error:
+        logger.warning("Queued agent run timed out: %s", error)
+        await record_db_agent_run_event(
+            db,
+            run,
+            event_type="diagnostic",
+            label="Agent runtime timeout diagnostics",
+            status="failed",
+            progress=run.progress,
+            step_status="failed",
+            payload=runtime_diagnostics(adapter, artifact_discovery_summary),
+        )
+        await finish_db_agent_run(
+            db,
+            run,
+            status="failed",
+            label=f"Agent run timeout: {error.timeout_type}",
+            error=str(error),
+        )
+        await _fail_conversation(db, run, conversation.id, f"Agent runtime timeout: {error}")
+    except AdapterCapacityTimeout as error:
+        logger.warning("Queued agent run could not acquire adapter capacity: %s", error)
+        await finish_db_agent_run(
+            db,
+            run,
+            status="failed",
+            label="Agent adapter capacity wait timed out",
+            error=str(error),
+        )
+        await _fail_conversation(db, run, conversation.id, f"Agent runtime error: {error}")
+    except Exception as error:
+        logger.exception("Queued agent run failed")
+        if adapter is not None and hasattr(adapter, "cancel_run"):
+            await adapter.cancel_run(run.id)
+        await record_db_agent_run_event(
+            db,
+            run,
+            event_type="diagnostic",
+            label="Agent runtime failure diagnostics",
+            status="failed",
+            progress=run.progress,
+            step_status="failed",
+            payload=runtime_diagnostics(adapter, artifact_discovery_summary),
+        )
+        await finish_db_agent_run(
+            db,
+            run,
+            status="failed",
+            label="Agent run failed",
+            error=str(error),
+        )
+        await _fail_conversation(db, run, conversation.id, f"Agent runtime error: {error}")
+    finally:
+        if adapter_capacity_lease is not None:
+            await adapter_capacity_lease.__aexit__(None, None, None)
+
+
+async def _discover_and_persist_artifacts(
+    db: AsyncSession,
+    run: AgentRun,
+    conversation_id: str,
+    skill_key: str | None,
+    run_started_at: datetime,
+    adapter: object,
+    artifact_discovery_summary: dict[str, object],
+    user: User,
+):
+    explicit_artifact_paths = (
+        adapter.get_last_artifact_paths() if hasattr(adapter, "get_last_artifact_paths") else []
+    )
+    explicit_artifacts = (
+        adapter.get_last_artifacts() if hasattr(adapter, "get_last_artifacts") else []
+    )
+    if explicit_artifacts:
+        explicit_artifact_paths = [
+            str(getattr(artifact, "path", ""))
+            for artifact in explicit_artifacts
+            if getattr(artifact, "path", "")
+        ]
+    artifact_discovery_summary.update(
+        {
+            "adapter_artifact_paths": list(explicit_artifact_paths),
+            "adapter_artifacts": [
+                {
+                    "artifact_path": getattr(artifact, "path", None),
+                    "artifact_type": getattr(artifact, "artifact_type", None),
+                    "run_id": getattr(artifact, "run_id", None),
+                    "source_dir": getattr(artifact, "source_dir", None),
+                    "title": getattr(artifact, "title", None),
+                }
+                for artifact in explicit_artifacts
+            ],
+        }
+    )
+    discovered_artifacts = await discover_artifacts_with_retry(
+        conversation_id,
+        run_started_at,
+        explicit_artifact_paths,
+        run.id,
+        explicit_artifacts,
+    )
+    if (
+        skill_key == "ppt_generation"
+        and any(artifact.type == "html_page" for artifact in discovered_artifacts)
+        and not any(artifact.type == "ppt_deck" for artifact in discovered_artifacts)
+    ):
+        try:
+            pptx_artifact = create_pptx_from_html_artifacts(
+                conversation_id,
+                discovered_artifacts,
+                run.id,
+                settings.agent_run_ppt_export_timeout_seconds,
+            )
+            if pptx_artifact is not None:
+                discovered_artifacts.append(pptx_artifact)
+        except subprocess.TimeoutExpired as error:
+            raise AgentRunTimeout(
+                "ppt_export_timeout",
+                f"PPTX export exceeded {settings.agent_run_ppt_export_timeout_seconds} seconds.",
+            ) from error
+
+    stored_artifacts = await persist_discovered_artifacts(
+        db,
+        conversation_id,
+        discovered_artifacts,
+        run.id,
+    )
+    current_run_artifacts = [artifact for artifact in stored_artifacts if artifact.run_id == run.id]
+    if (
+        skill_key == "ppt_generation"
+        and any(artifact.type == "html_page" for artifact in current_run_artifacts)
+        and not any(artifact.type == "ppt_deck" for artifact in current_run_artifacts)
+    ):
+        raise RuntimeError(
+            "PPTX export did not produce a .pptx file. "
+            "HTML pages were preserved as fallback artifacts."
+        )
+    developer_mode = await user_developer_mode(db, user)
+    visible_current_run_artifacts = [
+        artifact
+        for artifact in current_run_artifacts
+        if developer_mode or not is_debug_artifact(artifact)
+    ]
+    visible_stored_artifacts = [
+        artifact
+        for artifact in stored_artifacts
+        if developer_mode or not is_debug_artifact(artifact)
+    ]
+    response_artifacts = visible_current_run_artifacts or sorted(
+        visible_stored_artifacts,
+        key=artifact_display_priority,
+    )[-1:]
+    artifact_discovery_summary["stored_count"] = len(stored_artifacts)
+    return response_artifacts
+
+
+async def _final_assistant_message(
+    db: AsyncSession,
+    conversation_id: str,
+    assistant_messages: list[Message],
+    response_artifacts,
+) -> Message:
+    if assistant_messages:
+        assistant_message = assistant_messages[-1]
+        if response_artifacts:
+            assistant_message.artifact_ids = [artifact.id for artifact in response_artifacts]
+            await db.commit()
+            await db.refresh(assistant_message)
+        return assistant_message
+    return await persist_message(
+        db,
+        conversation_id,
+        "assistant",
+        (
+            "Agent runtime completed and generated artifacts."
+            if response_artifacts
+            else "Agent runtime completed without emitting a visible status update."
+        ),
+        [artifact.id for artifact in response_artifacts] or None,
+    )
+
+
+async def _complete_run(
+    db: AsyncSession,
+    run: AgentRun,
+    conversation_id: str,
+    assistant_message: Message,
+) -> None:
+    conversation = await refresh_conversation(db, conversation_id)
+    conversation.status = "active"
+    await finish_db_agent_run(
+        db,
+        run,
+        status="completed",
+        label="Agent run completed",
+        output=assistant_message.content,
+    )
+    await db.commit()
+    conversation = await refresh_conversation(db, conversation_id)
+    await record_db_agent_run_event(
+        db,
+        run,
+        event_type="assistant_done",
+        label="Assistant response completed",
+        status="completed",
+        progress=100,
+        payload={
+            "message": to_message(assistant_message).model_dump(by_alias=True),
+            "session": to_session(conversation).model_dump(by_alias=True),
+            "runId": run.id,
+            "status": "completed",
+        },
+    )
+
+
+async def _fail_conversation(
+    db: AsyncSession,
+    run: AgentRun,
+    conversation_id: str,
+    message: str,
+) -> None:
+    error_message = await persist_message(db, conversation_id, "assistant", message)
+    conversation = await refresh_conversation(db, conversation_id)
+    conversation.status = "failed"
+    await db.commit()
+    await record_db_agent_run_event(
+        db,
+        run,
+        event_type="assistant_done",
+        label="Assistant response failed",
+        status="failed",
+        progress=100,
+        payload={"messageId": error_message.id, "status": "failed"},
+    )

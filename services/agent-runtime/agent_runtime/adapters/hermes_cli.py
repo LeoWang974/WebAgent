@@ -118,8 +118,8 @@ class HermesCliWrapper:
     def _with_runtime_env(self, command: str) -> str:
         env_path = PurePosixPath(self.hermes_home) / ".env"
         env_loader = (
-            f"__f={shlex.quote(str(env_path))}; "
-            "if [ -f \"$__f\" ]; then "
+            f"for __f in ~/.hermes/.env {shlex.quote(str(env_path))}; do "
+            "[ -f \"$__f\" ] || continue; "
             "while IFS= read -r __line || [ -n \"$__line\" ]; do "
             "__line=${__line%$'\\r'}; "
             "case \"$__line\" in ''|\\#*) continue;; esac; "
@@ -128,7 +128,7 @@ class HermesCliWrapper:
             "export \"$__line\"; "
             "fi; "
             "done < \"$__f\"; "
-            "fi; "
+            "done; "
             "unset __f __line __key; "
         )
         return env_loader + command
@@ -146,8 +146,11 @@ class HermesCliWrapper:
         prompt_path = prompt_dir / f"{prompt_name}.txt"
         prompt_path.write_text(question, encoding="utf-8")
         drive = prompt_path.drive.rstrip(":").lower()
-        rest = prompt_path.as_posix().split(":", 1)[1].lstrip("/")
-        wsl_path = f"/mnt/{drive}/{rest}" if drive else prompt_path.as_posix()
+        if drive:
+            rest = prompt_path.as_posix().split(":", 1)[1].lstrip("/")
+            wsl_path = f"/mnt/{drive}/{rest}"
+        else:
+            wsl_path = prompt_path.as_posix()
         return prompt_path, wsl_path
 
     def _build_chat_command(
@@ -174,6 +177,8 @@ class HermesCliWrapper:
             use_pty=use_pty,
             run_id=run_id,
         )
+        if os.name != "nt":
+            return command
         return f"wsl -d {shlex.quote(self.wsl_distribution)} -- bash -lc {shlex.quote(command)}"
 
     def _build_chat_exec_args(
@@ -200,6 +205,8 @@ class HermesCliWrapper:
             use_pty=use_pty,
             run_id=run_id,
         )
+        if os.name != "nt":
+            return ["bash", "-lc", command]
         return ["wsl.exe", "-d", self.wsl_distribution, "--", "bash", "-lc", command]
 
     def _build_chat_bash_command(

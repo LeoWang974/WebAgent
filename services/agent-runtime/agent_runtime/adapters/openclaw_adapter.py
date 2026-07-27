@@ -44,6 +44,7 @@ class OpenClawAdapter(AgentRuntimeAdapter):
         cli_path: str = "openclaw",
         command_timeout_seconds: int = 600,
         mode: str = "gateway_cli",
+        home_dir: str | None = None,
         skills_dir: str | None = None,
     ):
         self.base_url = base_url.rstrip("/")
@@ -51,6 +52,7 @@ class OpenClawAdapter(AgentRuntimeAdapter):
         self.cli_path = cli_path
         self.command_timeout_seconds = command_timeout_seconds
         self.mode = mode
+        self.home_dir = home_dir
         self.skills_dir = skills_dir
         self.active_processes: dict[str, asyncio.subprocess.Process] = {}
         self.cancelled_run_ids: set[str] = set()
@@ -438,7 +440,7 @@ class OpenClawAdapter(AgentRuntimeAdapter):
             command = " ".join(shlex.quote(str(arg)) for arg in ["openclaw", *args])
             command = self._with_runtime_env(
                 command,
-                {"OPENCLAW_SKILLS_DIR": self.skills_dir} if self.skills_dir else None,
+                self._runtime_env(),
             )
             return ["wsl.exe", "--", "bash", "-lc", command]
         return [self.cli_path, *args]
@@ -446,7 +448,7 @@ class OpenClawAdapter(AgentRuntimeAdapter):
     def _build_shell_args(self, command: str) -> list[str]:
         command = self._with_runtime_env(
             command,
-            {"OPENCLAW_SKILLS_DIR": self.skills_dir} if self.skills_dir else None,
+            self._runtime_env(),
         )
         if os.name == "nt":
             return ["wsl.exe", "--", "bash", "-lc", command]
@@ -474,6 +476,13 @@ class OpenClawAdapter(AgentRuntimeAdapter):
             f"{extra_exports}"
             f"{command}"
         )
+
+    def _runtime_env(self) -> dict[str, str | None]:
+        return {
+            "HOME": self.home_dir,
+            "OPENCLAW_HOME": self.home_dir,
+            "OPENCLAW_SKILLS_DIR": self.skills_dir,
+        }
 
     def _reset_last_state(self) -> None:
         self.last_artifact_paths = []

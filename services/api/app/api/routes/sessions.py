@@ -25,6 +25,8 @@ from app.models import (
     Message,
 )
 from app.services import mock_store
+from app.services.adapter_limiter import acquire_adapter_capacity
+from app.services.agent_runtime_context import build_user_runtime_context
 from app.services.artifact_discovery import (
     create_artifacts_from_paths,
     create_artifacts_from_refs,
@@ -233,6 +235,159 @@ async def persist_message(
     await db.commit()
     await db.refresh(message)
     return message
+
+
+async def enqueue_agent_run_message(
+    db: AsyncSession,
+    session_id: str,
+    input_data: schemas.MessageCreate,
+    current_user,
+    resolved_skill_key: str | None,
+):
+    from app.api.routes.agent_runs import (
+        create_db_agent_run,
+        record_db_agent_run_event,
+        resolve_adapter_for_model,
+    )
+    from app.workers.agent_run_tasks import execute_agent_run_task
+
+    user_message = await persist_message(db, session_id, "user", input_data.content)
+    adapter_key, _ = await resolve_adapter_for_model(db, current_user, input_data.model_id)
+    run = await create_db_agent_run(
+        db,
+        session_id,
+        title=resolved_skill_key or "Agent Run",
+        status="queued",
+        progress=0,
+        adapter_key=adapter_key,
+    )
+    await record_db_agent_run_event(
+        db,
+        run,
+        event_type="queued",
+        label="Queued agent run",
+        status="queued",
+        progress=0,
+        step_status="pending",
+        payload={
+            "content": input_data.content,
+            "modelId": input_data.model_id,
+            "skillKey": resolved_skill_key,
+            "adapterKey": adapter_key,
+            "userMessageId": user_message.id,
+        },
+    )
+    execute_agent_run_task.apply_async((run.id,), queue=settings.agent_run_queue_name)
+    return user_message, run
+
+
+async def stream_queued_agent_run(
+    db: AsyncSession,
+    session_id: str,
+    input_data: schemas.MessageCreate,
+    current_user,
+    resolved_skill_key: str | None,
+):
+    from app.api.routes.agent_runs import TERMINAL_RUN_STATUSES
+
+    user_message, run = await enqueue_agent_run_message(
+        db,
+        session_id,
+        input_data,
+        current_user,
+        resolved_skill_key,
+    )
+    yield sse("user_message", to_message(user_message).model_dump(by_alias=True))
+    yield sse(
+        "run_started",
+        {
+            "runId": run.id,
+            "sessionId": session_id,
+            "status": run.status,
+            "progress": run.progress,
+        },
+    )
+
+    sent_event_ids: set[str] = set()
+    assistant_done_sent = False
+    run_id = run.id
+    while True:
+        db.expire_all()
+        run = await db.get(AgentRun, run_id)
+        if run is None:
+            raise RuntimeError("Queued agent run disappeared before completion.")
+        result = await db.execute(
+            select(AgentRunEvent)
+            .where(AgentRunEvent.run_id == run.id)
+            .order_by(AgentRunEvent.created_at.asc())
+        )
+        events = result.scalars().all()
+        for event in events:
+            if event.id in sent_event_ids:
+                continue
+            sent_event_ids.add(event.id)
+            payload = event.payload or {}
+            if (
+                event.event_type != "queued"
+                and payload.get("content")
+                and payload.get("messageId")
+            ):
+                yield sse(
+                    "assistant_delta",
+                    {
+                        "content": payload["content"],
+                        "messageId": payload["messageId"],
+                        "sessionId": session_id,
+                        "runId": run.id,
+                    },
+                )
+            if event.event_type == "artifact_created" and isinstance(payload.get("artifact"), dict):
+                yield sse(
+                    "artifact_created",
+                    {
+                        "artifact": payload["artifact"],
+                        "messageId": payload.get("messageId"),
+                        "sessionId": session_id,
+                        "runId": run.id,
+                    },
+                )
+            if event.event_type == "assistant_done":
+                done_payload = dict(payload)
+                if "message" not in done_payload and payload.get("messageId"):
+                    message = await db.get(Message, payload["messageId"])
+                    if message is not None:
+                        done_payload["message"] = to_message(message).model_dump(by_alias=True)
+                if "session" not in done_payload:
+                    conversation = await refresh_conversation(db, session_id)
+                    done_payload["session"] = to_session(conversation).model_dump(by_alias=True)
+                done_payload.setdefault("runId", run.id)
+                done_payload.setdefault("status", run.status)
+                yield sse("assistant_done", done_payload)
+                assistant_done_sent = True
+
+        if run.status in TERMINAL_RUN_STATUSES:
+            if not assistant_done_sent:
+                message_result = await db.execute(
+                    select(Message)
+                    .where(Message.conversation_id == session_id, Message.role == "assistant")
+                    .order_by(Message.created_at.desc())
+                    .limit(1)
+                )
+                message = message_result.scalar_one_or_none()
+                if message is not None:
+                    conversation = await refresh_conversation(db, session_id)
+                    yield sse(
+                        "assistant_done",
+                        {
+                            "message": to_message(message).model_dump(by_alias=True),
+                            "session": to_session(conversation).model_dump(by_alias=True),
+                            "runId": run.id,
+                            "status": run.status,
+                        },
+                    )
+            break
+        yield ": heartbeat\n\n"
+        await asyncio.sleep(settings.agent_run_event_poll_interval_seconds)
 
 
 @router.get("/folders", response_model=list[schemas.ConversationFolder])
@@ -534,6 +689,11 @@ async def stream_session_message(
 ) -> StreamingResponse:
     await get_conversation_or_404(db, session_id, current_user, require_write=True)
     resolved_skill_key = resolve_skill_key(input_data.content, input_data.skill_key)
+    if settings.agent_run_queue_enabled:
+        return StreamingResponse(
+            stream_queued_agent_run(db, session_id, input_data, current_user, resolved_skill_key),
+            media_type="text/event-stream",
+        )
 
     async def event_stream():
         run_started_at = datetime.now()
@@ -542,6 +702,7 @@ async def stream_session_message(
 
         assistant_messages: list[Message] = []
         adapter = None
+        adapter_capacity_lease = None
         run: AgentRun | None = None
         assistant_event_count = 0
         artifact_discovery_summary: dict[str, object] = {}
@@ -604,6 +765,27 @@ async def stream_session_message(
 
             if adapter is None:
                 raise RuntimeError("No agent runtime adapter is available.")
+
+            user_runtime_context = build_user_runtime_context(current_user)
+            adapter_capacity_lease = await acquire_adapter_capacity(
+                adapter_key,
+                run.id,
+                scope=user_runtime_context.adapter_lock_scope(),
+            )
+            await adapter_capacity_lease.__aenter__()
+            await record_db_agent_run_event(
+                db,
+                run,
+                event_type="adapter_capacity_acquired",
+                label=f"Acquired {adapter_key or 'agent'} adapter capacity.",
+                status="running",
+                progress=run.progress,
+                payload={
+                    "adapterKey": adapter_key,
+                    "adapterLockScope": user_runtime_context.adapter_lock_scope(),
+                    "userRuntimeRoot": str(user_runtime_context.root_dir),
+                },
+            )
 
             from agent_runtime.schemas import AgentRunCreate as AdapterAgentRunCreate
 
@@ -1152,6 +1334,9 @@ async def stream_session_message(
                     "status": "failed",
                 },
             )
+        finally:
+            if adapter_capacity_lease is not None:
+                await adapter_capacity_lease.__aexit__(None, None, None)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 

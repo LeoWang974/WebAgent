@@ -3,6 +3,7 @@ from typing import Annotated
 
 from fastapi import Depends, Header, HTTPException, Query, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -58,7 +59,15 @@ async def ensure_user(
         username=normalize_username(username),
     )
     db.add(user)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        result = await db.execute(select(User).where(User.email == email))
+        existing_user = result.scalar_one_or_none()
+        if existing_user is None:
+            raise
+        return existing_user
     await db.refresh(user)
     return user
 

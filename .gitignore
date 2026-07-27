@@ -24,6 +24,7 @@ dist/
 !.env.example
 !.env.local.example
 !.env.production.example
+!.env.docker.example
 
 # Logs
 *.log

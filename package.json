@@ -2,6 +2,7 @@
   "name": "webagent",
   "private": true,
   "version": "0.1.0",
+  "packageManager": "pnpm@11.10.0",
   "scripts": {
     "dev": "pnpm --filter web run dev",
     "dev:clean": "pnpm --filter web run dev:clean",
