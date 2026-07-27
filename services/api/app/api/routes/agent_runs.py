@@ -28,8 +28,8 @@ TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled", "disconnected"}
 STALE_RUN_GRACE_SECONDS = 30 * 60
 
 
-def _build_adapter(adapter_key: str, current_user: User):
-    runtime_context = build_user_runtime_context(current_user)
+def _build_adapter(adapter_key: str, current_user: User, conversation_id: str | None = None):
+    runtime_context = build_user_runtime_context(current_user, conversation_id)
     if adapter_key == "hermes" and HermesAdapter is not None:
         return HermesAdapter(
             hermes_path=settings.hermes_cli_path,
@@ -53,21 +53,22 @@ def _resolve_adapter(
     current_user: User,
     model_id: str | None = None,
     adapter_key: str | None = None,
+    conversation_id: str | None = None,
 ):
     if adapter_key in {"hermes", "openclaw"}:
-        return adapter_key, _build_adapter(adapter_key, current_user)
+        return adapter_key, _build_adapter(adapter_key, current_user, conversation_id)
     if model_id == "model_hermes":
-        return "hermes", _build_adapter("hermes", current_user)
+        return "hermes", _build_adapter("hermes", current_user, conversation_id)
     if model_id == "model_openclaw":
-        return "openclaw", _build_adapter("openclaw", current_user)
+        return "openclaw", _build_adapter("openclaw", current_user, conversation_id)
     if settings.agent_runtime_default == "openclaw":
-        adapter = _build_adapter("openclaw", current_user)
+        adapter = _build_adapter("openclaw", current_user, conversation_id)
         if adapter is not None:
             return "openclaw", adapter
-    adapter = _build_adapter("hermes", current_user)
+    adapter = _build_adapter("hermes", current_user, conversation_id)
     if adapter is not None:
         return "hermes", adapter
-    adapter = _build_adapter("openclaw", current_user)
+    adapter = _build_adapter("openclaw", current_user, conversation_id)
     if adapter is not None:
         return "openclaw", adapter
     return None, None
@@ -77,12 +78,22 @@ def _resolve_adapter_compat(
     current_user: User,
     model_id: str | None = None,
     adapter_key: str | None = None,
+    conversation_id: str | None = None,
 ):
     try:
-        return _resolve_adapter(current_user, model_id=model_id, adapter_key=adapter_key)
+        return _resolve_adapter(
+            current_user,
+            model_id=model_id,
+            adapter_key=adapter_key,
+            conversation_id=conversation_id,
+        )
     except TypeError as exc:
         message = str(exc)
-        if "current_user" not in message and "multiple values" not in message:
+        if (
+            "current_user" not in message
+            and "multiple values" not in message
+            and "conversation_id" not in message
+        ):
             raise
         return _resolve_adapter(model_id=model_id, adapter_key=adapter_key)
 
@@ -108,14 +119,27 @@ async def resolve_adapter_for_model(
     current_user: User,
     model_id: str | None = None,
     adapter_key: str | None = None,
+    conversation_id: str | None = None,
 ):
     if adapter_key:
-        return _resolve_adapter_compat(current_user, adapter_key=adapter_key)
+        return _resolve_adapter_compat(
+            current_user,
+            adapter_key=adapter_key,
+            conversation_id=conversation_id,
+        )
     if not model_id:
-        return _resolve_adapter_compat(current_user, model_id=model_id)
+        return _resolve_adapter_compat(
+            current_user,
+            model_id=model_id,
+            conversation_id=conversation_id,
+        )
 
     if model_id in {"model_hermes", "model_openclaw"}:
-        return _resolve_adapter_compat(current_user, model_id=model_id)
+        return _resolve_adapter_compat(
+            current_user,
+            model_id=model_id,
+            conversation_id=conversation_id,
+        )
 
     result = await db.execute(
         select(ModelConfig).where(
@@ -128,6 +152,7 @@ async def resolve_adapter_for_model(
         current_user,
         adapter_key=inferred_adapter_key,
         model_id=model_id,
+        conversation_id=conversation_id,
     )
 
 

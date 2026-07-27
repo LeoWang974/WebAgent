@@ -160,13 +160,14 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
             await _complete_plain_chat_with_sensenova(db, run, conversation, content)
             return
 
-        user_runtime_context = build_user_runtime_context(user)
+        user_runtime_context = build_user_runtime_context(user, conversation.id)
         run_workspace = run_workspace_dir(run.id, conversation.id, user.id)
         adapter_key, adapter = await resolve_adapter_for_model(
             db,
             user,
             model_id,
             adapter_key=run.adapter_key,
+            conversation_id=conversation.id,
         )
         run.adapter_key = adapter_key or run.adapter_key
         await record_db_agent_run_event(

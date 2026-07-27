@@ -73,9 +73,9 @@ export function MessageList() {
         {messages.map((message) => {
           const messageIndex = messages.findIndex((item) => item.id === message.id);
           const previousMessage = messageIndex > 0 ? messages[messageIndex - 1] : undefined;
-          const waitDurationMs = previousMessage
-            ? new Date(message.createdAt).getTime() -
-              new Date(previousMessage.createdAt).getTime()
+          const waitStartedAt = message.waitStartedAt ?? previousMessage?.createdAt;
+          const waitDurationMs = waitStartedAt
+            ? new Date(message.createdAt).getTime() - new Date(waitStartedAt).getTime()
             : undefined;
           const messageArtifacts = artifacts.filter((artifact) =>
             message.artifactIds?.includes(artifact.id),

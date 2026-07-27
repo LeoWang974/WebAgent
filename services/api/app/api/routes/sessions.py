@@ -252,7 +252,12 @@ async def enqueue_agent_run_message(
     from app.workers.agent_run_tasks import execute_agent_run_task
 
     user_message = await persist_message(db, session_id, "user", input_data.content)
-    adapter_key, _ = await resolve_adapter_for_model(db, current_user, input_data.model_id)
+    adapter_key, _ = await resolve_adapter_for_model(
+        db,
+        current_user,
+        input_data.model_id,
+        conversation_id=session_id,
+    )
     run = await create_db_agent_run(
         db,
         session_id,
@@ -594,6 +599,7 @@ async def send_session_message(
             db,
             current_user,
             input_data.model_id,
+            conversation_id=session_id,
         )
         runtime_content = await build_skill_runtime_content(
             db,
@@ -689,7 +695,7 @@ async def stream_session_message(
 ) -> StreamingResponse:
     await get_conversation_or_404(db, session_id, current_user, require_write=True)
     resolved_skill_key = resolve_skill_key(input_data.content, input_data.skill_key)
-    if settings.agent_run_queue_enabled:
+    if settings.agent_run_queue_enabled and resolved_skill_key is not None:
         return StreamingResponse(
             stream_queued_agent_run(db, session_id, input_data, current_user, resolved_skill_key),
             media_type="text/event-stream",
@@ -716,11 +722,54 @@ async def stream_session_message(
                 record_db_agent_run_event,
                 resolve_adapter_for_model,
             )
+            from app.services.agent_run_executor import _complete_plain_chat_with_sensenova
+
+            if resolved_skill_key is None and settings.sensenova_api_key:
+                run = await create_db_agent_run(
+                    db,
+                    session_id,
+                    title="Plain Chat",
+                    status="running",
+                    progress=5,
+                    adapter_key="sensenova",
+                )
+                yield sse(
+                    "run_started",
+                    {
+                        "runId": run.id,
+                        "sessionId": session_id,
+                        "status": run.status,
+                        "progress": run.progress,
+                    },
+                )
+                conversation = await refresh_conversation(db, session_id)
+                await _complete_plain_chat_with_sensenova(db, run, conversation, input_data.content)
+                result = await db.execute(
+                    select(AgentRunEvent)
+                    .where(AgentRunEvent.run_id == run.id)
+                    .order_by(AgentRunEvent.created_at.asc())
+                )
+                for event in result.scalars().all():
+                    payload = event.payload or {}
+                    if payload.get("content") and payload.get("messageId"):
+                        yield sse(
+                            "assistant_delta",
+                            {
+                                "content": payload["content"],
+                                "messageId": payload["messageId"],
+                                "sessionId": session_id,
+                                "runId": run.id,
+                            },
+                        )
+                    if event.event_type == "assistant_done":
+                        yield sse("assistant_done", payload)
+                return
 
             adapter_key, adapter = await resolve_adapter_for_model(
                 db,
                 current_user,
                 input_data.model_id,
+                conversation_id=session_id,
             )
             runtime_content = await build_skill_runtime_content(
                 db,
@@ -766,7 +815,7 @@ async def stream_session_message(
             if adapter is None:
                 raise RuntimeError("No agent runtime adapter is available.")
 
-            user_runtime_context = build_user_runtime_context(current_user)
+            user_runtime_context = build_user_runtime_context(current_user, session_id)
             adapter_capacity_lease = await acquire_adapter_capacity(
                 adapter_key,
                 run.id,

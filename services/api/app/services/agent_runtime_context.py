@@ -22,8 +22,10 @@ def runtime_root() -> Path:
     return root
 
 
-def runtime_user_dir(user: User) -> Path:
-    path = runtime_root() / safe_runtime_segment(user.id, "user")
+def runtime_conversation_dir(user: User, conversation_id: str | None = None) -> Path:
+    user_segment = safe_runtime_segment(user.id, "user")
+    conversation_segment = safe_runtime_segment(conversation_id or "default", "conversation")
+    path = runtime_root() / user_segment / "conversations" / conversation_segment
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -60,6 +62,7 @@ def shell_path(path: Path) -> str:
 @dataclass(frozen=True)
 class UserRuntimeContext:
     user_id: str
+    conversation_id: str
     root_dir: Path
     hermes_home: Path
     hermes_skills_dir: Path
@@ -67,7 +70,9 @@ class UserRuntimeContext:
     openclaw_skills_dir: Path
 
     def adapter_lock_scope(self) -> str:
-        return f"user:{safe_runtime_segment(self.user_id)}"
+        user_segment = safe_runtime_segment(self.user_id)
+        conversation_segment = safe_runtime_segment(self.conversation_id, "conversation")
+        return f"conversation:{user_segment}:{conversation_segment}"
 
     def hermes_home_for_shell(self) -> str:
         return shell_path(self.hermes_home)
@@ -82,8 +87,11 @@ class UserRuntimeContext:
         return shell_path(self.openclaw_skills_dir)
 
 
-def build_user_runtime_context(user: User) -> UserRuntimeContext:
-    root = runtime_user_dir(user)
+def build_user_runtime_context(
+    user: User,
+    conversation_id: str | None = None,
+) -> UserRuntimeContext:
+    root = runtime_conversation_dir(user, conversation_id)
     hermes_home = root / "hermes-home"
     openclaw_home = root / "openclaw-home"
     hermes_home.mkdir(parents=True, exist_ok=True)
@@ -111,6 +119,7 @@ def build_user_runtime_context(user: User) -> UserRuntimeContext:
 
     return UserRuntimeContext(
         user_id=user.id,
+        conversation_id=conversation_id or "default",
         root_dir=root,
         hermes_home=hermes_home,
         hermes_skills_dir=hermes_skills_dir,

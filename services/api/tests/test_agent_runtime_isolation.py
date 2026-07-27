@@ -14,7 +14,7 @@ def test_safe_runtime_segment_strips_path_unsafe_characters():
     assert safe_runtime_segment("../") == "user"
 
 
-def test_build_user_runtime_context_creates_per_user_dirs(
+def test_build_user_runtime_context_creates_per_conversation_dirs(
     monkeypatch,
     tmp_path: Path,
 ):
@@ -34,20 +34,20 @@ def test_build_user_runtime_context_creates_per_user_dirs(
     monkeypatch.setattr(settings, "openclaw_skills_dir", str(openclaw_skills))
 
     user = SimpleNamespace(id="user/one", username="Test User")
-    context = build_user_runtime_context(user)
+    context = build_user_runtime_context(user, "conversation/one")
 
-    assert context.root_dir == runtime_root / "user-one"
+    assert context.root_dir == runtime_root / "user-one" / "conversations" / "conversation-one"
     assert context.hermes_home.exists()
     assert context.openclaw_home.exists()
     assert (context.hermes_skills_dir / "skill.txt").read_text(encoding="utf-8") == "hermes skill"
     openclaw_skill = (context.openclaw_skills_dir / "skill.txt").read_text(encoding="utf-8")
     assert openclaw_skill == "openclaw skill"
-    assert context.adapter_lock_scope() == "user:user-one"
+    assert context.adapter_lock_scope() == "conversation:user-one:conversation-one"
 
 
 def test_adapter_lock_scope_respects_configured_scope(monkeypatch):
     monkeypatch.setattr(settings, "agent_adapter_limit_scope", "per_user")
-    assert adapter_lock_scope("user:abc") == "user:abc"
+    assert adapter_lock_scope("conversation:user:abc") == "conversation:user:abc"
 
     monkeypatch.setattr(settings, "agent_adapter_limit_scope", "global")
-    assert adapter_lock_scope("user:abc") == "global"
+    assert adapter_lock_scope("conversation:user:abc") == "global"
