@@ -25,10 +25,7 @@ function runtimeStatusText(model: { isAvailable?: boolean; runtimeStatus?: { mes
   if (model.runtimeStatus?.message) {
     return model.runtimeStatus.message;
   }
-  if (model.isAvailable === false) {
-    return "连接不可用";
-  }
-  return "连接可用";
+  return model.isAvailable === false ? "连接不可用" : "连接可用";
 }
 
 function runtimeHealthSummary(value: unknown) {
@@ -94,14 +91,15 @@ export function ModelSettings() {
 
   function handleAddModel() {
     const trimmedName = name.trim();
+    const trimmedKey = apiKey.trim();
 
     if (!trimmedName) {
       return;
     }
 
     void addModel({
+      apiKey: trimmedKey || undefined,
       baseUrl: baseUrl.trim() || undefined,
-      maskedApiKey: apiKey.trim() ? "sk-****" : undefined,
       name: trimmedName,
       provider,
     });
@@ -321,7 +319,6 @@ export function ModelSettings() {
                 </button>
                 <button
                   className="flex size-7 items-center justify-center rounded-md border bg-white text-muted-foreground hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
-                  disabled={model.isDefault}
                   onClick={() => void deleteModel(model.id)}
                   title={t("deleteModel")}
                   type="button"

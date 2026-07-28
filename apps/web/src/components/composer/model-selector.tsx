@@ -4,18 +4,38 @@ import { useChatStore } from "@/stores";
 import { useI18n } from "@/lib/i18n";
 import type { ModelConfig } from "@/types";
 
-function runtimeLabel(model?: ModelConfig) {
-  if (!model) {
-    return "未知";
+type AgentKey = "hermes" | "openclaw";
+
+const AGENTS: Array<{ key: AgentKey; label: string }> = [
+  { key: "hermes", label: "Hermes" },
+  { key: "openclaw", label: "OpenClaw" },
+];
+
+function isRuntimeAdapterModel(model: ModelConfig) {
+  const marker = `${model.name} ${model.baseUrl ?? ""}`.toLowerCase();
+  return (
+    marker.includes("openclaw") ||
+    marker.includes("hermes") ||
+    marker.includes("18789") ||
+    marker.includes("8642")
+  );
+}
+
+function runtimeLabel(agentKey: AgentKey, models: ModelConfig[]) {
+  const runtimeModel = models.find((model) => {
+    const marker = `${model.name} ${model.baseUrl ?? ""}`.toLowerCase();
+    return agentKey === "openclaw"
+      ? marker.includes("openclaw") || marker.includes("18789")
+      : marker.includes("hermes") || marker.includes("8642");
+  });
+
+  if (!runtimeModel) {
+    return `${agentKey} 状态未知`;
   }
-  const adapterKey = model.runtimeStatus?.adapterKey;
-  if (adapterKey === "openclaw") {
-    return model.isAvailable ? "OpenClaw Gateway 已连接" : "OpenClaw Gateway 未连接";
+  if (runtimeModel.isAvailable === false) {
+    return runtimeModel.runtimeStatus?.message ?? `${runtimeModel.name} 不可用`;
   }
-  if (adapterKey === "hermes") {
-    return model.isAvailable ? "Hermes 可用" : "Hermes 不可用";
-  }
-  return model.isAvailable === false ? "不可用" : "可用";
+  return runtimeModel.runtimeStatus?.message ?? `${runtimeModel.name} 可用`;
 }
 
 function optionLabel(model: ModelConfig, defaultLabel: string) {
@@ -23,8 +43,8 @@ function optionLabel(model: ModelConfig, defaultLabel: string) {
   if (model.isDefault) {
     parts.push(`(${defaultLabel})`);
   }
-  if (model.runtimeStatus?.adapterKey || model.isAvailable === false) {
-    parts.push(model.isAvailable ? "已连接" : "未连接");
+  if (model.isAvailable === false) {
+    parts.push("不可用");
   }
   return parts.join(" ");
 }
@@ -33,30 +53,54 @@ export function ModelSelector() {
   const { t } = useI18n();
   const loading = useChatStore((state) => state.loading);
   const models = useChatStore((state) => state.models);
+  const selectedAgentKey = useChatStore((state) => state.selectedAgentKey);
   const selectedModelId = useChatStore((state) => state.selectedModelId);
+  const selectAgent = useChatStore((state) => state.selectAgent);
   const selectModel = useChatStore((state) => state.selectModel);
-  const selectedModel = models.find((model) => model.id === selectedModelId);
-  const isConnected = selectedModel?.isAvailable !== false;
+  const apiModels = models.filter((model) => !isRuntimeAdapterModel(model));
+  const selectedModel = apiModels.find((model) => model.id === selectedModelId);
+  const agentAvailable =
+    !models.some((model) => {
+      const marker = `${model.name} ${model.baseUrl ?? ""}`.toLowerCase();
+      const matches =
+        selectedAgentKey === "openclaw"
+          ? marker.includes("openclaw") || marker.includes("18789")
+          : marker.includes("hermes") || marker.includes("8642");
+      return matches && model.isAvailable === false;
+    });
 
   return (
     <div className="flex items-center gap-1.5">
       <span
         className={`size-2 rounded-full ${
-          isConnected ? "bg-emerald-500" : "bg-amber-500"
+          agentAvailable ? "bg-emerald-500" : "bg-amber-500"
         }`}
-        title={selectedModel?.runtimeStatus?.message ?? runtimeLabel(selectedModel)}
+        title={runtimeLabel(selectedAgentKey, models)}
       />
       <select
+        className="h-8 max-w-[110px] rounded-md border bg-background px-2 text-xs text-muted-foreground outline-none hover:text-foreground disabled:opacity-50"
+        disabled={loading}
+        onChange={(event) => selectAgent(event.target.value as AgentKey)}
+        title="选择 Agent 运行时"
+        value={selectedAgentKey}
+      >
+        {AGENTS.map((agent) => (
+          <option key={agent.key} value={agent.key}>
+            {agent.label}
+          </option>
+        ))}
+      </select>
+      <select
         className="h-8 max-w-[190px] rounded-md border bg-background px-2 text-xs text-muted-foreground outline-none hover:text-foreground disabled:opacity-50"
-        disabled={loading || models.length === 0}
+        disabled={loading || apiModels.length === 0}
         onChange={(event) => selectModel(event.target.value)}
-        title={runtimeLabel(selectedModel)}
+        title={selectedModel?.baseUrl ?? selectedModel?.name ?? t("loadingModels")}
         value={selectedModelId ?? ""}
       >
-        {models.length === 0 ? (
+        {apiModels.length === 0 ? (
           <option value="">{t("loadingModels")}</option>
         ) : null}
-        {models.map((model) => (
+        {apiModels.map((model) => (
           <option key={model.id} value={model.id}>
             {optionLabel(model, t("defaultModel"))}
           </option>

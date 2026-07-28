@@ -4,11 +4,11 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from agent_runtime.schemas import AgentArtifactRef, AgentRunEvent, AgentRunStep
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from agent_runtime.schemas import AgentArtifactRef, AgentRunEvent, AgentRunStep
 from app.api.routes.sessions import persist_discovered_artifacts
 from app.core.config import settings
 from app.core.security import create_access_token
@@ -545,12 +545,12 @@ async def test_agent_run_sse_persists_events_and_artifact(
     report_path.write_text("# SSE 报告\n\n已生成。", encoding="utf-8")
     fake_adapter = FakeStreamingAdapter(str(report_path))
 
-    def fake_resolve_adapter(model_id=None, adapter_key=None):
+    async def fake_resolve_adapter_for_model(*args, **kwargs):
         return "hermes", fake_adapter
 
     monkeypatch.setattr(
-        "app.api.routes.agent_runs._resolve_adapter",
-        fake_resolve_adapter,
+        "app.api.routes.agent_runs.resolve_adapter_for_model",
+        fake_resolve_adapter_for_model,
     )
 
     session_response = await api_client.post(
@@ -609,12 +609,12 @@ async def test_raw_activity_heartbeat_does_not_create_assistant_message(
 ):
     fake_adapter = FakeRawActivityAdapter()
 
-    def fake_resolve_adapter(model_id=None, adapter_key=None):
+    async def fake_resolve_adapter_for_model(*args, **kwargs):
         return "hermes", fake_adapter
 
     monkeypatch.setattr(
-        "app.api.routes.agent_runs._resolve_adapter",
-        fake_resolve_adapter,
+        "app.api.routes.agent_runs.resolve_adapter_for_model",
+        fake_resolve_adapter_for_model,
     )
 
     async def fake_discover_artifacts_with_retry(*args, **kwargs):
@@ -645,7 +645,8 @@ async def test_raw_activity_heartbeat_does_not_create_assistant_message(
     events = parse_sse_events(response.text)
     event_names = [name for name, _ in events]
     assert "assistant_delta" not in event_names
-    done_event = next(data for name, data in events if name == "assistant_done")
+    done_event = next((data for name, data in events if name == "assistant_done"), None)
+    assert done_event is not None, response.text
 
     async with db_sessionmaker() as db:
         messages = (
@@ -754,12 +755,12 @@ async def test_agent_run_stream_idle_timeout_records_diagnostics(
 ):
     fake_adapter = FakeHangingAdapter()
 
-    def fake_resolve_adapter(model_id=None, adapter_key=None):
+    async def fake_resolve_adapter_for_model(*args, **kwargs):
         return "hermes", fake_adapter
 
     monkeypatch.setattr(
-        "app.api.routes.agent_runs._resolve_adapter",
-        fake_resolve_adapter,
+        "app.api.routes.agent_runs.resolve_adapter_for_model",
+        fake_resolve_adapter_for_model,
     )
     previous_idle_timeout = settings.agent_run_idle_timeout_seconds
     previous_overall_timeout = settings.agent_run_overall_timeout_seconds
@@ -814,15 +815,52 @@ async def test_short_chat_fast_closes_after_first_response(
     db_sessionmaker: async_sessionmaker[AsyncSession],
     monkeypatch: pytest.MonkeyPatch,
 ):
-    fake_adapter = FakeShortChatAdapter()
+    async def fake_complete_plain_chat(db, run, conversation, content):
+        from app.api.routes.agent_runs import finish_db_agent_run, record_db_agent_run_event
+        from app.api.routes.sessions import persist_message
 
-    def fake_resolve_adapter(model_id=None, adapter_key=None):
-        return "hermes", fake_adapter
+        assistant_message = await persist_message(
+            db,
+            conversation.id,
+            "assistant",
+            "Hello, how can I help?",
+        )
+        await record_db_agent_run_event(
+            db,
+            run,
+            event_type="stage_update",
+            label=assistant_message.content,
+            status="running",
+            progress=90,
+            payload={
+                "content": assistant_message.content,
+                "directPlainChat": True,
+                "messageId": assistant_message.id,
+            },
+        )
+        await finish_db_agent_run(
+            db,
+            run,
+            status="completed",
+            label="Assistant response completed",
+            output=assistant_message.content,
+        )
+        await record_db_agent_run_event(
+            db,
+            run,
+            event_type="assistant_done",
+            label="Assistant response completed",
+            status="completed",
+            progress=100,
+            payload={"messageId": assistant_message.id, "status": "completed"},
+        )
 
     monkeypatch.setattr(
-        "app.api.routes.agent_runs._resolve_adapter",
-        fake_resolve_adapter,
+        "app.services.agent_run_executor._complete_plain_chat_with_sensenova",
+        fake_complete_plain_chat,
     )
+    monkeypatch.setattr(settings, "sensenova_api_key", "test-api-key")
+    monkeypatch.setattr(settings, "sensenova_base_url", "https://example.test/v1")
 
     session_response = await api_client.post(
         "/api/sessions",
@@ -834,7 +872,7 @@ async def test_short_chat_fast_closes_after_first_response(
     started_at = datetime.now(UTC)
     response = await api_client.post(
         f"/api/sessions/{session_id}/messages/stream",
-        json={"content": "你好", "modelId": "model_hermes"},
+        json={"content": "hello", "modelId": "model_hermes"},
         headers=auth_headers["owner"],
     )
     elapsed = (datetime.now(UTC) - started_at).total_seconds()
@@ -843,12 +881,12 @@ async def test_short_chat_fast_closes_after_first_response(
 
     events = parse_sse_events(response.text)
     event_names = [name for name, _ in events]
-    assert event_names.count("assistant_delta") == 1
+    assert event_names.count("assistant_delta") == 1, response.text
     assert "artifact_created" not in event_names
-    done_event = next(data for name, data in events if name == "assistant_done")
+    done_event = next((data for name, data in events if name == "assistant_done"), None)
+    assert done_event is not None, response.text
     assert done_event["status"] == "completed"
-    assert done_event["message"]["content"] == "你好，有什么可以帮你的？"
-    assert fake_adapter.cancelled is True
+    assert done_event["message"]["content"] == "Hello, how can I help?"
 
     async with db_sessionmaker() as db:
         run = await db.get(AgentRun, done_event["runId"])
@@ -860,10 +898,7 @@ async def test_short_chat_fast_closes_after_first_response(
             .all()
         )
         assert not any(event.event_type == "diagnostic" for event in run_events)
-        fast_close_event = next(
-            event for event in run_events if (event.payload or {}).get("shortChatFastClose") is True
-        )
-        assert fast_close_event.payload["artifactDiscoverySkipped"] is True
+        assert any((event.payload or {}).get("directPlainChat") is True for event in run_events)
 
 
 @pytest.mark.asyncio

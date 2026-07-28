@@ -1,4 +1,4 @@
-import { apiClient, getAccessToken } from "../api-client";
+import { API_BASE_URL, apiClient, getAccessToken } from "../api-client";
 import { parseSseEvents, parseSseJson, splitSseBuffer } from "../sse-parser";
 import type {
   AgentRun,
@@ -27,9 +27,6 @@ import type {
   UploadFileInput,
   WebAgentApiAdapter,
 } from "./types";
-
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
 function persistAuth(result: AuthResult) {
   if (typeof window !== "undefined") {
@@ -64,6 +61,7 @@ export const fastApiAdapter: WebAgentApiAdapter = {
   createAgentRun(input: CreateAgentRunInput) {
     return apiClient<AgentRun>("/api/agent-runs", {
       body: JSON.stringify({
+        adapter_key: input.adapterKey,
         content: input.content,
         model_id: input.modelId,
         session_id: input.sessionId,
@@ -186,6 +184,7 @@ export const fastApiAdapter: WebAgentApiAdapter = {
       `/api/sessions/${input.sessionId}/messages`,
       {
         body: JSON.stringify({
+          adapter_key: input.adapterKey,
           content: input.content,
           model_id: input.modelId,
           skill_key: input.skillKey,
@@ -203,6 +202,7 @@ export const fastApiAdapter: WebAgentApiAdapter = {
       `${API_BASE_URL}/api/sessions/${input.sessionId}/messages/stream`,
       {
         body: JSON.stringify({
+          adapter_key: input.adapterKey,
           content: input.content,
           model_id: input.modelId,
           skill_key: input.skillKey,

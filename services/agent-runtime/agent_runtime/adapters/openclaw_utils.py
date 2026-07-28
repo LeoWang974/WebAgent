@@ -31,8 +31,9 @@ OPENCLAW_SKILL_MAPPING = {
         "name": "OpenClaw presentation generation",
         "capability": "presentation",
         "instruction": (
-            "Run OpenClaw's presentation generation workflow. Use the most relevant source report "
-            "or HTML content, generate slide pages, and export a PPTX deliverable when possible."
+            "Run OpenClaw's presentation generation workflow. Prefer the sn-ppt-workbench skill "
+            "when it is available. Use the most relevant source report or HTML content, generate "
+            "slide pages, and export a PPTX deliverable when possible."
         ),
         "artifact_type_hint": "ppt_deck and optional html_page fallback",
     },

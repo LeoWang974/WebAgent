@@ -8,7 +8,9 @@ def test_hermes_wsl_command_sources_runtime_env():
 
     command = wrapper._build_wsl_command(["/home/demo/.local/bin/hermes", "tools", "list"])
 
-    assert "/home/demo/.hermes/.env" in command
+    assert "~/.hermes/.env" in command
+    assert ".hermes/.env" in command
+    assert "--noprofile --norc" in command
     assert "while IFS= read -r __line" in command
     assert "export \"$__line\"" in command
     assert "\"$__key\" != PATH" in command
@@ -18,7 +20,9 @@ def test_hermes_chat_command_keeps_prompt_out_of_shell():
     wrapper = HermesCliWrapper(hermes_home="/home/demo/.hermes", wsl_distribution="Ubuntu")
 
     command = wrapper._build_chat_command(
-        "请使用 sn-deep-research 调研《全球主题乐园竞争格局》，重点分析 Disney's model。",
+        "\u8bf7\u4f7f\u7528 sn-deep-research \u8c03\u7814"
+        "\u300a\u5168\u7403\u4e3b\u9898\u4e50\u56ed\u7ade\u4e89\u683c\u5c40\u300b"
+        "\uff0c\u91cd\u70b9\u5206\u6790 Disney's model\u3002",
         skills="sn-research-report",
         toolsets="web,terminal,file",
         run_id="run_quote_test",
@@ -34,16 +38,27 @@ def test_hermes_chat_exec_args_avoid_windows_shell_quoting():
     wrapper = HermesCliWrapper(hermes_home="/home/demo/.hermes", wsl_distribution="Ubuntu")
 
     args = wrapper._build_chat_exec_args(
-        "请使用 sn-deep-research 调研《全球主题乐园竞争格局》，重点分析 Disney's model。",
+        "\u8bf7\u4f7f\u7528 sn-deep-research \u8c03\u7814"
+        "\u300a\u5168\u7403\u4e3b\u9898\u4e50\u56ed\u7ade\u4e89\u683c\u5c40\u300b"
+        "\uff0c\u91cd\u70b9\u5206\u6790 Disney's model\u3002",
         skills="sn-research-report",
         toolsets="web,terminal,file",
         run_id="run_exec_quote_test",
     )
 
     if os_name == "nt":
-        assert args[:6] == ["wsl.exe", "-d", "Ubuntu", "--", "bash", "-lc"]
+        assert args[:8] == [
+            "wsl.exe",
+            "-d",
+            "Ubuntu",
+            "--",
+            "bash",
+            "--noprofile",
+            "--norc",
+            "-c",
+        ]
     else:
-        assert args[:2] == ["bash", "-lc"]
+        assert args[:4] == ["bash", "--noprofile", "--norc", "-c"]
     assert "Disney's model" not in " ".join(args)
     assert "python3 -c" in args[-1]
     assert "run_exec_quote_test.txt" in args[-1]

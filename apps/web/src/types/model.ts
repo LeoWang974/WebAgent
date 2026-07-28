@@ -9,6 +9,7 @@ export interface ModelRuntimeStatus {
 }
 
 export interface ModelConfig {
+  apiKey?: string;
   baseUrl?: string;
   id: string;
   isAvailable?: boolean;

@@ -55,7 +55,7 @@ For long-running service management, run the uvicorn command through `systemd`,
 ```bash
 pnpm install
 pnpm --filter web build
-pnpm --filter web exec next start --port 3002
+pnpm --filter web exec next start -H 0.0.0.0 --port 3000
 ```
 
 Set `NEXT_PUBLIC_API_BASE_URL` to the public HTTPS API origin used by the
@@ -65,7 +65,7 @@ browser, for example `https://api.example.com`.
 
 Recommended public layout:
 
-- `https://app.example.com` -> Next.js on `127.0.0.1:3002`
+- `https://app.example.com` -> Next.js on `127.0.0.1:3000`
 - `https://api.example.com` -> FastAPI on `127.0.0.1:8010`
 
 Set backend CORS accordingly:

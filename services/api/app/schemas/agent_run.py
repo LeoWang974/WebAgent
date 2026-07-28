@@ -42,6 +42,7 @@ class AgentRun(ApiModel):
 
 
 class AgentRunCreate(ApiModel):
+    adapter_key: str | None = None
     content: str
     model_id: str | None = None
     session_id: str

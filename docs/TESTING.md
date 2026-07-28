@@ -11,6 +11,30 @@ cd services\api
 .\.venv\Scripts\python.exe -m pytest
 ```
 
+For day-to-day work, prefer the split runner from the repository root. It avoids
+waiting on one opaque full suite and prints the slowest tests in each group:
+
+```powershell
+.\scripts\test-api.ps1 -Group unit
+.\scripts\test-api.ps1 -Group integration
+.\scripts\test-api.ps1 -Group all
+```
+
+On Linux/CCI:
+
+```bash
+./scripts/test-api.sh unit
+./scripts/test-api.sh integration
+./scripts/test-api.sh all
+```
+
+Current grouping:
+
+- `unit`: adapter parsing, artifact discovery, model runtime config, runtime
+  context, cleanup, skill resolution/update, and protocol helpers.
+- `integration`: ASGI API flows, Agent Run SSE persistence, permissions,
+  sharing, cancellation, timeout, and runtime isolation.
+
 Current backend coverage:
 
 - `tests/test_api_integration.py`
@@ -89,8 +113,10 @@ pnpm --filter web run clean
 Before committing a stable checkpoint:
 
 ```powershell
+.\scripts\test-api.ps1 -Group unit
+.\scripts\test-api.ps1 -Group integration
+
 cd services\api
-.\.venv\Scripts\python.exe -m pytest
 .\.venv\Scripts\python.exe -m compileall -q app ..\agent-runtime\agent_runtime
 .\.venv\Scripts\python.exe -m ruff check app ..\agent-runtime\agent_runtime tests --select F401,F841
 

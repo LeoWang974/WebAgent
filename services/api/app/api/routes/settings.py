@@ -1,14 +1,14 @@
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import schemas
 from app.api.dependencies import CurrentUser, DbSession
 from app.core.security import create_access_token, hash_password, verify_password
-from app.models import ModelConfig, SkillConfig, SkillVersion, User, UserSettings
+from app.models import AgentRun, ModelConfig, SkillConfig, SkillVersion, User, UserSettings
 from app.services.persistence import (
     get_user_by_username,
     normalize_email,
@@ -106,6 +106,13 @@ def get_input_value(input_data: dict[str, Any], camel_key: str, snake_key: str, 
     if snake_key in input_data:
         return input_data[snake_key]
     return default
+
+
+def is_runtime_adapter_model(model: ModelConfig) -> bool:
+    marker = f"{model.name or ''} {model.base_url or ''}".lower()
+    return not model.encrypted_api_key and (
+        "openclaw" in marker or "hermes" in marker or "18789" in marker or "8642" in marker
+    )
 
 
 def to_user_schema(user: User) -> schemas.User:
@@ -209,16 +216,30 @@ async def user_developer_mode(db: AsyncSession, user: User) -> bool:
 async def ensure_default_models(db: AsyncSession, user: User) -> None:
     result = await db.execute(select(ModelConfig).where(ModelConfig.user_id == user.id))
     existing_models = list(result.scalars().all())
-    if existing_models:
-        for model in existing_models:
-            if model.name == "OpenClaw Agent" and model.base_url == "http://localhost:8643":
-                model.base_url = "ws://127.0.0.1:18789"
-        await db.commit()
-        return
+    existing_by_name = {model.name: model for model in existing_models}
+    changed = False
+
+    for model in existing_models:
+        if model.name == "OpenClaw Agent" and model.base_url == "http://localhost:8643":
+            model.base_url = "ws://127.0.0.1:18789"
+            changed = True
 
     for item in DEFAULT_MODELS:
-        db.add(ModelConfig(user_id=user.id, **item))
-    await db.commit()
+        model = existing_by_name.get(item["name"])
+        if model is None:
+            db.add(ModelConfig(user_id=user.id, **item))
+            changed = True
+            continue
+
+        if is_runtime_adapter_model(model):
+            for key in ("provider", "base_url", "is_available"):
+                value = item.get(key)
+                if getattr(model, key) != value:
+                    setattr(model, key, value)
+                    changed = True
+
+    if changed:
+        await db.commit()
 
 
 async def list_user_models(db: AsyncSession, user: User) -> list[ModelConfig]:
@@ -435,6 +456,11 @@ async def delete_model(
 ) -> None:
     model = await get_user_model(db, current_user, model_id)
     was_default = model.is_default
+    await db.execute(
+        update(AgentRun)
+        .where(AgentRun.model_config_id == model.id)
+        .values(model_config_id=None)
+    )
     await db.delete(model)
     await db.commit()
 

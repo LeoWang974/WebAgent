@@ -8,7 +8,11 @@ INSECURE_JWT_SECRETS = {"", "change-me", "change-me-in-local-env"}
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=(".env", "services/api/.env"),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     access_token_expire_minutes: int = 60 * 24 * 7
     allow_dev_auth_fallback: bool = True
@@ -32,8 +36,8 @@ class Settings(BaseSettings):
     openclaw_command_timeout_seconds: int = 600
     openclaw_mode: str = "gateway_cli"
     hermes_base_url: str = "http://localhost:8642"
-    hermes_cli_path: str = "/home/zhuchangbiaozhu_xyl/.local/bin/hermes"
-    hermes_home: str = "/home/zhuchangbiaozhu_xyl/.hermes"
+    hermes_cli_path: str = "hermes"
+    hermes_home: str = "~/.hermes"
     hermes_skills_dir: str | None = None
     hermes_wsl_distribution: str = "Ubuntu"
     openclaw_skills_dir: str | None = None
@@ -64,7 +68,7 @@ class Settings(BaseSettings):
     skills_update_repo_url: str = "https://github.com/OpenSenseNova/SenseNova-Skills.git"
     skills_update_branch: str | None = None
     skills_update_cache_dir: str | None = None
-    skills_update_source_subdir: str = "."
+    skills_update_source_subdir: str = "skills"
     skills_update_timezone: str = "Asia/Shanghai"
     skills_update_weekday: int = 4
     skills_update_hour: int = 17

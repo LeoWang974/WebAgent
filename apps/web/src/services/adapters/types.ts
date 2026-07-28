@@ -47,6 +47,7 @@ export interface AuthResult {
 }
 
 export interface SendMessageInput {
+  adapterKey?: "hermes" | "openclaw";
   content: string;
   modelId?: string;
   signal?: AbortSignal;
@@ -105,6 +106,7 @@ export interface UpdateSessionInput {
 }
 
 export interface CreateAgentRunInput {
+  adapterKey?: "hermes" | "openclaw";
   content: string;
   modelId?: string;
   sessionId: string;

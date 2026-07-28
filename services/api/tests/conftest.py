@@ -75,17 +75,28 @@ async def api_client(
     db_sessionmaker: async_sessionmaker[AsyncSession],
     seeded_users: dict[str, User],
 ) -> AsyncGenerator[AsyncClient, None]:
+    previous_agent_run_queue_enabled = settings.agent_run_queue_enabled
+    previous_allow_dev_auth_fallback = settings.allow_dev_auth_fallback
+    previous_cleanup_enabled = settings.cleanup_enabled
+    previous_skills_update_enabled = settings.skills_update_enabled
     settings.cleanup_enabled = False
     settings.skills_update_enabled = False
     settings.allow_dev_auth_fallback = True
-    app = create_app()
+    settings.agent_run_queue_enabled = False
+    try:
+        app = create_app()
 
-    async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
-        async with db_sessionmaker() as session:
-            yield session
+        async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
+            async with db_sessionmaker() as session:
+                yield session
 
-    app.dependency_overrides[get_db] = override_get_db
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
-        yield client
-    app.dependency_overrides.clear()
+        app.dependency_overrides[get_db] = override_get_db
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+            yield client
+        app.dependency_overrides.clear()
+    finally:
+        settings.agent_run_queue_enabled = previous_agent_run_queue_enabled
+        settings.allow_dev_auth_fallback = previous_allow_dev_auth_fallback
+        settings.cleanup_enabled = previous_cleanup_enabled
+        settings.skills_update_enabled = previous_skills_update_enabled

@@ -2,7 +2,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from agent_runtime.schemas import AgentArtifactRef
-
 from app.services import mock_store
 from app.services.artifact_discovery import (
     _candidate_roots,

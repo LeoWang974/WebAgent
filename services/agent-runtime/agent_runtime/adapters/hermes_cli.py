@@ -81,16 +81,17 @@ class HermesStreamEvent:
 class HermesCliWrapper:
     def __init__(
         self,
-        hermes_path: str = "/home/zhuchangbiaozhu_xyl/.local/bin/hermes",
-        hermes_home: str = "/home/zhuchangbiaozhu_xyl/.hermes",
+        hermes_path: str = "hermes",
+        hermes_home: str = "~/.hermes",
         wsl_distribution: str = "Ubuntu",
     ):
         self.hermes_path = hermes_path
-        self.hermes_home = hermes_home
+        self.hermes_home = str(Path(hermes_home).expanduser())
         self.wsl_distribution = wsl_distribution
         self._env = {
-            "HERMES_HOME": hermes_home,
+            "HERMES_HOME": self.hermes_home,
             "HERMES_QUIET": "1",
+            "HOME": self.hermes_home,
         }
         self.last_artifact_paths: list[str] = []
         self.last_artifacts: list[dict[str, str | None]] = []
@@ -113,7 +114,14 @@ class HermesCliWrapper:
         command = self._with_runtime_env(f"{env_str} {quoted_args}".strip())
         if use_pty:
             command = f"script -q -e -c {shlex.quote(command)} /dev/null"
-        return f"wsl -d {shlex.quote(self.wsl_distribution)} -- bash -lc {shlex.quote(command)}"
+        return (
+            f"wsl -d {shlex.quote(self.wsl_distribution)} -- "
+            f"bash --noprofile --norc -c {shlex.quote(command)}"
+        )
+
+    @staticmethod
+    def _bash_exec_args(command: str) -> list[str]:
+        return ["bash", "--noprofile", "--norc", "-c", command]
 
     def _with_runtime_env(self, command: str) -> str:
         env_path = PurePosixPath(self.hermes_home) / ".env"
@@ -178,8 +186,11 @@ class HermesCliWrapper:
             run_id=run_id,
         )
         if os.name != "nt":
-            return command
-        return f"wsl -d {shlex.quote(self.wsl_distribution)} -- bash -lc {shlex.quote(command)}"
+            return " ".join(shlex.quote(part) for part in self._bash_exec_args(command))
+        return (
+            f"wsl -d {shlex.quote(self.wsl_distribution)} -- "
+            f"bash --noprofile --norc -c {shlex.quote(command)}"
+        )
 
     def _build_chat_exec_args(
         self,
@@ -206,8 +217,18 @@ class HermesCliWrapper:
             run_id=run_id,
         )
         if os.name != "nt":
-            return ["bash", "-lc", command]
-        return ["wsl.exe", "-d", self.wsl_distribution, "--", "bash", "-lc", command]
+            return self._bash_exec_args(command)
+        return [
+            "wsl.exe",
+            "-d",
+            self.wsl_distribution,
+            "--",
+            "bash",
+            "--noprofile",
+            "--norc",
+            "-c",
+            command,
+        ]
 
     def _build_chat_bash_command(
         self,
@@ -705,7 +726,7 @@ class HermesCliWrapper:
         completion_detected = False
         last_raw_activity_emit = datetime.now()
         raw_activity_interval_seconds = 120
-        should_stop_on_completion_signal = skills != "sn-ppt-entry"
+        should_stop_on_completion_signal = skills not in {"sn-ppt-entry", "sn-ppt-workbench"}
 
         async def stop_after_completion() -> None:
             if process.returncode is not None:
@@ -785,9 +806,12 @@ class HermesCliWrapper:
         try:
             while finished_streams < len(stream_tasks):
                 try:
+                    completion_timeout = (
+                        8 if completion_detected and should_stop_on_completion_signal else None
+                    )
                     raw_line = await asyncio.wait_for(
                         line_queue.get(),
-                        timeout=8 if completion_detected and should_stop_on_completion_signal else None,
+                        timeout=completion_timeout,
                     )
                 except TimeoutError:
                     await stop_after_completion()

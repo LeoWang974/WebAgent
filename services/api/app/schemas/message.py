@@ -16,6 +16,7 @@ class Message(ApiModel):
 
 
 class MessageCreate(ApiModel):
+    adapter_key: str | None = None
     content: str
     model_id: str | None = None
     skill_key: SkillKey | None = None

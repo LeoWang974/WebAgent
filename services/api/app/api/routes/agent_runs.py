@@ -15,6 +15,7 @@ from app.models import AgentRunEvent as DBAgentRunEvent
 from app.models import Conversation, ConversationShare, ModelConfig, User
 from app.services.agent_runtime_context import build_user_runtime_context
 from app.services.model_runtime_config import (
+    ADAPTER_MODEL_ALIASES,
     ModelRuntimeConfig,
     model_runtime_config_builder,
 )
@@ -80,7 +81,7 @@ def _resolve_adapter(
             run_id=run_id,
             model_runtime_config=model_runtime_config,
         )
-    if model_id == "model_hermes":
+    if model_id in {"hermes", "model_hermes"}:
         return "hermes", _build_adapter(
             "hermes",
             current_user,
@@ -88,7 +89,7 @@ def _resolve_adapter(
             run_id=run_id,
             model_runtime_config=model_runtime_config,
         )
-    if model_id == "model_openclaw":
+    if model_id in {"openclaw", "model_openclaw"}:
         return "openclaw", _build_adapter(
             "openclaw",
             current_user,
@@ -197,7 +198,7 @@ async def resolve_adapter_for_model(
             model_runtime_config=model_runtime_config,
         )
 
-    if model_id in {"model_hermes", "model_openclaw"}:
+    if model_id in ADAPTER_MODEL_ALIASES:
         return _resolve_adapter_compat(
             current_user,
             model_id=model_id,
@@ -527,6 +528,7 @@ async def create_agent_run(
         db,
         current_user,
         input_data.model_id,
+        adapter_key=input_data.adapter_key,
         model_runtime_config=model_runtime_config,
     )
     run = await create_db_agent_run(
@@ -549,6 +551,7 @@ async def create_agent_run(
         payload={
             "content": input_data.content,
             "modelId": input_data.model_id,
+            "requestedAdapterKey": input_data.adapter_key,
             "modelConfigId": run.model_config_id,
             "modelProvider": run.model_provider,
             "modelName": run.model_name,

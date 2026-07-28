@@ -13,7 +13,7 @@ from sqlalchemy.orm import selectinload
 
 from app import schemas
 from app.api.dependencies import CurrentUser, DbSession
-from app.api.routes.settings import user_developer_mode
+from app.api.routes.settings import is_runtime_adapter_model, user_developer_mode
 from app.core.config import settings
 from app.models import (
     AgentRun,
@@ -23,6 +23,7 @@ from app.models import (
     ConversationShare,
     FileAsset,
     Message,
+    ModelConfig,
 )
 from app.services import mock_store
 from app.services.adapter_limiter import acquire_adapter_capacity
@@ -63,6 +64,11 @@ from app.services.session_artifacts import (
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+MODEL_CONFIG_DIRECTIVE_RE = re.compile(
+    r"(?:~?/\.hermes/config\.yaml|model:\s*)",
+    re.IGNORECASE,
+)
+PLACEHOLDER_API_KEYS = {"sk-xxx", "sk-test", "sk-smoke", "xxx", "your-api-key"}
 
 
 class AgentRunCancelled(Exception):
@@ -73,6 +79,104 @@ class AgentRunTimeout(Exception):
     def __init__(self, timeout_type: str, message: str) -> None:
         self.timeout_type = timeout_type
         super().__init__(message)
+
+
+def parse_model_config_directive(content: str) -> dict[str, str] | None:
+    if not MODEL_CONFIG_DIRECTIVE_RE.search(content):
+        return None
+
+    values: dict[str, str] = {}
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        normalized_key = key.strip().lower().replace("-", "_")
+        if normalized_key not in {"default", "provider", "base_url", "api_key"}:
+            continue
+        cleaned_value = value.strip().strip("'\"")
+        if cleaned_value:
+            values[normalized_key] = cleaned_value
+
+    required = {"default", "base_url", "api_key"}
+    if not required.issubset(values):
+        return None
+    if values["api_key"].strip().lower() in PLACEHOLDER_API_KEYS:
+        raise HTTPException(
+            status_code=400,
+            detail="API key is a placeholder. Please provide a valid key before saving.",
+        )
+    values.setdefault("provider", "custom")
+    return values
+
+
+async def apply_model_config_directive(
+    db: AsyncSession,
+    current_user,
+    model_id: str | None,
+    values: dict[str, str],
+) -> ModelConfig:
+    model: ModelConfig | None = None
+    if model_id and model_id not in {
+        "hermes",
+        "openclaw",
+        "sensenova",
+        "model_hermes",
+        "model_openclaw",
+    }:
+        result = await db.execute(
+            select(ModelConfig).where(
+                ModelConfig.id == model_id,
+                ModelConfig.user_id == current_user.id,
+            )
+        )
+        model = result.scalar_one_or_none()
+        if model is not None and is_runtime_adapter_model(model):
+            model = None
+
+    if model is None:
+        result = await db.execute(
+            select(ModelConfig)
+            .where(
+                ModelConfig.user_id == current_user.id,
+                ModelConfig.is_default.is_(True),
+            )
+            .order_by(ModelConfig.is_default.desc(), ModelConfig.updated_at.desc())
+        )
+        model = next(
+            (item for item in result.scalars().all() if not is_runtime_adapter_model(item)),
+            None,
+        )
+
+    if model is None:
+        model = ModelConfig(
+            user_id=current_user.id,
+            name=values["default"],
+            provider="custom",
+            is_default=True,
+            is_available=True,
+        )
+        db.add(model)
+
+    result = await db.execute(
+        select(ModelConfig).where(
+            ModelConfig.user_id == current_user.id,
+            ModelConfig.id != model.id,
+        )
+    )
+    for item in result.scalars().all():
+        item.is_default = False
+
+    model.name = values["default"]
+    model.provider = values.get("provider", "custom")
+    model.base_url = values["base_url"]
+    model.encrypted_api_key = values["api_key"]
+    model.is_default = True
+    model.is_available = True
+
+    await db.commit()
+    await db.refresh(model)
+    return model
 
 
 def runtime_diagnostics(adapter: object, artifact_discovery_summary: dict[str, object]) -> dict:
@@ -127,7 +231,7 @@ def resolve_skill_key(content: str, explicit_skill_key: str | None) -> str | Non
         ("deep_research", ["sn-deep-research", "deep research", "深度调研", "调研", "研究报告"]),
         ("data_analysis", ["sn-da", "data analysis", "数据分析", "分析数据", "表格分析"]),
         ("ppt_generation", ["sn-ppt", "ppt", "幻灯片", "演示文稿"]),
-        ("u1_image", ["u1", "生图", "生成图片", "图片生成"]),
+        ("u1_image", ["u1", "生图", "生成图片", "图像生成"]),
     ]
     for skill_key, aliases in skill_aliases:
         if any(alias.lower() in normalized for alias in aliases):
@@ -262,6 +366,7 @@ async def enqueue_agent_run_message(
         db,
         current_user,
         input_data.model_id,
+        adapter_key=input_data.adapter_key,
         conversation_id=session_id,
         model_runtime_config=model_runtime_config,
     )
@@ -285,11 +390,12 @@ async def enqueue_agent_run_message(
         payload={
             "content": input_data.content,
             "modelId": input_data.model_id,
+            "adapterKey": adapter_key,
+            "requestedAdapterKey": input_data.adapter_key,
             "modelConfigId": run.model_config_id,
             "modelProvider": run.model_provider,
             "modelName": run.model_name,
             "skillKey": resolved_skill_key,
-            "adapterKey": adapter_key,
             "userMessageId": user_message.id,
         },
     )
@@ -615,6 +721,7 @@ async def send_session_message(
             db,
             current_user,
             input_data.model_id,
+            adapter_key=input_data.adapter_key,
             conversation_id=session_id,
             model_runtime_config=model_runtime_config,
         )
@@ -644,6 +751,7 @@ async def send_session_message(
             payload={
                 "content": input_data.content,
                 "modelId": input_data.model_id,
+                "requestedAdapterKey": input_data.adapter_key,
                 "modelConfigId": run.model_config_id,
                 "modelProvider": run.model_provider,
                 "modelName": run.model_name,
@@ -745,6 +853,35 @@ async def stream_session_message(
             )
             from app.services.agent_run_executor import _complete_plain_chat_with_sensenova
 
+            model_config_values = parse_model_config_directive(input_data.content)
+            if model_config_values is not None:
+                model = await apply_model_config_directive(
+                    db,
+                    current_user,
+                    input_data.model_id,
+                    model_config_values,
+                )
+                conversation = await refresh_conversation(db, session_id)
+                conversation.status = "active"
+                reply = (
+                    "模型配置已更新：当前默认模型为 "
+                    f"`{model.name}`，base_url 为 `{model.base_url}`。"
+                    "后续 Hermes Agent 运行会使用这组模型配置；你也可以在设置页切回 SenseNova。"
+                )
+                assistant_message = await persist_message(db, session_id, "assistant", reply)
+                await db.commit()
+                conversation = await refresh_conversation(db, session_id)
+                yield sse(
+                    "assistant_done",
+                    {
+                        "message": to_message(assistant_message).model_dump(by_alias=True),
+                        "session": to_session(conversation).model_dump(by_alias=True),
+                        "runId": None,
+                        "status": "completed",
+                    },
+                )
+                return
+
             model_runtime_config = await model_runtime_config_builder.build_for_user(
                 db,
                 current_user,
@@ -792,7 +929,73 @@ async def stream_session_message(
                             },
                         )
                     if event.event_type == "assistant_done":
-                        yield sse("assistant_done", payload)
+                        done_payload = dict(payload)
+                        if "message" not in done_payload and payload.get("messageId"):
+                            message = await db.get(Message, payload["messageId"])
+                            if message is not None:
+                                done_payload["message"] = to_message(message).model_dump(
+                                    by_alias=True
+                                )
+                        if "session" not in done_payload:
+                            conversation = await refresh_conversation(db, session_id)
+                            done_payload["session"] = to_session(conversation).model_dump(
+                                by_alias=True
+                            )
+                        done_payload.setdefault("runId", run.id)
+                        done_payload.setdefault("status", run.status)
+                        yield sse("assistant_done", done_payload)
+                return
+
+            if resolved_skill_key is None:
+                run = await create_db_agent_run(
+                    db,
+                    session_id,
+                    title="Plain Chat",
+                    status="running",
+                    progress=5,
+                    adapter_key="direct_chat",
+                    model_runtime_config=model_runtime_config,
+                )
+                yield sse(
+                    "run_started",
+                    {
+                        "runId": run.id,
+                        "sessionId": session_id,
+                        "status": run.status,
+                        "progress": run.progress,
+                    },
+                )
+                assistant_content = (
+                    f"当前模型 `{model_runtime_config.model_name}` 缺少可用的 API Key "
+                    "或 base_url，无法进行普通短对话。请在设置页为该模型补齐配置，"
+                    "或切回已经配置好的模型。"
+                )
+                assistant_message = await persist_message(
+                    db,
+                    session_id,
+                    "assistant",
+                    assistant_content,
+                )
+                conversation = await refresh_conversation(db, session_id)
+                conversation.status = "active"
+                await finish_db_agent_run(
+                    db,
+                    run,
+                    status="failed",
+                    label="Plain chat model configuration is incomplete",
+                    error=assistant_content,
+                )
+                await db.commit()
+                conversation = await refresh_conversation(db, session_id)
+                yield sse(
+                    "assistant_done",
+                    {
+                        "message": to_message(assistant_message).model_dump(by_alias=True),
+                        "session": to_session(conversation).model_dump(by_alias=True),
+                        "runId": run.id,
+                        "status": "failed",
+                    },
+                )
                 return
 
             model_runtime_config = await model_runtime_config_builder.build_for_user(
@@ -804,6 +1007,7 @@ async def stream_session_message(
                 db,
                 current_user,
                 input_data.model_id,
+                adapter_key=input_data.adapter_key,
                 conversation_id=session_id,
                 model_runtime_config=model_runtime_config,
             )
@@ -844,6 +1048,7 @@ async def stream_session_message(
                 payload={
                     "content": input_data.content,
                     "modelId": input_data.model_id,
+                    "requestedAdapterKey": input_data.adapter_key,
                     "modelConfigId": run.model_config_id,
                     "modelProvider": run.model_provider,
                     "modelName": run.model_name,

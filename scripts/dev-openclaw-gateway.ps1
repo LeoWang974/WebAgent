@@ -10,7 +10,7 @@ $openclawSkillsDir = Join-Path $runtimeRoot "openclaw-skills"
 New-Item -ItemType Directory -Force -Path $runtimeRoot | Out-Null
 New-Item -ItemType Directory -Force -Path $openclawSkillsDir | Out-Null
 
-$existing = wsl.exe -- bash -lc "ss -ltn | grep -q ':18789 ' && echo running || true"
+$existing = wsl.exe -- bash --noprofile --norc -c "ss -ltn | grep -q ':18789 ' && echo running || true"
 if (($existing | Out-String).Trim() -eq "running") {
   Write-Host "OpenClaw Gateway is already listening on ws://127.0.0.1:18789"
   exit 0
@@ -52,7 +52,7 @@ Write-Host "Starting OpenClaw Gateway: ws://127.0.0.1:18789"
 Write-Host "Logs: $stdoutLog"
 
 Start-Process -FilePath "wsl.exe" `
-  -ArgumentList @("--", "bash", $startScriptWsl) `
+  -ArgumentList @("--", "bash", "--noprofile", "--norc", $startScriptWsl) `
   -WindowStyle Hidden `
   -RedirectStandardOutput $stdoutLog `
   -RedirectStandardError $stderrLog `
@@ -60,5 +60,5 @@ Start-Process -FilePath "wsl.exe" `
 
 Start-Sleep -Seconds 5
 
-$health = wsl.exe -- bash -lc "openclaw health --json --timeout 5000 || true"
+$health = wsl.exe -- bash --noprofile --norc -c "openclaw health --json --timeout 5000 || true"
 Write-Host $health

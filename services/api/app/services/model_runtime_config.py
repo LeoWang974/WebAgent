@@ -8,6 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.models import AgentRun, ModelConfig, User
 
+ADAPTER_MODEL_ALIASES = {"hermes", "openclaw", "sensenova", "model_hermes", "model_openclaw"}
+
 OPENAI_COMPATIBLE_PROVIDERS = {
     "custom",
     "deepseek",
@@ -137,7 +139,8 @@ def model_runtime_config_from_model(model: ModelConfig) -> ModelRuntimeConfig:
     provider = _normalize_provider(model.provider)
     name = (model.name or "").strip()
     base_url = (model.base_url or "").lower()
-    is_runtime_selector = (
+    has_explicit_model_runtime = bool(model.encrypted_api_key and model.base_url)
+    is_runtime_selector = not has_explicit_model_runtime and (
         "hermes" in name.lower()
         or "openclaw" in name.lower()
         or "8642" in base_url
@@ -179,7 +182,7 @@ class ModelRuntimeConfigBuilder:
         user: User,
         model_id: str | None = None,
     ) -> ModelRuntimeConfig:
-        if model_id in {"model_hermes", "model_openclaw"}:
+        if model_id in ADAPTER_MODEL_ALIASES:
             return default_model_runtime_config()
 
         model = await self._load_user_model(db, user, model_id)

@@ -7,6 +7,12 @@ def test_hermes_deep_research_uses_sensenova_skill_entrypoint():
     assert adapter._get_skills_for_skill("deep_research") == "sn-deep-research"
 
 
+def test_hermes_ppt_generation_uses_workbench_skill_entrypoint():
+    adapter = HermesAdapter()
+
+    assert adapter._get_skills_for_skill("ppt_generation") == "sn-ppt-workbench"
+
+
 def test_hermes_deep_research_prompt_includes_serper_runtime_note():
     prompt = HermesAdapter._build_runtime_prompt("请调研青年线下社交", "deep_research")
 

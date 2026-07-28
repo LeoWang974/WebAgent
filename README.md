@@ -179,6 +179,13 @@ The next deployment target is a Linux CCI environment. The recommended shape is:
 5. Verify login, conversations, Agent Run SSE, artifacts, sharing permissions,
    and long Hermes/OpenClaw tasks.
 
+CCI web port convention:
+
+- Web app: `http://<cci-host>:3000/app`
+- API health: `http://<cci-host>:8010/api/health`
+- `scripts/cci-start.sh` defaults to `WEB_PORT=3000` for bare Linux runs.
+- Docker Compose can use the same convention by setting `WEB_PORT=3000`.
+
 The Windows PowerShell scripts remain local development helpers, not Linux
 service runners:
 

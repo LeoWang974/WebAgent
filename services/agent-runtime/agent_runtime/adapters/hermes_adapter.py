@@ -1,6 +1,6 @@
 import asyncio
+from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
-from typing import AsyncGenerator, Optional
 
 from ..schemas import AgentArtifactRef, AgentRun, AgentRunCreate, AgentRunEvent, AgentRunStep
 from .base import AgentRuntimeAdapter
@@ -14,8 +14,8 @@ def now_iso() -> str:
 class HermesAdapter(AgentRuntimeAdapter):
     def __init__(
         self,
-        hermes_path: str = "/home/zhuchangbiaozhu_xyl/.local/bin/hermes",
-        hermes_home: str = "/home/zhuchangbiaozhu_xyl/.hermes",
+        hermes_path: str = "hermes",
+        hermes_home: str = "~/.hermes",
         wsl_distribution: str = "Ubuntu",
     ):
         self.cli = HermesCliWrapper(hermes_path, hermes_home, wsl_distribution)
@@ -32,8 +32,13 @@ class HermesAdapter(AgentRuntimeAdapter):
                 skills=skills,
             )
 
+            run_id = (
+                f"run_hermes_{session_id}"
+                if session_id
+                else f"run_hermes_{input_data.session_id}"
+            )
             run = AgentRun(
-                id=f"run_hermes_{session_id}" if session_id else f"run_hermes_{input_data.session_id}",
+                id=run_id,
                 session_id=input_data.session_id,
                 status="completed",
                 title="Hermes Agent Run",
@@ -241,7 +246,7 @@ class HermesAdapter(AgentRuntimeAdapter):
     def get_last_diagnostics(self) -> dict[str, object]:
         return dict(self.cli.last_diagnostics)
 
-    def _get_toolsets_for_skill(self, skill_key: Optional[str]) -> Optional[str]:
+    def _get_toolsets_for_skill(self, skill_key: str | None) -> str | None:
         toolsets_map = {
             "data_analysis": "file,terminal,web",
             "deep_research": "web,terminal,file",
@@ -250,17 +255,17 @@ class HermesAdapter(AgentRuntimeAdapter):
         }
         return toolsets_map.get(skill_key)
 
-    def _get_skills_for_skill(self, skill_key: Optional[str]) -> Optional[str]:
+    def _get_skills_for_skill(self, skill_key: str | None) -> str | None:
         skills_map = {
             "data_analysis": "sn-da-excel-workflow",
             "deep_research": "sn-deep-research",
-            "ppt_generation": "sn-ppt-entry",
+            "ppt_generation": "sn-ppt-workbench",
             "u1_image": "sn-image-base",
         }
         return skills_map.get(skill_key)
 
     @staticmethod
-    def _build_runtime_prompt(content: str, skill_key: Optional[str]) -> str:
+    def _build_runtime_prompt(content: str, skill_key: str | None) -> str:
         if skill_key != "deep_research" and "serper" not in content.lower():
             return content
 

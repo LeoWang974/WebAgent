@@ -54,7 +54,7 @@ export function generateSessionTitle(content: string, skillKey?: SkillKey) {
   const cleaned = content
     .replace(/[`*_>#\[\]{}()（）《》“”‘’]/g, " ")
     .replace(/\s+/g, " ")
-    .replace(/^(请|帮我|麻烦|使用|基于|最后|现在|接下来|生成|分析|写一份|做一份)+/i, "")
+    .replace(/^(请|请帮我|帮我|麻烦|使用|基于|最后|现在|接下来|生成|分析|写一份|做一份)+/i, "")
     .trim();
   const compact = cleaned.length > 22 ? `${cleaned.slice(0, 22)}...` : cleaned;
   const fallback = skillKey ? skillPrefix[skillKey] : "新任务";

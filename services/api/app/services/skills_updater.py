@@ -84,7 +84,7 @@ def _sync_local_directory(source_dir: Path, target_dir: Path) -> None:
     shutil.copytree(source_dir, tmp_dir, ignore=shutil.ignore_patterns(".git"))
     if target_dir.exists():
         shutil.rmtree(target_dir)
-    tmp_dir.replace(target_dir)
+    shutil.move(str(tmp_dir), str(target_dir))
 
 
 def _sync_wsl_directory(

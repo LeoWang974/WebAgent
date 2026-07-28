@@ -98,7 +98,7 @@ services:
     depends_on:
       - api
     ports:
-      - "${WEB_PORT:-3002}:3002"
+      - "${WEB_PORT:-3002}:3000"
 
 volumes:
   postgres-data:

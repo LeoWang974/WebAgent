@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 
 import pytest
+
 from agent_runtime.adapters.openclaw_adapter import OpenClawAdapter
 from agent_runtime.adapters.openclaw_utils import (
     OPENCLAW_EVENT_PROTOCOL,

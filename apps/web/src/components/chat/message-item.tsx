@@ -32,8 +32,11 @@ function formatTime(value: string, locale: string) {
 
 function formatDuration(durationMs: number | undefined, locale: string) {
   const useChineseUnits = locale === "zh-CN";
-  if (durationMs === undefined || !Number.isFinite(durationMs) || durationMs < 1000) {
-    return useChineseUnits ? "0 秒" : "0s";
+  if (durationMs === undefined || !Number.isFinite(durationMs)) {
+    return undefined;
+  }
+  if (durationMs < 1000) {
+    return useChineseUnits ? "不足 1 秒" : "<1s";
   }
 
   const totalSeconds = Math.round(durationMs / 1000);
@@ -91,7 +94,7 @@ export function MessageItem({
   const pendingElapsedMs = useElapsed(isPending ? (waitStartedAt ?? createdAt) : undefined);
   const waitDuration = isPending
     ? formatDuration(pendingElapsedMs, language)
-    : waitDurationMs
+    : waitDurationMs !== undefined
       ? formatDuration(waitDurationMs, language)
       : undefined;
 

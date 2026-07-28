@@ -24,6 +24,12 @@ def runtime_root() -> Path:
     return root
 
 
+def runtime_shared_dir() -> Path:
+    path = runtime_root() / "_shared"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def runtime_conversation_dir(user: User, conversation_id: str | None = None) -> Path:
     user_segment = safe_runtime_segment(user.id, "user")
     conversation_segment = safe_runtime_segment(conversation_id or "default", "conversation")
@@ -66,6 +72,11 @@ def _copy_file_once(source: Path, destination: Path) -> None:
     shutil.copy2(source, destination)
 
 
+def _ensure_shared_openclaw_skills(source: Path) -> Path:
+    destination = runtime_shared_dir() / "openclaw-skills"
+    return _copy_skills_once(source, destination)
+
+
 def _read_env_file(path: Path) -> dict[str, str]:
     if not path.exists() or not path.is_file():
         return {}
@@ -81,26 +92,6 @@ def _read_env_file(path: Path) -> dict[str, str]:
             continue
         values[key] = value.strip().strip("'\"")
     return values
-
-
-def _append_missing_env_values(path: Path, values: dict[str, str | None]) -> None:
-    existing = _read_env_file(path)
-    missing = {
-        key: value
-        for key, value in values.items()
-        if value and not existing.get(key)
-    }
-    if not missing:
-        return
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8", newline="\n") as handle:
-        if path.exists() and path.stat().st_size > 0:
-            handle.write("\n")
-        handle.write("# Added by WebAgent runtime context.\n")
-        for key, value in missing.items():
-            escaped = str(value).replace("\n", "").replace("\r", "")
-            handle.write(f"{key}={escaped}\n")
 
 
 def _write_runtime_env_values(path: Path, values: dict[str, str | None]) -> None:
@@ -147,9 +138,15 @@ def _sync_runtime_env(
 
     sensenova_base_url = settings.sensenova_base_url or environ.get("SENSENOVA_BASE_URL")
     sensenova_api_key = settings.sensenova_api_key or environ.get("SENSENOVA_API_KEY")
-    openai_base_url = environ.get("OPENAI_BASE_URL") or sensenova_base_url
-    openai_api_key = environ.get("OPENAI_API_KEY") or sensenova_api_key
-    serper_api_key = environ.get("SERPER_API_KEY")
+    openai_base_url = sensenova_base_url or environ.get("OPENAI_BASE_URL")
+    openai_api_key = sensenova_api_key or environ.get("OPENAI_API_KEY")
+    existing_hermes_env = _read_env_file(hermes_env_path)
+    existing_openclaw_env = _read_env_file(openclaw_env_path)
+    serper_api_key = (
+        existing_hermes_env.get("SERPER_API_KEY")
+        or existing_openclaw_env.get("SERPER_API_KEY")
+        or environ.get("SERPER_API_KEY")
+    )
 
     common_values = {
         "SENSENOVA_API_KEY": sensenova_api_key,
@@ -158,8 +155,8 @@ def _sync_runtime_env(
         "OPENAI_BASE_URL": openai_base_url,
         "SERPER_API_KEY": serper_api_key,
     }
-    _append_missing_env_values(hermes_env_path, common_values)
-    _append_missing_env_values(openclaw_env_path, common_values)
+    _write_runtime_env_values(hermes_env_path, common_values)
+    _write_runtime_env_values(openclaw_env_path, common_values)
 
 
 def _ensure_hermes_config(
@@ -248,7 +245,7 @@ def build_user_runtime_context(
     openclaw_home = root / "openclaw-home"
     hermes_home.mkdir(parents=True, exist_ok=True)
     openclaw_home.mkdir(parents=True, exist_ok=True)
-    base_hermes_home = Path(settings.hermes_home)
+    base_hermes_home = Path(settings.hermes_home).expanduser()
     _copy_file_once(base_hermes_home / ".env", hermes_home / ".env")
     _ensure_hermes_config(base_hermes_home, hermes_home, model_runtime_config)
     _copy_file_once(Path.home() / ".openclaw" / ".env", openclaw_home / ".openclaw" / ".env")
@@ -261,7 +258,7 @@ def build_user_runtime_context(
     hermes_source = (
         Path(settings.hermes_skills_dir)
         if settings.hermes_skills_dir
-        else Path(settings.hermes_home) / "skills"
+        else Path(settings.hermes_home).expanduser() / "skills"
     )
     hermes_skills_dir = hermes_home / "skills"
     if hermes_source.exists():
@@ -274,7 +271,7 @@ def build_user_runtime_context(
         if settings.openclaw_skills_dir
         else default_openclaw_skills_dir()
     )
-    openclaw_skills_dir = _copy_skills_once(openclaw_source, openclaw_home / "skills")
+    openclaw_skills_dir = _ensure_shared_openclaw_skills(openclaw_source)
 
     return UserRuntimeContext(
         user_id=user.id,
