@@ -24,9 +24,10 @@ class HermesAdapter(AgentRuntimeAdapter):
         try:
             toolsets = self._get_toolsets_for_skill(input_data.skill_key)
             skills = self._get_skills_for_skill(input_data.skill_key)
+            question = self._build_runtime_prompt(input_data.content, input_data.skill_key)
 
             session_id, response = await self.cli.ask(
-                question=input_data.content,
+                question=question,
                 toolsets=toolsets,
                 skills=skills,
             )
@@ -180,10 +181,11 @@ class HermesAdapter(AgentRuntimeAdapter):
     ) -> AsyncGenerator[AgentRunEvent, None]:
         toolsets = self._get_toolsets_for_skill(input_data.skill_key)
         skills = self._get_skills_for_skill(input_data.skill_key)
+        question = self._build_runtime_prompt(input_data.content, input_data.skill_key)
         event_index = 0
 
         async for event in self.cli.ask_stream_events(
-            question=input_data.content,
+            question=question,
             run_id=input_data.run_id,
             toolsets=toolsets,
             skills=skills,
@@ -251,8 +253,26 @@ class HermesAdapter(AgentRuntimeAdapter):
     def _get_skills_for_skill(self, skill_key: Optional[str]) -> Optional[str]:
         skills_map = {
             "data_analysis": "sn-da-excel-workflow",
-            "deep_research": "sn-research-report",
+            "deep_research": "sn-deep-research",
             "ppt_generation": "sn-ppt-entry",
             "u1_image": "sn-image-base",
         }
         return skills_map.get(skill_key)
+
+    @staticmethod
+    def _build_runtime_prompt(content: str, skill_key: Optional[str]) -> str:
+        if skill_key != "deep_research" and "serper" not in content.lower():
+            return content
+
+        runtime_note = (
+            "WebAgent runtime note:\n"
+            "- SEARCH_PROVIDER=serper.\n"
+            "- Serper is configured and reachable in the WebAgent runtime environment.\n"
+            "- Use the Serper-backed search capability for web search.\n"
+            "- Do not judge search availability by running terminal tests against Google or "
+            "arbitrary external HTTPS websites; those direct requests may be blocked by the "
+            "server network policy while Serper still works.\n"
+            "- If a search attempt fails, first verify that the Serper search tool/API path was "
+            "actually used before falling back to knowledge-only writing.\n"
+        )
+        return f"{runtime_note}\nUser request:\n{content}"

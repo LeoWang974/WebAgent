@@ -66,6 +66,7 @@ def _candidate_roots() -> list[Path]:
     user_home = Path.home()
     roots = [
         repo_root / "services" / "api" / "deep-research-reports",
+        repo_root / "ppt_decks",
         repo_root / "artifacts",
         repo_root / "outputs",
         user_home / "Desktop",
@@ -406,11 +407,12 @@ def _run_pptx_export(
             check=False,
         )
 
+    output_path = output_dir / output_filename
+    if output_path.exists() and output_path.stat().st_size > 0:
+        return output_path
     if result.returncode != 0:
         return None
-
-    output_path = output_dir / output_filename
-    return output_path if output_path.exists() and output_path.stat().st_size > 0 else None
+    return None
 
 
 def _extract_path_strings(value: Any) -> list[str]:

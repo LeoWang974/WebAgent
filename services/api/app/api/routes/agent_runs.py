@@ -14,6 +14,10 @@ from app.models import AgentRun as DBAgentRun
 from app.models import AgentRunEvent as DBAgentRunEvent
 from app.models import Conversation, ConversationShare, ModelConfig, User
 from app.services.agent_runtime_context import build_user_runtime_context
+from app.services.model_runtime_config import (
+    ModelRuntimeConfig,
+    model_runtime_config_builder,
+)
 from app.services.persistence import get_conversation_or_404
 
 try:
@@ -28,8 +32,19 @@ TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled", "disconnected"}
 STALE_RUN_GRACE_SECONDS = 30 * 60
 
 
-def _build_adapter(adapter_key: str, current_user: User, conversation_id: str | None = None):
-    runtime_context = build_user_runtime_context(current_user, conversation_id)
+def _build_adapter(
+    adapter_key: str,
+    current_user: User,
+    conversation_id: str | None = None,
+    run_id: str | None = None,
+    model_runtime_config: ModelRuntimeConfig | None = None,
+):
+    runtime_context = build_user_runtime_context(
+        current_user,
+        conversation_id,
+        run_id=run_id,
+        model_runtime_config=model_runtime_config,
+    )
     if adapter_key == "hermes" and HermesAdapter is not None:
         return HermesAdapter(
             hermes_path=settings.hermes_cli_path,
@@ -54,21 +69,59 @@ def _resolve_adapter(
     model_id: str | None = None,
     adapter_key: str | None = None,
     conversation_id: str | None = None,
+    run_id: str | None = None,
+    model_runtime_config: ModelRuntimeConfig | None = None,
 ):
     if adapter_key in {"hermes", "openclaw"}:
-        return adapter_key, _build_adapter(adapter_key, current_user, conversation_id)
+        return adapter_key, _build_adapter(
+            adapter_key,
+            current_user,
+            conversation_id,
+            run_id=run_id,
+            model_runtime_config=model_runtime_config,
+        )
     if model_id == "model_hermes":
-        return "hermes", _build_adapter("hermes", current_user, conversation_id)
+        return "hermes", _build_adapter(
+            "hermes",
+            current_user,
+            conversation_id,
+            run_id=run_id,
+            model_runtime_config=model_runtime_config,
+        )
     if model_id == "model_openclaw":
-        return "openclaw", _build_adapter("openclaw", current_user, conversation_id)
+        return "openclaw", _build_adapter(
+            "openclaw",
+            current_user,
+            conversation_id,
+            run_id=run_id,
+            model_runtime_config=model_runtime_config,
+        )
     if settings.agent_runtime_default == "openclaw":
-        adapter = _build_adapter("openclaw", current_user, conversation_id)
+        adapter = _build_adapter(
+            "openclaw",
+            current_user,
+            conversation_id,
+            run_id=run_id,
+            model_runtime_config=model_runtime_config,
+        )
         if adapter is not None:
             return "openclaw", adapter
-    adapter = _build_adapter("hermes", current_user, conversation_id)
+    adapter = _build_adapter(
+        "hermes",
+        current_user,
+        conversation_id,
+        run_id=run_id,
+        model_runtime_config=model_runtime_config,
+    )
     if adapter is not None:
         return "hermes", adapter
-    adapter = _build_adapter("openclaw", current_user, conversation_id)
+    adapter = _build_adapter(
+        "openclaw",
+        current_user,
+        conversation_id,
+        run_id=run_id,
+        model_runtime_config=model_runtime_config,
+    )
     if adapter is not None:
         return "openclaw", adapter
     return None, None
@@ -79,6 +132,8 @@ def _resolve_adapter_compat(
     model_id: str | None = None,
     adapter_key: str | None = None,
     conversation_id: str | None = None,
+    run_id: str | None = None,
+    model_runtime_config: ModelRuntimeConfig | None = None,
 ):
     try:
         return _resolve_adapter(
@@ -86,6 +141,8 @@ def _resolve_adapter_compat(
             model_id=model_id,
             adapter_key=adapter_key,
             conversation_id=conversation_id,
+            run_id=run_id,
+            model_runtime_config=model_runtime_config,
         )
     except TypeError as exc:
         message = str(exc)
@@ -120,18 +177,24 @@ async def resolve_adapter_for_model(
     model_id: str | None = None,
     adapter_key: str | None = None,
     conversation_id: str | None = None,
+    run_id: str | None = None,
+    model_runtime_config: ModelRuntimeConfig | None = None,
 ):
     if adapter_key:
         return _resolve_adapter_compat(
             current_user,
             adapter_key=adapter_key,
             conversation_id=conversation_id,
+            run_id=run_id,
+            model_runtime_config=model_runtime_config,
         )
     if not model_id:
         return _resolve_adapter_compat(
             current_user,
             model_id=model_id,
             conversation_id=conversation_id,
+            run_id=run_id,
+            model_runtime_config=model_runtime_config,
         )
 
     if model_id in {"model_hermes", "model_openclaw"}:
@@ -139,6 +202,8 @@ async def resolve_adapter_for_model(
             current_user,
             model_id=model_id,
             conversation_id=conversation_id,
+            run_id=run_id,
+            model_runtime_config=model_runtime_config,
         )
 
     result = await db.execute(
@@ -153,6 +218,8 @@ async def resolve_adapter_for_model(
         adapter_key=inferred_adapter_key,
         model_id=model_id,
         conversation_id=conversation_id,
+        run_id=run_id,
+        model_runtime_config=model_runtime_config,
     )
 
 
@@ -203,6 +270,10 @@ def to_agent_run_schema(
         error=run.error,
         output=output,
         adapter_key=run.adapter_key,
+        model_config_id=run.model_config_id,
+        model_provider=run.model_provider,
+        model_name=run.model_name,
+        model_base_url=run.model_base_url,
     )
 
 
@@ -305,13 +376,16 @@ async def create_db_agent_run(
     status: str = "running",
     progress: int = 0,
     adapter_key: str | None = None,
+    model_runtime_config: ModelRuntimeConfig | None = None,
 ) -> DBAgentRun:
+    model_snapshot = model_runtime_config.snapshot() if model_runtime_config is not None else {}
     run = DBAgentRun(
         conversation_id=session_id,
         status=status,
         title=title,
         progress=progress,
         adapter_key=adapter_key,
+        **model_snapshot,
     )
     db.add(run)
     await db.commit()
@@ -444,7 +518,17 @@ async def create_agent_run(
     current_user: CurrentUser,
 ) -> schemas.AgentRun:
     await get_conversation_or_404(db, input_data.session_id, current_user, require_write=True)
-    adapter_key, _ = await resolve_adapter_for_model(db, current_user, input_data.model_id)
+    model_runtime_config = await model_runtime_config_builder.build_for_user(
+        db,
+        current_user,
+        input_data.model_id,
+    )
+    adapter_key, _ = await resolve_adapter_for_model(
+        db,
+        current_user,
+        input_data.model_id,
+        model_runtime_config=model_runtime_config,
+    )
     run = await create_db_agent_run(
         db,
         input_data.session_id,
@@ -452,6 +536,7 @@ async def create_agent_run(
         status="queued",
         progress=0,
         adapter_key=adapter_key,
+        model_runtime_config=model_runtime_config,
     )
     event = await record_db_agent_run_event(
         db,
@@ -464,6 +549,9 @@ async def create_agent_run(
         payload={
             "content": input_data.content,
             "modelId": input_data.model_id,
+            "modelConfigId": run.model_config_id,
+            "modelProvider": run.model_provider,
+            "modelName": run.model_name,
             "skillKey": input_data.skill_key,
         },
     )
@@ -489,7 +577,15 @@ async def cancel_agent_run(
 ) -> schemas.AgentRun:
     run = await get_db_agent_run(db, run_id, current_user)
     await get_conversation_or_404(db, run.conversation_id, current_user, require_write=True)
-    _, adapter = await resolve_adapter_for_model(db, current_user, adapter_key=run.adapter_key)
+    model_runtime_config = model_runtime_config_builder.build_for_run(run)
+    _, adapter = await resolve_adapter_for_model(
+        db,
+        current_user,
+        adapter_key=run.adapter_key,
+        conversation_id=run.conversation_id,
+        run_id=run.id,
+        model_runtime_config=model_runtime_config,
+    )
     adapter_cancelled = False
     adapter_error = None
     if adapter is not None:

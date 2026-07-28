@@ -32,6 +32,7 @@ from app.services.adapter_limiter import (
 from app.services.agent_run_workspace import run_workspace_dir
 from app.services.agent_runtime_context import build_user_runtime_context
 from app.services.artifact_discovery import create_pptx_from_html_artifacts
+from app.services.model_runtime_config import model_runtime_config_builder
 from app.services.persistence import to_artifact, to_message, to_session
 from app.services.runtime_context_builder import build_runtime_content
 from app.services.session_artifacts import (
@@ -81,10 +82,11 @@ async def _complete_plain_chat_with_sensenova(
     conversation: Conversation,
     content: str,
 ) -> None:
-    if not settings.sensenova_api_key:
+    model_runtime_config = model_runtime_config_builder.build_for_run(run)
+    if not model_runtime_config.supports_openai_chat_completions():
         return
 
-    run.adapter_key = "sensenova"
+    run.adapter_key = run.adapter_key or "sensenova"
     await record_db_agent_run_event(
         db,
         run,
@@ -95,21 +97,22 @@ async def _complete_plain_chat_with_sensenova(
         step_status="running",
         payload={"adapterKey": "sensenova", "mode": "direct_chat"},
     )
-    base_url = (settings.sensenova_base_url or "https://token.sensenova.cn/v1").rstrip("/")
+    base_url = (model_runtime_config.base_url or "https://token.sensenova.cn/v1").rstrip("/")
     try:
         async with httpx.AsyncClient(timeout=45) as client:
             response = await client.post(
                 f"{base_url}/chat/completions",
-                headers={"Authorization": f"Bearer {settings.sensenova_api_key}"},
+                headers={"Authorization": f"Bearer {model_runtime_config.api_key}"},
                 json={
-                    "model": settings.sensenova_default_model,
+                    "model": model_runtime_config.model_name,
                     "messages": [{"role": "user", "content": content}],
                 },
             )
             response.raise_for_status()
     except httpx.HTTPStatusError as error:
         detail = error.response.text[:500]
-        raise RuntimeError(f"SenseNova chat error: {error.response.status_code} {detail}") from error
+        message = f"SenseNova chat error: {error.response.status_code} {detail}"
+        raise RuntimeError(message) from error
     except httpx.HTTPError as error:
         raise RuntimeError(f"SenseNova chat request failed: {error}") from error
 
@@ -154,13 +157,19 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
     adapter = None
     adapter_capacity_lease = None
     run_started_monotonic = asyncio.get_running_loop().time()
+    model_runtime_config = model_runtime_config_builder.build_for_run(run)
 
     try:
-        if skill_key is None and settings.sensenova_api_key:
+        if skill_key is None and model_runtime_config.supports_openai_chat_completions():
             await _complete_plain_chat_with_sensenova(db, run, conversation, content)
             return
 
-        user_runtime_context = build_user_runtime_context(user, conversation.id)
+        user_runtime_context = build_user_runtime_context(
+            user,
+            conversation.id,
+            run_id=run.id,
+            model_runtime_config=model_runtime_config,
+        )
         run_workspace = run_workspace_dir(run.id, conversation.id, user.id)
         adapter_key, adapter = await resolve_adapter_for_model(
             db,
@@ -168,6 +177,8 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
             model_id,
             adapter_key=run.adapter_key,
             conversation_id=conversation.id,
+            run_id=run.id,
+            model_runtime_config=model_runtime_config,
         )
         run.adapter_key = adapter_key or run.adapter_key
         await record_db_agent_run_event(

@@ -19,6 +19,13 @@ class AgentRun(IdMixin, TimestampMixin, Base):
     progress: Mapped[int] = mapped_column(Integer, default=0)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     adapter_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    model_config_id: Mapped[str | None] = mapped_column(
+        ForeignKey("model_configs.id"), nullable=True
+    )
+    model_provider: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    model_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    model_base_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    model_api_key_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class AgentRunEvent(IdMixin, TimestampMixin, Base):

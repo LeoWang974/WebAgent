@@ -5,5 +5,6 @@ $apiRoot = Join-Path $repoRoot "services\api"
 
 Set-Location $apiRoot
 
-celery -A app.workers.celery_app.celery_app worker --loglevel=info
+$workerConcurrency = if ($env:WORKER_CONCURRENCY) { $env:WORKER_CONCURRENCY } else { "2" }
 
+celery -A app.workers.celery_app.celery_app worker --loglevel=info --concurrency=$workerConcurrency

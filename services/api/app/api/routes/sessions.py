@@ -42,6 +42,7 @@ from app.services.conversation_folders import (
     list_user_folders,
     update_user_folder,
 )
+from app.services.model_runtime_config import model_runtime_config_builder
 from app.services.persistence import (
     get_conversation_or_404,
     get_user_by_email,
@@ -252,11 +253,17 @@ async def enqueue_agent_run_message(
     from app.workers.agent_run_tasks import execute_agent_run_task
 
     user_message = await persist_message(db, session_id, "user", input_data.content)
+    model_runtime_config = await model_runtime_config_builder.build_for_user(
+        db,
+        current_user,
+        input_data.model_id,
+    )
     adapter_key, _ = await resolve_adapter_for_model(
         db,
         current_user,
         input_data.model_id,
         conversation_id=session_id,
+        model_runtime_config=model_runtime_config,
     )
     run = await create_db_agent_run(
         db,
@@ -265,6 +272,7 @@ async def enqueue_agent_run_message(
         status="queued",
         progress=0,
         adapter_key=adapter_key,
+        model_runtime_config=model_runtime_config,
     )
     await record_db_agent_run_event(
         db,
@@ -277,6 +285,9 @@ async def enqueue_agent_run_message(
         payload={
             "content": input_data.content,
             "modelId": input_data.model_id,
+            "modelConfigId": run.model_config_id,
+            "modelProvider": run.model_provider,
+            "modelName": run.model_name,
             "skillKey": resolved_skill_key,
             "adapterKey": adapter_key,
             "userMessageId": user_message.id,
@@ -595,11 +606,17 @@ async def send_session_message(
             resolve_adapter_for_model,
         )
 
+        model_runtime_config = await model_runtime_config_builder.build_for_user(
+            db,
+            current_user,
+            input_data.model_id,
+        )
         adapter_key, adapter = await resolve_adapter_for_model(
             db,
             current_user,
             input_data.model_id,
             conversation_id=session_id,
+            model_runtime_config=model_runtime_config,
         )
         runtime_content = await build_skill_runtime_content(
             db,
@@ -615,6 +632,7 @@ async def send_session_message(
             status="running",
             progress=5,
             adapter_key=adapter_key,
+            model_runtime_config=model_runtime_config,
         )
         await record_db_agent_run_event(
             db,
@@ -626,6 +644,9 @@ async def send_session_message(
             payload={
                 "content": input_data.content,
                 "modelId": input_data.model_id,
+                "modelConfigId": run.model_config_id,
+                "modelProvider": run.model_provider,
+                "modelName": run.model_name,
                 "skillKey": resolved_skill_key,
                 "adapterKey": adapter_key,
             },
@@ -724,7 +745,15 @@ async def stream_session_message(
             )
             from app.services.agent_run_executor import _complete_plain_chat_with_sensenova
 
-            if resolved_skill_key is None and settings.sensenova_api_key:
+            model_runtime_config = await model_runtime_config_builder.build_for_user(
+                db,
+                current_user,
+                input_data.model_id,
+            )
+            if (
+                resolved_skill_key is None
+                and model_runtime_config.supports_openai_chat_completions()
+            ):
                 run = await create_db_agent_run(
                     db,
                     session_id,
@@ -732,6 +761,7 @@ async def stream_session_message(
                     status="running",
                     progress=5,
                     adapter_key="sensenova",
+                    model_runtime_config=model_runtime_config,
                 )
                 yield sse(
                     "run_started",
@@ -765,11 +795,17 @@ async def stream_session_message(
                         yield sse("assistant_done", payload)
                 return
 
+            model_runtime_config = await model_runtime_config_builder.build_for_user(
+                db,
+                current_user,
+                input_data.model_id,
+            )
             adapter_key, adapter = await resolve_adapter_for_model(
                 db,
                 current_user,
                 input_data.model_id,
                 conversation_id=session_id,
+                model_runtime_config=model_runtime_config,
             )
             runtime_content = await build_skill_runtime_content(
                 db,
@@ -786,6 +822,7 @@ async def stream_session_message(
                 status="running",
                 progress=5,
                 adapter_key=adapter_key,
+                model_runtime_config=model_runtime_config,
             )
             yield sse(
                 "run_started",
@@ -807,6 +844,9 @@ async def stream_session_message(
                 payload={
                     "content": input_data.content,
                     "modelId": input_data.model_id,
+                    "modelConfigId": run.model_config_id,
+                    "modelProvider": run.model_provider,
+                    "modelName": run.model_name,
                     "skillKey": resolved_skill_key,
                     "adapterKey": adapter_key,
                 },
@@ -815,7 +855,12 @@ async def stream_session_message(
             if adapter is None:
                 raise RuntimeError("No agent runtime adapter is available.")
 
-            user_runtime_context = build_user_runtime_context(current_user, session_id)
+            user_runtime_context = build_user_runtime_context(
+                current_user,
+                session_id,
+                run_id=run.id,
+                model_runtime_config=model_runtime_config,
+            )
             adapter_capacity_lease = await acquire_adapter_capacity(
                 adapter_key,
                 run.id,

@@ -705,6 +705,7 @@ class HermesCliWrapper:
         completion_detected = False
         last_raw_activity_emit = datetime.now()
         raw_activity_interval_seconds = 120
+        should_stop_on_completion_signal = skills != "sn-ppt-entry"
 
         async def stop_after_completion() -> None:
             if process.returncode is not None:
@@ -786,7 +787,7 @@ class HermesCliWrapper:
                 try:
                     raw_line = await asyncio.wait_for(
                         line_queue.get(),
-                        timeout=8 if completion_detected else None,
+                        timeout=8 if completion_detected and should_stop_on_completion_signal else None,
                     )
                 except TimeoutError:
                     await stop_after_completion()
@@ -863,8 +864,10 @@ class HermesCliWrapper:
                             artifact_found=artifact_found,
                             payload={"fallbackCompletion": True, "rawFooter": text[:500]},
                         )
-                        await stop_after_completion()
-                        break
+                        if should_stop_on_completion_signal:
+                            await stop_after_completion()
+                            break
+                        continue
 
                     now = datetime.now()
                     if (
@@ -904,7 +907,7 @@ class HermesCliWrapper:
                     artifact_found=artifact_found,
                 )
 
-        if completion_detected:
+        if completion_detected and should_stop_on_completion_signal:
             await stop_after_completion()
 
         try:

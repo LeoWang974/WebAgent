@@ -86,10 +86,50 @@ interface ChatState {
 
 let activeRequestAbortController: AbortController | undefined;
 const agentRunUnsubscribers = new Map<string, AgentRunUnsubscribe>();
+const agentRunPollers = new Map<string, number>();
 
 function unsubscribeAgentRun(runId: string) {
   agentRunUnsubscribers.get(runId)?.();
   agentRunUnsubscribers.delete(runId);
+  const poller = agentRunPollers.get(runId);
+  if (poller !== undefined) {
+    window.clearInterval(poller);
+    agentRunPollers.delete(runId);
+  }
+}
+
+function startAgentRunPolling(
+  get: () => ChatState,
+  runId: string,
+) {
+  if (agentRunPollers.has(runId)) {
+    return;
+  }
+
+  const refresh = async () => {
+    const run = await get().refreshAgentRun(runId);
+    if (!run) {
+      return;
+    }
+    if (isTerminalRunStatus(run.status)) {
+      setTimeout(() => unsubscribeAgentRun(run.id), 0);
+      return;
+    }
+    const currentSessionId = get().currentSessionId;
+    if (
+      run.sessionId === currentSessionId &&
+      !hasPendingAssistantMessage(get().messages, currentSessionId)
+    ) {
+      useChatStore.setState((state) => ({
+        messages: [...state.messages, pendingMessageForRun(run)],
+      }));
+    }
+  };
+
+  const poller = window.setInterval(() => {
+    void refresh();
+  }, 5000);
+  agentRunPollers.set(runId, poller);
 }
 
 function subscribeAgentRunEvents(
@@ -97,6 +137,7 @@ function subscribeAgentRunEvents(
   runId: string,
 ) {
   if (agentRunUnsubscribers.has(runId)) {
+    startAgentRunPolling(get, runId);
     return;
   }
 
@@ -108,6 +149,7 @@ function subscribeAgentRunEvents(
     }
   });
   agentRunUnsubscribers.set(runId, unsubscribe);
+  startAgentRunPolling(get, runId);
 }
 
 function setSwitchingState(
@@ -456,11 +498,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
   refreshAgentRun: async (runId) => {
     try {
       const run = await webAgentApi.getAgentRun(runId);
+      const terminal = isTerminalRunStatus(run.status);
       set((state) => ({
+        activeAgentRunId:
+          state.activeAgentRunId === run.id && terminal ? undefined : state.activeAgentRunId,
         agentRuns: state.agentRuns.some((item) => item.id === run.id)
           ? state.agentRuns.map((item) => (item.id === run.id ? run : item))
           : [run, ...state.agentRuns],
       }));
+      if (terminal) {
+        unsubscribeAgentRun(run.id);
+      }
       return run;
     } catch (error) {
       set({ error: error instanceof Error ? error.message : "Failed to load run details." });
@@ -711,6 +759,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           );
 
           if (event.type === "run_started") {
+            subscribeAgentRunEvents(get, event.runId);
             set((state) => ({
               activeAgentRunId:
                 state.activeAgentRunId === currentRunId ? event.runId : state.activeAgentRunId,

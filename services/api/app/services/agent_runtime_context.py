@@ -1,11 +1,13 @@
 import re
 import shutil
 from dataclasses import dataclass
+from os import environ
 from os import name as os_name
 from pathlib import Path
 
 from app.core.config import settings
 from app.models import User
+from app.services.model_runtime_config import ModelRuntimeConfig
 from app.services.skills_updater import default_openclaw_skills_dir
 
 
@@ -30,6 +32,20 @@ def runtime_conversation_dir(user: User, conversation_id: str | None = None) -> 
     return path
 
 
+def runtime_run_dir(
+    user: User,
+    conversation_id: str | None = None,
+    run_id: str | None = None,
+) -> Path:
+    conversation_dir = runtime_conversation_dir(user, conversation_id)
+    if not run_id:
+        return conversation_dir
+    run_segment = safe_runtime_segment(run_id, "run")
+    path = conversation_dir / "runs" / run_segment
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def _copy_skills_once(source: Path, destination: Path) -> Path:
     if destination.exists():
         return destination
@@ -50,6 +66,139 @@ def _copy_file_once(source: Path, destination: Path) -> None:
     shutil.copy2(source, destination)
 
 
+def _read_env_file(path: Path) -> dict[str, str]:
+    if not path.exists() or not path.is_file():
+        return {}
+
+    values: dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
+            continue
+        values[key] = value.strip().strip("'\"")
+    return values
+
+
+def _append_missing_env_values(path: Path, values: dict[str, str | None]) -> None:
+    existing = _read_env_file(path)
+    missing = {
+        key: value
+        for key, value in values.items()
+        if value and not existing.get(key)
+    }
+    if not missing:
+        return
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8", newline="\n") as handle:
+        if path.exists() and path.stat().st_size > 0:
+            handle.write("\n")
+        handle.write("# Added by WebAgent runtime context.\n")
+        for key, value in missing.items():
+            escaped = str(value).replace("\n", "").replace("\r", "")
+            handle.write(f"{key}={escaped}\n")
+
+
+def _write_runtime_env_values(path: Path, values: dict[str, str | None]) -> None:
+    managed_keys = {key for key, value in values.items() if value}
+    if not managed_keys:
+        return
+
+    existing_lines = (
+        path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        if path.exists()
+        else []
+    )
+    preserved_lines: list[str] = []
+    for raw_line in existing_lines:
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            preserved_lines.append(raw_line)
+            continue
+        key = line.split("=", 1)[0].strip()
+        if key not in managed_keys:
+            preserved_lines.append(raw_line)
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    output_lines = preserved_lines
+    if output_lines and output_lines[-1].strip():
+        output_lines.append("")
+    output_lines.append("# Managed by WebAgent runtime context.")
+    for key in sorted(managed_keys):
+        value = str(values[key]).replace("\n", "").replace("\r", "")
+        output_lines.append(f"{key}={value}")
+    path.write_text("\n".join(output_lines) + "\n", encoding="utf-8")
+
+
+def _sync_runtime_env(
+    hermes_env_path: Path,
+    openclaw_env_path: Path,
+    model_runtime_config: ModelRuntimeConfig | None = None,
+) -> None:
+    if model_runtime_config is not None:
+        common_values = model_runtime_config.env_values()
+        _write_runtime_env_values(hermes_env_path, common_values)
+        _write_runtime_env_values(openclaw_env_path, common_values)
+        return
+
+    sensenova_base_url = settings.sensenova_base_url or environ.get("SENSENOVA_BASE_URL")
+    sensenova_api_key = settings.sensenova_api_key or environ.get("SENSENOVA_API_KEY")
+    openai_base_url = environ.get("OPENAI_BASE_URL") or sensenova_base_url
+    openai_api_key = environ.get("OPENAI_API_KEY") or sensenova_api_key
+    serper_api_key = environ.get("SERPER_API_KEY")
+
+    common_values = {
+        "SENSENOVA_API_KEY": sensenova_api_key,
+        "SENSENOVA_BASE_URL": sensenova_base_url,
+        "OPENAI_API_KEY": openai_api_key,
+        "OPENAI_BASE_URL": openai_base_url,
+        "SERPER_API_KEY": serper_api_key,
+    }
+    _append_missing_env_values(hermes_env_path, common_values)
+    _append_missing_env_values(openclaw_env_path, common_values)
+
+
+def _ensure_hermes_config(
+    source_home: Path,
+    destination_home: Path,
+    model_runtime_config: ModelRuntimeConfig | None = None,
+) -> None:
+    source_config = source_home / "config.yaml"
+    destination_config = destination_home / "config.yaml"
+    if model_runtime_config is not None:
+        destination_config.parent.mkdir(parents=True, exist_ok=True)
+        destination_config.write_text(model_runtime_config.hermes_config_yaml(), encoding="utf-8")
+        return
+
+    if source_config.exists() and source_config.is_file():
+        _copy_file_once(source_config, destination_config)
+        return
+
+    if destination_config.exists():
+        return
+
+    base_url = settings.sensenova_base_url or environ.get("SENSENOVA_BASE_URL")
+    if not base_url:
+        return
+
+    destination_config.write_text(
+        "\n".join(
+            [
+                "model:",
+                f'  default: "{settings.sensenova_default_model}"',
+                '  provider: "custom"',
+                f'  base_url: "{base_url}"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
 def shell_path(path: Path) -> str:
     resolved = path.resolve()
     if os_name != "nt":
@@ -63,6 +212,7 @@ def shell_path(path: Path) -> str:
 class UserRuntimeContext:
     user_id: str
     conversation_id: str
+    run_id: str | None
     root_dir: Path
     hermes_home: Path
     hermes_skills_dir: Path
@@ -90,14 +240,23 @@ class UserRuntimeContext:
 def build_user_runtime_context(
     user: User,
     conversation_id: str | None = None,
+    run_id: str | None = None,
+    model_runtime_config: ModelRuntimeConfig | None = None,
 ) -> UserRuntimeContext:
-    root = runtime_conversation_dir(user, conversation_id)
+    root = runtime_run_dir(user, conversation_id, run_id)
     hermes_home = root / "hermes-home"
     openclaw_home = root / "openclaw-home"
     hermes_home.mkdir(parents=True, exist_ok=True)
     openclaw_home.mkdir(parents=True, exist_ok=True)
-    _copy_file_once(Path(settings.hermes_home) / ".env", hermes_home / ".env")
+    base_hermes_home = Path(settings.hermes_home)
+    _copy_file_once(base_hermes_home / ".env", hermes_home / ".env")
+    _ensure_hermes_config(base_hermes_home, hermes_home, model_runtime_config)
     _copy_file_once(Path.home() / ".openclaw" / ".env", openclaw_home / ".openclaw" / ".env")
+    _sync_runtime_env(
+        hermes_home / ".env",
+        openclaw_home / ".openclaw" / ".env",
+        model_runtime_config,
+    )
 
     hermes_source = (
         Path(settings.hermes_skills_dir)
@@ -120,6 +279,7 @@ def build_user_runtime_context(
     return UserRuntimeContext(
         user_id=user.id,
         conversation_id=conversation_id or "default",
+        run_id=run_id,
         root_dir=root,
         hermes_home=hermes_home,
         hermes_skills_dir=hermes_skills_dir,

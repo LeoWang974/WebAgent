@@ -35,6 +35,10 @@ class AgentRun(ApiModel):
     error: str | None = None
     output: str | None = None
     adapter_key: str | None = None
+    model_config_id: str | None = None
+    model_provider: str | None = None
+    model_name: str | None = None
+    model_base_url: str | None = None
 
 
 class AgentRunCreate(ApiModel):
