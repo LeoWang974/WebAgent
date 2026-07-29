@@ -11,7 +11,7 @@ from ..schemas import AgentArtifactRef, AgentRun, AgentRunCreate, AgentRunEvent,
 from .base import AgentRuntimeAdapter
 from .openclaw_utils import (
     OPENCLAW_EVENT_PROTOCOL,
-    OPENCLAW_SKILL_MAPPING,
+    OPENCLAW_SKILL_NAMES,
     artifact_to_payload,
     clean_text_output,
     extract_output,
@@ -155,10 +155,7 @@ class OpenClawAdapter(AgentRuntimeAdapter):
         report_dirs.update(self._extract_file_parent_dirs(input_data.content))
 
         if input_data.skill_key:
-            skill_name = self._skill_mapping(input_data.skill_key).get(
-                "name",
-                input_data.skill_key,
-            )
+            skill_name = OPENCLAW_SKILL_NAMES.get(input_data.skill_key, input_data.skill_key)
             yield self._stage_event(
                 run_id,
                 "stage_started",
@@ -400,12 +397,6 @@ class OpenClawAdapter(AgentRuntimeAdapter):
         if input_data.session_id:
             args.extend(["--session-id", input_data.session_id])
         return self._build_cli_args(args)
-
-    @staticmethod
-    def _skill_mapping(skill_key: str | None) -> dict[str, str]:
-        if not skill_key:
-            return {}
-        return OPENCLAW_SKILL_MAPPING.get(skill_key, {})
 
     def _build_openclaw_message(self, input_data: AgentRunCreate) -> str:
         return input_data.content
@@ -919,7 +910,10 @@ for item in sorted(matches):
         )
 
     @staticmethod
-    def _summarize_task_label(task: dict[str, object]) -> str:
+    def _summarize_task_label(
+        task: dict[str, object],
+        skill_key: str | None = None,
+    ) -> str:
         task_text = OpenClawAdapter._repair_mojibake(str(task.get("task") or ""))
         status = str(task.get("status") or "running")
         dimension_match = re.search(r"dimension_id\s*:\s*([A-Za-z0-9_-]+)", task_text)
@@ -963,9 +957,9 @@ for item in sorted(matches):
                 return OpenClawAdapter._compact_label(OpenClawAdapter._repair_mojibake(value))
 
         runtime = str(task.get("runtime") or "task")
-        if "webagent_skill=ppt_generation" in task_text and status in {"queued", "running"}:
+        if skill_key == "ppt_generation" and status in {"queued", "running"}:
             return "OpenClaw is generating slides and watching for PPT/HTML artifacts."
-        if "webagent_skill=html_generation" in task_text and status in {"queued", "running"}:
+        if skill_key == "html_generation" and status in {"queued", "running"}:
             source_match = re.search(
                 r"path=([^\s]+(?:\.md|\.markdown))",
                 task_text,
@@ -973,7 +967,7 @@ for item in sorted(matches):
             )
             source_name = Path(source_match.group(1)).name if source_match else "source report"
             return f"OpenClaw is generating an HTML report from {source_name}."
-        if "webagent_skill=deep_research" in task_text and status in {"queued", "running"}:
+        if skill_key == "deep_research" and status in {"queued", "running"}:
             title_match = re.search(r"《([^》]+)》", task_text)
             title = f"《{title_match.group(1)}》" if title_match else "the research topic"
             return f"OpenClaw is researching {title} and collecting report artifacts."
@@ -1272,7 +1266,7 @@ for item in sorted(matches):
         ]
         if matching_tasks:
             display_task = next(iter(running_tasks), matching_tasks[0])
-            label = self._summarize_task_label(display_task)
+            label = self._summarize_task_label(display_task, input_data.skill_key)
         elif report_dirs:
             label = "OpenClaw is still working; watching the report directory."
         else:

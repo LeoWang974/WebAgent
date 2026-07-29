@@ -7,56 +7,12 @@ from ..schemas import AgentArtifactRef
 
 OPENCLAW_EVENT_PROTOCOL = "openclaw.event.v1"
 
-OPENCLAW_SKILL_MAPPING = {
-    "data_analysis": {
-        "name": "OpenClaw data analysis",
-        "capability": "data_analysis",
-        "instruction": (
-            "Run OpenClaw's data analysis workflow. Prefer attached or referenced CSV/XLSX/table "
-            "artifacts, inspect the data, summarize findings, and create a concise report or table."
-        ),
-        "artifact_type_hint": "data_table or markdown_report",
-    },
-    "deep_research": {
-        "name": "OpenClaw research",
-        "capability": "research",
-        "instruction": (
-            "Run OpenClaw's research workflow. Search and synthesize evidence, "
-            "keep citations clear, "
-            "and produce one final report instead of scattering the answer across sub-reports."
-        ),
-        "artifact_type_hint": "markdown_report or html_page",
-    },
-    "ppt_generation": {
-        "name": "OpenClaw presentation generation",
-        "capability": "presentation",
-        "instruction": (
-            "Run OpenClaw's presentation generation workflow. Prefer the sn-ppt-workbench skill "
-            "when it is available. Use the most relevant source report or HTML content, generate "
-            "slide pages, and export a PPTX deliverable when possible."
-        ),
-        "artifact_type_hint": "ppt_deck and optional html_page fallback",
-    },
-    "html_generation": {
-        "name": "OpenClaw HTML report generation",
-        "capability": "html_report_generation",
-        "instruction": (
-            "Run OpenClaw's report-html-v2 workflow. Use the most relevant source Markdown "
-            "report path from the WebAgent runtime context, generate a standalone HTML report, "
-            "and do not redo research unless the source report is missing."
-        ),
-        "artifact_type_hint": "html_page",
-    },
-    "u1_image": {
-        "name": "OpenClaw image generation",
-        "capability": "image_generation",
-        "instruction": (
-            "Run OpenClaw's image generation workflow. Treat U1 as the image "
-            "generation capability, "
-            "not as a reference image name. Generate image files matching the user's request."
-        ),
-        "artifact_type_hint": "image_result",
-    },
+OPENCLAW_SKILL_NAMES = {
+    "data_analysis": "OpenClaw data analysis",
+    "deep_research": "OpenClaw research",
+    "ppt_generation": "OpenClaw presentation generation",
+    "html_generation": "OpenClaw HTML report generation",
+    "u1_image": "OpenClaw image generation",
 }
 
 

@@ -13,14 +13,16 @@ def test_hermes_ppt_generation_uses_workbench_skill_entrypoint():
     assert adapter._get_skills_for_skill("ppt_generation") == "sn-ppt-workbench"
 
 
-def test_hermes_deep_research_prompt_includes_serper_runtime_note():
-    prompt = HermesAdapter._build_runtime_prompt("请调研青年线下社交", "deep_research")
+def test_hermes_deep_research_prompt_is_unchanged():
+    content = "请调研青年线下社交"
 
-    assert "SEARCH_PROVIDER=serper" in prompt
-    assert "Serper is configured and reachable" in prompt
-    assert "Do not judge search availability" in prompt
-    assert "User request:" in prompt
-    assert "请调研青年线下社交" in prompt
+    assert HermesAdapter._build_runtime_prompt(content, "deep_research") == content
+
+
+def test_hermes_serper_prompt_is_unchanged():
+    content = "请使用 Serper 搜索资料"
+
+    assert HermesAdapter._build_runtime_prompt(content, None) == content
 
 
 def test_hermes_plain_chat_prompt_is_unchanged():

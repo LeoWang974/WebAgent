@@ -266,18 +266,4 @@ class HermesAdapter(AgentRuntimeAdapter):
 
     @staticmethod
     def _build_runtime_prompt(content: str, skill_key: str | None) -> str:
-        if skill_key != "deep_research" and "serper" not in content.lower():
-            return content
-
-        runtime_note = (
-            "WebAgent runtime note:\n"
-            "- SEARCH_PROVIDER=serper.\n"
-            "- Serper is configured and reachable in the WebAgent runtime environment.\n"
-            "- Use the Serper-backed search capability for web search.\n"
-            "- Do not judge search availability by running terminal tests against Google or "
-            "arbitrary external HTTPS websites; those direct requests may be blocked by the "
-            "server network policy while Serper still works.\n"
-            "- If a search attempt fails, first verify that the Serper search tool/API path was "
-            "actually used before falling back to knowledge-only writing.\n"
-        )
-        return f"{runtime_note}\nUser request:\n{content}"
+        return content

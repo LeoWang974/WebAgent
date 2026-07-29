@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
 from app.models import Artifact
 
 SUPPORTED_CONTEXT_SKILLS = {
@@ -197,75 +196,6 @@ def title_match_score(content: str, title: str) -> int:
         if token.lower() in normalized_content:
             return 20
     return 0
-
-
-def instruction_for_skill(skill_key: str, adapter_key: str | None = None) -> str:
-    adapter = normalized_adapter_key(adapter_key)
-    if adapter == "openclaw":
-        return openclaw_instruction_for_skill(skill_key)
-    return hermes_instruction_for_skill(skill_key)
-
-
-def hermes_instruction_for_skill(skill_key: str) -> str:
-    if skill_key == "data_analysis":
-        return (
-            "下方是 WebAgent 为当前会话选出的少量相关产物路径，可作为继续分析时的上下文。"
-            "如有新数据表、图表或报告产物，请在最终回复中附带文件路径，便于 WebAgent 展示。"
-        )
-    if skill_key == "deep_research":
-        return (
-            "下方是 WebAgent 为当前主题选出的少量相关报告、HTML 或数据表路径。"
-            "如有最终 Markdown/HTML 报告产物，请在最终回复中附带文件路径，便于 WebAgent 展示。"
-        )
-    if skill_key == "ppt_generation":
-        hermes_skills_dir = settings.hermes_skills_dir or f"{settings.hermes_home.rstrip('/')}/skills"
-        return (
-            "下方是 WebAgent 为当前 PPT 任务选出的少量相关 Markdown/HTML/图片路径。"
-            "可按 Hermes 自身能力选择 sn-ppt-workbench、sn-ppt-entry、sn-ppt-standard 或其他合适流程。"
-            "如生成了 PPTX 或 HTML 幻灯片，请在最终回复中附带文件路径，便于 WebAgent 预览和下载。"
-            f"可用 PPT skills 目录参考：{hermes_skills_dir}。"
-        )
-    if skill_key == "html_generation":
-        return (
-            "The paths below are WebAgent-selected context artifacts for this HTML task. "
-            "If an HTML file is produced, include its file path in the final response so "
-            "WebAgent can display it."
-        )
-    if skill_key == "u1_image":
-        return (
-            "下方是 WebAgent 为当前图像任务选出的少量相关报告、HTML、PPT 或图片路径。"
-            "如生成了图片产物，请在最终回复中附带文件路径，便于 WebAgent 展示。"
-        )
-    return ""
-
-
-def openclaw_instruction_for_skill(skill_key: str) -> str:
-    if skill_key == "data_analysis":
-        return (
-            "OpenClaw context: WebAgent selected a few relevant table/chart/report paths below. "
-            "If new analysis artifacts are produced, include their paths in the final response."
-        )
-    if skill_key == "deep_research":
-        return (
-            "OpenClaw context: WebAgent selected a few relevant prior report/data paths below. "
-            "If a final research report is produced, include its path in the final response."
-        )
-    if skill_key == "ppt_generation":
-        return (
-            "OpenClaw context: WebAgent selected a few relevant Markdown/HTML/image paths below. "
-            "If PPTX or HTML slides are produced, include their paths in the final response."
-        )
-    if skill_key == "html_generation":
-        return (
-            "OpenClaw context: WebAgent selected a few relevant markdown_report paths below. "
-            "If an HTML report is produced, include its path in the final response."
-        )
-    if skill_key == "u1_image":
-        return (
-            "OpenClaw context: WebAgent selected a few relevant report/slide/image paths below. "
-            "If image artifacts are produced, include their paths in the final response."
-        )
-    return ""
 
 
 def build_context_line(

@@ -759,7 +759,9 @@ async def test_openclaw_adapter_emits_visible_heartbeat_for_unchanged_running_ta
     monkeypatch.setattr(
         adapter,
         "_summarize_task_label",
-        lambda task: "OpenClaw is researching report and collecting report artifacts.",
+        lambda task, skill_key=None: (
+            "OpenClaw is researching report and collecting report artifacts."
+        ),
     )
 
     events = await adapter._poll_task_family_snapshot(
