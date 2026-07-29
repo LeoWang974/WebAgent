@@ -1,9 +1,10 @@
-import re
+﻿import re
 from dataclasses import dataclass
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.models import Artifact
 
 SUPPORTED_CONTEXT_SKILLS = {
@@ -208,30 +209,32 @@ def instruction_for_skill(skill_key: str, adapter_key: str | None = None) -> str
 def hermes_instruction_for_skill(skill_key: str) -> str:
     if skill_key == "data_analysis":
         return (
-            "如果用户要求继续分析已有数据，请优先从下方少量相关表格、图表或报告中选择输入。"
-            "不要一次读取所有历史产物。完成时输出生成的数据表、图表或报告文件路径。"
+            "下方是 WebAgent 为当前会话选出的少量相关产物路径，可作为继续分析时的上下文。"
+            "如有新数据表、图表或报告产物，请在最终回复中附带文件路径，便于 WebAgent 展示。"
         )
     if skill_key == "deep_research":
         return (
-            "如果用户要求继续调研已有主题，请优先参考下方少量相关报告、HTML 或数据表。"
-            "不要把历史产物全部展开。完成时输出最终 Markdown/HTML 报告文件路径。"
+            "下方是 WebAgent 为当前主题选出的少量相关报告、HTML 或数据表路径。"
+            "如有最终 Markdown/HTML 报告产物，请在最终回复中附带文件路径，便于 WebAgent 展示。"
         )
     if skill_key == "ppt_generation":
+        hermes_skills_dir = settings.hermes_skills_dir or f"{settings.hermes_home.rstrip('/')}/skills"
         return (
-            "如果用户提到已有 Markdown/HTML/图片，请优先从下方会话产物中选择最匹配文件。"
-            "生成 PPT 时必须明确输出最终 PPTX 或可转换 HTML 页面路径。"
+            "下方是 WebAgent 为当前 PPT 任务选出的少量相关 Markdown/HTML/图片路径。"
+            "可按 Hermes 自身能力选择 sn-ppt-workbench、sn-ppt-entry、sn-ppt-standard 或其他合适流程。"
+            "如生成了 PPTX 或 HTML 幻灯片，请在最终回复中附带文件路径，便于 WebAgent 预览和下载。"
+            f"可用 PPT skills 目录参考：{hermes_skills_dir}。"
         )
     if skill_key == "html_generation":
         return (
-            "If the user asks to convert or render an existing Markdown report as HTML, "
-            "prefer the most relevant markdown_report path below as the source input. "
-            "Generate a standalone HTML file and output the final HTML file path."
+            "The paths below are WebAgent-selected context artifacts for this HTML task. "
+            "If an HTML file is produced, include its file path in the final response so "
+            "WebAgent can display it."
         )
     if skill_key == "u1_image":
         return (
-            "用户提到 U1 生图时，表示调用 u1_image/sn-image-base 生图能力，"
-            "不是名为 U1 的参考图片。若用户提到已有 Markdown/HTML/PPT，"
-            "优先从下方会话产物中选择最匹配文件；直接生成图片，并在完成时输出图片文件路径。"
+            "下方是 WebAgent 为当前图像任务选出的少量相关报告、HTML、PPT 或图片路径。"
+            "如生成了图片产物，请在最终回复中附带文件路径，便于 WebAgent 展示。"
         )
     return ""
 
@@ -239,35 +242,28 @@ def hermes_instruction_for_skill(skill_key: str) -> str:
 def openclaw_instruction_for_skill(skill_key: str) -> str:
     if skill_key == "data_analysis":
         return (
-            "OpenClaw context: only use the most relevant table/chart/report paths below. "
-            "Prefer CSV/XLSX inputs, perform the requested analysis, and explicitly return "
-            "artifact_paths with artifact_type=data_table or markdown_report."
+            "OpenClaw context: WebAgent selected a few relevant table/chart/report paths below. "
+            "If new analysis artifacts are produced, include their paths in the final response."
         )
     if skill_key == "deep_research":
         return (
-            "OpenClaw context: use at most the relevant prior report/data paths below "
-            "as background. Do not expand unrelated artifacts. Produce a final research "
-            "report and explicitly return artifact_paths, artifact_type=markdown_report "
-            "or html_page, source_dir, run_id, and title."
+            "OpenClaw context: WebAgent selected a few relevant prior report/data paths below. "
+            "If a final research report is produced, include its path in the final response."
         )
     if skill_key == "ppt_generation":
         return (
-            "OpenClaw context: prefer one source Markdown/HTML report below as the deck input. "
-            "Generate a PPT deliverable when possible; if HTML slides are produced first, "
-            "return both HTML paths and the final PPTX path with artifact_type=ppt_deck/html_page."
+            "OpenClaw context: WebAgent selected a few relevant Markdown/HTML/image paths below. "
+            "If PPTX or HTML slides are produced, include their paths in the final response."
         )
     if skill_key == "html_generation":
         return (
-            "OpenClaw context: prefer exactly one source markdown_report path below as input. "
-            "Run the report-html-v2 workflow, do not redo research unless the source report "
-            "is missing, generate a standalone HTML report, and explicitly return "
-            "artifact_paths, artifact_type=html_page, source_dir, run_id, and title."
+            "OpenClaw context: WebAgent selected a few relevant markdown_report paths below. "
+            "If an HTML report is produced, include its path in the final response."
         )
     if skill_key == "u1_image":
         return (
-            "OpenClaw context: use the relevant report/slide/image paths below only as reference. "
-            "Generate image artifacts and explicitly return artifact_paths with "
-            "artifact_type=image_result, source_dir, run_id, and title."
+            "OpenClaw context: WebAgent selected a few relevant report/slide/image paths below. "
+            "If image artifacts are produced, include their paths in the final response."
         )
     return ""
 

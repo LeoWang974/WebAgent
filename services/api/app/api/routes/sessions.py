@@ -196,6 +196,13 @@ def sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+SSE_HEADERS = {
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+}
+
+
 def is_low_value_runtime_update(content: str, event_payload: dict) -> bool:
     normalized = re.sub(r"\s+", " ", content).strip().lower()
     if event_payload.get("rawActivityHeartbeat"):
@@ -419,6 +426,7 @@ async def stream_queued_agent_run(
         current_user,
         resolved_skill_key,
     )
+    yield f": {' ' * 2048}\n\n"
     yield sse("user_message", to_message(user_message).model_dump(by_alias=True))
     yield sse(
         "run_started",
@@ -828,6 +836,7 @@ async def stream_session_message(
         return StreamingResponse(
             stream_queued_agent_run(db, session_id, input_data, current_user, resolved_skill_key),
             media_type="text/event-stream",
+            headers=SSE_HEADERS,
         )
 
     async def event_stream():
@@ -1637,7 +1646,11 @@ async def stream_session_message(
             if adapter_capacity_lease is not None:
                 await adapter_capacity_lease.__aexit__(None, None, None)
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers=SSE_HEADERS,
+    )
 
 
 @router.get("/{session_id}/artifacts", response_model=list[schemas.Artifact])

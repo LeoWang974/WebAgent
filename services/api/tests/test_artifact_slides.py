@@ -1,6 +1,10 @@
 from pathlib import Path
 
-from app.api.routes.artifacts import discover_deck_slide_paths, slides_from_paths
+from app.api.routes.artifacts import (
+    dedupe_slide_artifacts,
+    discover_deck_slide_paths,
+    slides_from_paths,
+)
 from app.models import Artifact
 
 
@@ -25,6 +29,60 @@ def test_discover_deck_slide_paths_finds_png_pages(tmp_path: Path):
     paths = discover_deck_slide_paths(artifact)
 
     assert [path.name for path in paths] == ["page_001.png", "page_002.png"]
+
+
+def test_discover_deck_slide_paths_dedupes_archived_and_source_pages(tmp_path: Path):
+    deck = tmp_path / "deck.pptx"
+    pages = tmp_path / "pages"
+    source = tmp_path / "source" / "pages"
+    pages.mkdir()
+    source.mkdir(parents=True)
+    deck.write_bytes(b"pptx")
+    (pages / "page_001-archive.html").write_text("<html>archive 1</html>", encoding="utf-8")
+    (pages / "page_002-archive.html").write_text("<html>archive 2</html>", encoding="utf-8")
+    (source / "page_001.html").write_text("<html>source 1</html>", encoding="utf-8")
+    (source / "page_002.html").write_text("<html>source 2</html>", encoding="utf-8")
+
+    artifact = Artifact(
+        conversation_id="session_1",
+        title="deck",
+        type="ppt_deck",
+        status="ready",
+        artifact_metadata={
+            "path": str(deck),
+            "sourceDir": str(source.parent),
+        },
+    )
+
+    paths = discover_deck_slide_paths(artifact)
+
+    assert [path.name for path in paths] == ["page_001-archive.html", "page_002-archive.html"]
+
+
+def test_dedupe_slide_artifacts_keeps_one_artifact_per_page():
+    first = Artifact(
+        conversation_id="session_1",
+        title="page_001-archive",
+        type="html_page",
+        status="ready",
+        artifact_metadata={"filename": "page_001-archive.html"},
+    )
+    duplicate = Artifact(
+        conversation_id="session_1",
+        title="page_001",
+        type="html_page",
+        status="ready",
+        artifact_metadata={"filename": "page_001.html"},
+    )
+    second = Artifact(
+        conversation_id="session_1",
+        title="page_002-archive",
+        type="html_page",
+        status="ready",
+        artifact_metadata={"filename": "page_002-archive.html"},
+    )
+
+    assert dedupe_slide_artifacts([first, duplicate, second]) == [first, second]
 
 
 def test_slides_from_png_paths_returns_html_wrapped_images(tmp_path: Path):

@@ -15,10 +15,17 @@ export function ChatComposer() {
   const [skillKey, setSkillKey] = useState<SkillKey | undefined>();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const activeAgentRunId = useChatStore((state) => state.activeAgentRunId);
+  const agentRuns = useChatStore((state) => state.agentRuns);
+  const currentSessionId = useChatStore((state) => state.currentSessionId);
   const sendMessage = useChatStore((state) => state.sendMessage);
   const stopActiveRun = useChatStore((state) => state.stopActiveRun);
   const sendShortcut = useUiStore((state) => state.sendShortcut);
-  const running = Boolean(activeAgentRunId);
+  const currentActiveRun = agentRuns.find(
+    (run) =>
+      run.sessionId === currentSessionId &&
+      !["completed", "failed", "cancelled", "disconnected"].includes(run.status),
+  );
+  const running = Boolean(currentActiveRun);
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -84,7 +91,7 @@ export function ChatComposer() {
               <button
                 aria-label={t("stop")}
                 className="flex size-8 items-center justify-center rounded-lg border border-[#d8d8d2] bg-white text-muted-foreground hover:bg-[#f1f1ed] hover:text-foreground"
-                onClick={stopActiveRun}
+                onClick={() => stopActiveRun(currentActiveRun?.id ?? activeAgentRunId)}
                 title={t("stop")}
                 type="button"
               >

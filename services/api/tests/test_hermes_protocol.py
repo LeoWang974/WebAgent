@@ -117,3 +117,22 @@ def test_hermes_stream_event_classification():
         )
         == "stage_started"
     )
+
+
+def test_hermes_summarizes_raw_tool_lines_to_user_visible_status():
+    assert (
+        HermesCliWrapper._summarize_raw_runtime_line(
+            'curl -s "https://google.serper.dev/search" -d \'{"q":"AI support"}\''
+        )
+        == "正在使用 Serper 搜索资料..."
+    )
+    assert (
+        HermesCliWrapper._summarize_raw_runtime_line(
+            "python3 /skills/sn-ppt-standard/scripts/run_stage.py export --deck-dir /tmp/deck"
+        )
+        == "正在导出 PPTX 文件..."
+    )
+    assert (
+        HermesCliWrapper._summarize_raw_runtime_line("write /tmp/deck/pages/page_003.html")
+        == "正在生成第 3 页幻灯片..."
+    )

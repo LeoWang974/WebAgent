@@ -31,7 +31,10 @@ from app.services.adapter_limiter import (
 )
 from app.services.agent_run_workspace import run_workspace_dir
 from app.services.agent_runtime_context import build_user_runtime_context
-from app.services.artifact_discovery import create_pptx_from_html_artifacts
+from app.services.artifact_discovery import (
+    create_pptx_from_html_artifacts,
+    extract_artifact_path_strings,
+)
 from app.services.model_runtime_config import model_runtime_config_builder
 from app.services.persistence import to_artifact, to_message, to_session
 from app.services.runtime_context_builder import build_runtime_content
@@ -530,6 +533,15 @@ async def _discover_and_persist_artifacts(
             for artifact in explicit_artifacts
             if getattr(artifact, "path", "")
         ]
+    event_path_candidates: list[str] = []
+    result = await db.execute(
+        select(AgentRunEvent).where(AgentRunEvent.run_id == run.id)
+    )
+    for event in result.scalars().all():
+        event_path_candidates.extend(extract_artifact_path_strings(event.payload or {}))
+    for path in event_path_candidates:
+        if path not in explicit_artifact_paths:
+            explicit_artifact_paths.append(path)
     artifact_discovery_summary.update(
         {
             "adapter_artifact_paths": list(explicit_artifact_paths),
@@ -579,6 +591,8 @@ async def _discover_and_persist_artifacts(
         run.id,
     )
     current_run_artifacts = [artifact for artifact in stored_artifacts if artifact.run_id == run.id]
+    if skill_key == "ppt_generation" and not current_run_artifacts:
+        raise RuntimeError("PPT generation completed without producing any artifact.")
     if (
         skill_key == "ppt_generation"
         and any(artifact.type == "html_page" for artifact in current_run_artifacts)

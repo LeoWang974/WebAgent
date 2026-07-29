@@ -65,6 +65,7 @@ def _candidate_roots() -> list[Path]:
     repo_root = _repo_root()
     user_home = Path.home()
     roots = [
+        repo_root / "deep-research-reports",
         repo_root / "services" / "api" / "deep-research-reports",
         repo_root / "ppt_decks",
         repo_root / "artifacts",
@@ -429,6 +430,10 @@ def _extract_path_strings(value: Any) -> list[str]:
         for item in value:
             paths.extend(_extract_path_strings(item))
     return paths
+
+
+def extract_artifact_path_strings(value: Any) -> list[str]:
+    return _extract_path_strings(value)
 
 
 def _as_local_naive(value: datetime) -> datetime:

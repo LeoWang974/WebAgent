@@ -31,6 +31,11 @@ router = APIRouter()
 ACTIVE_RUN_STATUSES = {"queued", "running", "tool_calling", "rendering"}
 TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled", "disconnected"}
 STALE_RUN_GRACE_SECONDS = 30 * 60
+SSE_HEADERS = {
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+}
 
 
 def _build_adapter(
@@ -648,4 +653,8 @@ async def stream_agent_run_events(
             yield ": heartbeat\n\n"
             await asyncio.sleep(settings.agent_run_event_poll_interval_seconds)
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers=SSE_HEADERS,
+    )

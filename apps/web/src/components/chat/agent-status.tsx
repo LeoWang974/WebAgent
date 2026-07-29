@@ -31,6 +31,10 @@ export function AgentStatus() {
     }
 
     setDetailsOpen(true);
+    if (active) {
+      setLoadingDetails(false);
+      return;
+    }
     setLoadingDetails(true);
     await refreshAgentRun(run.id);
     setLoadingDetails(false);

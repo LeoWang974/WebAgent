@@ -93,6 +93,11 @@ class HermesCliWrapper:
             "HERMES_QUIET": "1",
             "HOME": self.hermes_home,
         }
+        self.auto_approve_commands = os.getenv("WEBAGENT_HERMES_YOLO", "1").lower() not in {
+            "0",
+            "false",
+            "no",
+        }
         self.last_artifact_paths: list[str] = []
         self.last_artifacts: list[dict[str, str | None]] = []
         self.last_diagnostics: dict[str, object] = {}
@@ -246,6 +251,7 @@ class HermesCliWrapper:
         prompt_path, wsl_prompt_path = self._prompt_file_path(question, run_id)
         pre_prompt_args = [
             self.hermes_path,
+            *(["--yolo"] if self.auto_approve_commands else []),
             "chat",
             "-q",
         ]
@@ -388,6 +394,40 @@ class HermesCliWrapper:
                         "source_dir": self._source_dir_from_path(path),
                     }
                 )
+
+    @staticmethod
+    def _summarize_raw_runtime_line(text: str) -> str | None:
+        normalized = re.sub(r"\s+", " ", ANSI_RE.sub("", text)).strip()
+        if not normalized:
+            return None
+
+        lower = normalized.lower()
+        if re.search(r"\bpage[_-]?\d+\.(?:html?|png|jpe?g)\b", lower):
+            match = re.search(r"page[_-]?(\d+)", lower)
+            return f"正在生成第 {int(match.group(1))} 页幻灯片..." if match else "正在生成幻灯片页面..."
+        if "serper" in lower or "google.serper.dev" in lower:
+            return "正在使用 Serper 搜索资料..."
+        if "curl " in lower or "http" in lower and any(word in lower for word in ("search", "fetch", "crawl")):
+            return "正在抓取和整理网页资料..."
+        if "read_file" in lower or re.search(r"\bread\s+", lower):
+            return "正在读取相关文件..."
+        if "write_file" in lower or re.search(r"\bwrite\s+", lower):
+            return "正在写入中间文件..."
+        if "search_files" in lower or re.search(r"\bfind\s+", lower) or re.search(r"\bgrep\s+", lower):
+            return "正在查找相关文件和产物..."
+        if "run_stage.py" in lower and "export" in lower:
+            return "正在导出 PPTX 文件..."
+        if "html_to_pptx" in lower or "pptx" in lower and "export" in lower:
+            return "正在转换并导出 PPTX..."
+        if "outline.json" in lower:
+            return "正在整理幻灯片大纲..."
+        if "style_spec.json" in lower:
+            return "正在生成幻灯片视觉规范..."
+        if "task_pack.json" in lower or "info_pack.json" in lower:
+            return "正在准备任务配置文件..."
+        if "report.md" in lower or "final_report" in lower:
+            return "正在处理 Markdown 报告..."
+        return None
 
     def _build_stream_event(
         self,
@@ -725,6 +765,8 @@ class HermesCliWrapper:
         line_queue: asyncio.Queue[str | None] = asyncio.Queue()
         completion_detected = False
         last_raw_activity_emit = datetime.now()
+        last_raw_summary = ""
+        last_raw_summary_emit = datetime.min
         raw_activity_interval_seconds = 120
         should_stop_on_completion_signal = skills not in {"sn-ppt-entry", "sn-ppt-workbench"}
 
@@ -892,6 +934,31 @@ class HermesCliWrapper:
                             await stop_after_completion()
                             break
                         continue
+
+                    raw_summary = self._summarize_raw_runtime_line(text)
+                    if raw_summary:
+                        now = datetime.now()
+                        should_emit_summary = (
+                            raw_summary != last_raw_summary
+                            or (now - last_raw_summary_emit).total_seconds() >= 18
+                        )
+                        if should_emit_summary:
+                            last_raw_summary = raw_summary
+                            last_raw_summary_emit = now
+                            emitted_output = True
+                            last_emitted = raw_summary
+                            self.last_diagnostics["last_stage"] = raw_summary
+                            artifact_found = len(self.last_artifact_paths) > emitted_artifact_count
+                            emitted_artifact_count = len(self.last_artifact_paths)
+                            yield self._build_stream_event(
+                                content=raw_summary,
+                                raw_log_path=raw_log_path,
+                                run_id=run_id,
+                                completion_detected=False,
+                                artifact_found=artifact_found,
+                                payload={"runtimeSummary": True, "rawLine": text[:500]},
+                            )
+                            continue
 
                     now = datetime.now()
                     if (

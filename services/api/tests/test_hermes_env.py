@@ -34,6 +34,19 @@ def test_hermes_chat_command_keeps_prompt_out_of_shell():
     assert "run_quote_test.txt" in command
 
 
+def test_hermes_chat_command_auto_approves_background_tool_calls():
+    wrapper = HermesCliWrapper(hermes_home="/home/demo/.hermes", wsl_distribution="Ubuntu")
+
+    command = wrapper._build_chat_command(
+        "请使用搜索工具生成报告",
+        skills="sn-deep-research",
+        toolsets="web,terminal,file",
+        run_id="run_yolo_test",
+    )
+
+    assert '"hermes", "--yolo", "chat", "-q"' in command
+
+
 def test_hermes_chat_exec_args_avoid_windows_shell_quoting():
     wrapper = HermesCliWrapper(hermes_home="/home/demo/.hermes", wsl_distribution="Ubuntu")
 

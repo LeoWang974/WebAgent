@@ -1,4 +1,4 @@
-from types import SimpleNamespace
+﻿from types import SimpleNamespace
 
 import pytest
 
@@ -93,7 +93,8 @@ async def test_runtime_context_builder_prioritizes_final_reports_and_limits_path
     assert context.count(" -> ") == 6
     assert "1. markdown_report: 未来餐桌深度研究报告" in context
     assert "plan.md" not in context
-    assert ".hermes/skills" not in context
+    artifact_lines = [line for line in context.splitlines() if " -> " in line]
+    assert all(".hermes/skills" not in line for line in artifact_lines)
 
 
 @pytest.mark.asyncio
@@ -137,7 +138,7 @@ async def test_runtime_context_builder_injects_markdown_for_openclaw_html_genera
     )
 
     assert "[WebAgent runtime context: openclaw]" in result
-    assert "report-html-v2 workflow" in result
+    assert "WebAgent selected a few relevant markdown_report paths" in result
     assert "artifact_1: type=markdown_report" in result
     assert "path=/home/demo/report.md" in result
     assert result.count("path=") == 2

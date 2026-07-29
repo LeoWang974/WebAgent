@@ -95,6 +95,13 @@ def slide_path_sort_key(path: Path) -> tuple[int, str]:
     return (int(match.group(1)) if match else 9999, path.name)
 
 
+def slide_identity(value: str) -> str:
+    match = re.search(r"page[_-]?(\d+)", value, re.IGNORECASE)
+    if match:
+        return f"page_{int(match.group(1)):03d}"
+    return value.lower()
+
+
 def is_deck_slide_path(path: Path) -> bool:
     return re.search(r"page[_-]?\d+", path.stem, re.IGNORECASE) is not None
 
@@ -140,6 +147,7 @@ def deck_slide_directories(artifact: Artifact) -> list[Path]:
 def discover_deck_slide_paths(artifact: Artifact) -> list[Path]:
     slide_paths: list[Path] = []
     seen_paths: set[str] = set()
+    seen_slides: set[str] = set()
     for directory in deck_slide_directories(artifact):
         for path in directory.glob("*"):
             if not path.is_file() or path.suffix.lower() not in DECK_SLIDE_SUFFIXES:
@@ -147,9 +155,11 @@ def discover_deck_slide_paths(artifact: Artifact) -> list[Path]:
             if not is_deck_slide_path(path):
                 continue
             path_key = str(path).lower()
-            if path_key in seen_paths:
+            slide_key = slide_identity(path.stem)
+            if path_key in seen_paths or slide_key in seen_slides:
                 continue
             seen_paths.add(path_key)
+            seen_slides.add(slide_key)
             slide_paths.append(path)
 
     return sorted(slide_paths, key=slide_path_sort_key)
@@ -200,6 +210,20 @@ def slides_from_paths(artifact: Artifact, paths: list[Path]) -> list[schemas.Sli
             )
         )
     return slides
+
+
+def dedupe_slide_artifacts(artifacts: list[Artifact]) -> list[Artifact]:
+    deduped: list[Artifact] = []
+    seen: set[str] = set()
+    for artifact in artifacts:
+        metadata = artifact.artifact_metadata or {}
+        filename = str(metadata.get("filename") or artifact.title or artifact.id)
+        key = slide_identity(filename)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(artifact)
+    return deduped
 
 
 @router.get("", response_model=list[schemas.Artifact])
@@ -291,7 +315,9 @@ async def get_artifact_slides(
                 Artifact.type == "html_page",
             )
         )
-        html_artifacts = sorted(html_result.scalars().all(), key=slide_sort_key)
+        html_artifacts = dedupe_slide_artifacts(
+            sorted(html_result.scalars().all(), key=slide_sort_key)
+        )
         slides = [
             schemas.SlidePreview(
                 content=html_artifact.content,

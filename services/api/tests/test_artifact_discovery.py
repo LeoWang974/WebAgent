@@ -24,8 +24,10 @@ def test_normalized_path_key_unifies_windows_and_wsl_paths():
 
 def test_candidate_roots_include_hermes_deep_research_reports():
     roots = [str(root).replace("\\", "/") for root in _candidate_roots()]
+    repo_root = str(_repo_root()).replace("\\", "/")
 
     assert any("/.hermes/deep-research-reports" in root for root in roots)
+    assert f"{repo_root}/deep-research-reports" in roots
 
 
 def test_create_artifacts_from_paths_dedupes_by_content_hash(tmp_path: Path):
