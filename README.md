@@ -168,14 +168,14 @@ pnpm --filter web run clean
 
 ## Linux / CCI Server Notes
 
-The next deployment target is a Linux CCI environment. The recommended shape is:
+The CCI environment does not provide Docker. Treat bare Linux processes as the
+primary deployment path:
 
 1. Install and validate agent_pack, Hermes, OpenClaw, SenseNova credentials, and
    Serper credentials in an isolated host directory.
-2. Build WebAgent images from this repository.
-3. Run WebAgent API/Web containers with PostgreSQL and Redis.
-4. Connect the API container to the host-side Hermes/OpenClaw runtime through
-   mounted paths or gateway URLs.
+2. Clone or pull this repository inside the isolated CCI workspace.
+3. Run FastAPI, Celery worker, and Next.js through `scripts/cci-start.sh`.
+4. Keep PostgreSQL and Redis as host services or platform-managed services.
 5. Verify login, conversations, Agent Run SSE, artifacts, sharing permissions,
    and long Hermes/OpenClaw tasks.
 
@@ -184,7 +184,7 @@ CCI web port convention:
 - Web app: `http://<cci-host>:3000/app`
 - API health: `http://<cci-host>:8010/api/health`
 - `scripts/cci-start.sh` defaults to `WEB_PORT=3000` for bare Linux runs.
-- Docker Compose can use the same convention by setting `WEB_PORT=3000`.
+- Docker files remain development artifacts and are not the CCI deployment path.
 
 The Windows PowerShell scripts remain local development helpers, not Linux
 service runners:
@@ -195,8 +195,8 @@ service runners:
   `ws://127.0.0.1:18789`.
 - `scripts/stop-dev.ps1`: stops `3002`, `8010`, and `18789`.
 
-On Linux/CCI, replace them with Docker Compose, platform container settings, or
-systemd/tmux only for host-side Hermes/OpenClaw helper processes.
+On Linux/CCI, use `scripts/cci-start.sh` or an equivalent process manager such
+as systemd, supervisord, or tmux.
 
 ## Agent Runtime And Search Configuration
 
@@ -212,10 +212,10 @@ The OpenClaw event contract expected by WebAgent is documented in:
 docs/OPENCLAW_EVENT_PROTOCOL.md
 ```
 
-When the project moves to the mac server, deploy a Hermes/OpenClaw installation
-that uses the same runtime contract. For OpenClaw, either keep the current
-fallback behavior or deploy a protocol-capable fork/branch that emits
-`openclaw.event.v1` events from `openclaw tasks list --json`.
+When deploying to CCI or another Linux server, use a Hermes/OpenClaw
+installation that follows the same runtime contract. For OpenClaw, either keep
+the current fallback behavior or deploy a protocol-capable fork/branch that
+emits `openclaw.event.v1` events from `openclaw tasks list --json`.
 
 Search configuration:
 
