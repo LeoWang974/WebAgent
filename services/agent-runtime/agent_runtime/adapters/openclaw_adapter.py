@@ -408,24 +408,7 @@ class OpenClawAdapter(AgentRuntimeAdapter):
         return OPENCLAW_SKILL_MAPPING.get(skill_key, {})
 
     def _build_openclaw_message(self, input_data: AgentRunCreate) -> str:
-        mapping = self._skill_mapping(input_data.skill_key)
-        if not mapping:
-            return input_data.content
-
-        protocol_instruction = (
-            "When artifacts are created, return a JSON-compatible artifact protocol with: "
-            "artifact_paths, artifact_type, source_dir, run_id, and title. "
-            f"Expected artifact_type: {mapping['artifact_type_hint']}."
-        )
-        return (
-            f"[WebAgent skill mapping]\n"
-            f"webagent_skill={input_data.skill_key}\n"
-            f"webagent_run_id={input_data.run_id or input_data.session_id}\n"
-            f"openclaw_capability={mapping['capability']}\n"
-            f"{mapping['instruction']}\n"
-            f"{protocol_instruction}\n\n"
-            f"[User request]\n{input_data.content}"
-        )
+        return input_data.content
 
     def _build_local_cli_args(self, input_data: AgentRunCreate) -> list[str]:
         previous_mode = self.mode

@@ -10,6 +10,9 @@ AGENT_BIN_DIR="$ROOT_DIR/runtime/agent-home/.local/bin"
 HERMES_NODE_DIR="$ROOT_DIR/runtime/agent-home/.hermes/node/bin"
 WEB_PORT="${WEB_PORT:-3000}"
 API_PORT="${API_PORT:-8010}"
+WEB_PUBLIC_API_BASE_URL="${NEXT_PUBLIC_API_BASE_URL:-}"
+WEB_PUBLIC_API_ADAPTER="${NEXT_PUBLIC_API_ADAPTER:-fastapi}"
+DEFAULT_CORS_ORIGINS="http://localhost:$WEB_PORT,http://127.0.0.1:$WEB_PORT,http://localhost:3300,http://127.0.0.1:3300,http://localhost:3002,http://127.0.0.1:3002"
 
 cd "$REPO_DIR"
 mkdir -p "$LOG_DIR"
@@ -28,6 +31,7 @@ fi
 
 export PATH="$AGENT_BIN_DIR:$HERMES_NODE_DIR:$PATH"
 export PYTHONPATH="$REPO_DIR/services/api:$REPO_DIR/services/agent-runtime"
+export BACKEND_CORS_ORIGINS="${BACKEND_CORS_ORIGINS:-$DEFAULT_CORS_ORIGINS}"
 
 CA_BUNDLE="${SSL_CERT_FILE:-${REQUESTS_CA_BUNDLE:-}}"
 if [ -n "$CA_BUNDLE" ] && [ ! -f "$CA_BUNDLE" ]; then
@@ -85,13 +89,29 @@ nohup "$PYTHON_BIN" -m celery -A app.workers.celery_app.celery_app worker \
 if ! command -v pnpm >/dev/null 2>&1; then
   echo "Missing pnpm on PATH; API and worker started, web was not started." >&2
 else
-  if [ ! -d "$REPO_DIR/apps/web/.next-build" ]; then
-    NEXT_PUBLIC_API_BASE_URL="${NEXT_PUBLIC_API_BASE_URL:-}" \
-    NEXT_PUBLIC_API_ADAPTER="${NEXT_PUBLIC_API_ADAPTER:-fastapi}" \
-    pnpm --filter web build >> "$LOG_DIR/webagent-web.log" 2>&1
+  BUILD_ENV_STAMP="$REPO_DIR/apps/web/.next-build/.webagent-env"
+  CURRENT_BUILD_ENV="NEXT_PUBLIC_API_BASE_URL=$WEB_PUBLIC_API_BASE_URL
+NEXT_PUBLIC_API_ADAPTER=$WEB_PUBLIC_API_ADAPTER"
+  WEB_SOURCE_CHANGED=false
+  if [ -f "$BUILD_ENV_STAMP" ] && find \
+    "$REPO_DIR/apps/web/src" \
+    "$REPO_DIR/apps/web/package.json" \
+    "$REPO_DIR/apps/web/next.config.ts" \
+    -newer "$BUILD_ENV_STAMP" -print -quit | grep -q .; then
+    WEB_SOURCE_CHANGED=true
   fi
-  NEXT_PUBLIC_API_BASE_URL="${NEXT_PUBLIC_API_BASE_URL:-}" \
-  NEXT_PUBLIC_API_ADAPTER="${NEXT_PUBLIC_API_ADAPTER:-fastapi}" \
+  if [ ! -d "$REPO_DIR/apps/web/.next-build" ] || \
+    [ ! -f "$BUILD_ENV_STAMP" ] || \
+    [ "$(cat "$BUILD_ENV_STAMP" 2>/dev/null || true)" != "$CURRENT_BUILD_ENV" ] || \
+    [ "$WEB_SOURCE_CHANGED" = true ]; then
+    rm -rf "$REPO_DIR/apps/web/.next-build"
+    NEXT_PUBLIC_API_BASE_URL="$WEB_PUBLIC_API_BASE_URL" \
+    NEXT_PUBLIC_API_ADAPTER="$WEB_PUBLIC_API_ADAPTER" \
+    pnpm --filter web build >> "$LOG_DIR/webagent-web.log" 2>&1
+    printf "%s" "$CURRENT_BUILD_ENV" > "$BUILD_ENV_STAMP"
+  fi
+  NEXT_PUBLIC_API_BASE_URL="$WEB_PUBLIC_API_BASE_URL" \
+  NEXT_PUBLIC_API_ADAPTER="$WEB_PUBLIC_API_ADAPTER" \
   nohup pnpm --filter web exec next start -H 0.0.0.0 -p "$WEB_PORT" \
     >> "$LOG_DIR/webagent-web.log" 2>&1 &
 fi

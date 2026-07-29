@@ -124,6 +124,13 @@ def _is_ignored(path: Path) -> bool:
     return any(part in IGNORED_PARTS for part in path.parts)
 
 
+def _is_regular_artifact_candidate(path: Path) -> bool:
+    try:
+        return path.is_file() and not _is_ignored(path)
+    except OSError:
+        return False
+
+
 def _is_non_artifact_path(path: str | Path) -> bool:
     normalized = str(path).replace("\\", "/").lower()
     return any(marker.replace("\\", "/") in normalized for marker in NON_ARTIFACT_MARKERS)
@@ -296,7 +303,7 @@ def _artifact_from_path(
     original_path: str | None = None,
     title_override: str | None = None,
 ) -> schemas.Artifact | None:
-    if not path.exists() or not path.is_file() or _is_ignored(path):
+    if not _is_regular_artifact_candidate(path):
         return None
     if path.name.lower() in IGNORED_FILENAMES:
         return None
@@ -332,7 +339,7 @@ def _normalize_path(raw_path: str) -> Path:
 def _archive_artifact_path(path: Path, run_id: str | None) -> Path:
     if not run_id:
         return path
-    if not path.exists() or not path.is_file():
+    if not _is_regular_artifact_candidate(path):
         return path
 
     artifact_dir = _runtime_artifacts_dir(run_id)
@@ -660,7 +667,7 @@ def discover_related_artifact_paths(
         if not directory.exists() or not directory.is_dir():
             continue
         for path in directory.rglob("*"):
-            if not path.is_file() or _is_ignored(path):
+            if not _is_regular_artifact_candidate(path):
                 continue
             if _is_repo_runtime_temp_path(path):
                 continue
@@ -750,7 +757,7 @@ def discover_artifacts_since(
             continue
 
         for path in root.rglob("*"):
-            if not path.is_file() or _is_ignored(path):
+            if not _is_regular_artifact_candidate(path):
                 continue
             if _is_repo_runtime_temp_path(path):
                 continue

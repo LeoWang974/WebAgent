@@ -221,27 +221,15 @@ def resolve_skill_key(content: str, explicit_skill_key: str | None) -> str | Non
         return explicit_skill_key
 
     normalized = content.lower()
-    html_generation_aliases = (
-        "report-html-v2",
-        "report html",
-        "html report",
-        "html文件",
-        "输出html",
-        "生成html",
-        "生成 html",
-        "输出 html",
-    )
-    if any(alias in normalized for alias in html_generation_aliases):
-        return "html_generation"
-
-    skill_aliases = [
-        ("deep_research", ["sn-deep-research", "deep research", "深度调研", "调研", "研究报告"]),
-        ("data_analysis", ["sn-da", "data analysis", "数据分析", "分析数据", "表格分析"]),
-        ("ppt_generation", ["sn-ppt", "ppt", "幻灯片", "演示文稿"]),
-        ("u1_image", ["u1", "生图", "生成图片", "图像生成"]),
+    explicit_aliases = [
+        ("html_generation", ["report-html-v2", "html_generation"]),
+        ("deep_research", ["sn-deep-research", "deep_research"]),
+        ("data_analysis", ["sn-da", "data_analysis"]),
+        ("ppt_generation", ["sn-ppt", "sn-ppt-workbench", "sn-ppt-entry", "ppt_generation"]),
+        ("u1_image", ["u1_image"]),
     ]
-    for skill_key, aliases in skill_aliases:
-        if any(alias.lower() in normalized for alias in aliases):
+    for skill_key, aliases in explicit_aliases:
+        if any(alias in normalized for alias in aliases):
             return skill_key
     return None
 
@@ -1676,4 +1664,3 @@ async def list_session_artifacts(
 @router.get("/{session_id}/files", response_model=list[schemas.FileAsset])
 async def list_session_files(session_id: str) -> list[schemas.FileAsset]:
     return [item for item in mock_store.files if item.session_id == session_id]
-

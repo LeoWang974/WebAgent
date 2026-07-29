@@ -46,6 +46,13 @@ from app.services.session_artifacts import (
 )
 
 logger = logging.getLogger(__name__)
+PRIMARY_ARTIFACT_TYPES_BY_SKILL = {
+    "data_analysis": {"data_table", "markdown_report", "html_page"},
+    "deep_research": {"markdown_report", "html_page"},
+    "html_generation": {"html_page"},
+    "ppt_generation": {"ppt_deck"},
+    "u1_image": {"image_result"},
+}
 
 
 async def _load_run_context(
@@ -591,6 +598,14 @@ async def _discover_and_persist_artifacts(
         run.id,
     )
     current_run_artifacts = [artifact for artifact in stored_artifacts if artifact.run_id == run.id]
+    required_primary_types = PRIMARY_ARTIFACT_TYPES_BY_SKILL.get(skill_key or "")
+    if required_primary_types and not any(
+        artifact.type in required_primary_types for artifact in current_run_artifacts
+    ):
+        expected = ", ".join(sorted(required_primary_types))
+        raise RuntimeError(
+            f"{skill_key} completed without producing a primary artifact ({expected})."
+        )
     if skill_key == "ppt_generation" and not current_run_artifacts:
         raise RuntimeError("PPT generation completed without producing any artifact.")
     if (

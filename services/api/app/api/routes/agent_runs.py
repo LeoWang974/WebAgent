@@ -413,6 +413,7 @@ async def record_db_agent_run_event(
     run.status = status or run.status
     if progress is not None:
         run.progress = progress
+    run.updated_at = datetime.now(UTC)
     event_payload = {
         "eventType": event_type,
         "status": run.status,

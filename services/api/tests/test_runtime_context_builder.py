@@ -62,7 +62,7 @@ async def test_runtime_context_builder_injects_limited_deep_research_context():
         "deep_research",
     )
 
-    context = result.split("[WebAgent runtime context: hermes]", maxsplit=1)[1]
+    context = result.split("[WebAgent related artifacts: hermes]", maxsplit=1)[1]
     assert "Available artifacts" not in result
     assert context.count(" -> ") == 3
     assert "未来餐桌报告" in context
@@ -89,7 +89,7 @@ async def test_runtime_context_builder_prioritizes_final_reports_and_limits_path
         "ppt_generation",
     )
 
-    context = result.split("[WebAgent runtime context: hermes]", maxsplit=1)[1]
+    context = result.split("[WebAgent related artifacts: hermes]", maxsplit=1)[1]
     assert context.count(" -> ") == 6
     assert "1. markdown_report: 未来餐桌深度研究报告" in context
     assert "plan.md" not in context
@@ -114,8 +114,8 @@ async def test_runtime_context_builder_uses_openclaw_context_style_and_limits_pa
         "openclaw",
     )
 
-    assert "[WebAgent runtime context: openclaw]" in result
-    assert "OpenClaw context" in result
+    assert "[WebAgent related artifacts: openclaw]" in result
+    assert "OpenClaw context" not in result
     assert "artifact_1: type=markdown_report" in result
     assert result.count("path=") == 3
     assert "artifact_4" not in result
@@ -137,8 +137,8 @@ async def test_runtime_context_builder_injects_markdown_for_openclaw_html_genera
         "openclaw",
     )
 
-    assert "[WebAgent runtime context: openclaw]" in result
-    assert "WebAgent selected a few relevant markdown_report paths" in result
+    assert "[WebAgent related artifacts: openclaw]" in result
+    assert "WebAgent selected a few relevant markdown_report paths" not in result
     assert "artifact_1: type=markdown_report" in result
     assert "path=/home/demo/report.md" in result
     assert result.count("path=") == 2

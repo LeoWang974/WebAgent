@@ -333,5 +333,8 @@ async def build_runtime_content(
         build_context_line(index, artifact, adapter)
         for index, artifact in enumerate(selected, start=1)
     )
-    instruction = instruction_for_skill(skill_key, adapter)
-    return f"{content}\n\n[WebAgent runtime context: {adapter}]\n{instruction}\n{context}"
+    return (
+        f"{content}\n\n"
+        f"[WebAgent related artifacts: {adapter}]\n"
+        f"{context}"
+    )

@@ -28,10 +28,10 @@ export function detectRequestedSkill(
 
   const normalized = content.toLowerCase();
   const skillAliases: Array<[SkillKey, string[]]> = [
-    ["deep_research", ["sn-deep-research", "deep research", "深度调研", "调研", "研究报告"]],
-    ["data_analysis", ["sn-da", "data analysis", "数据分析", "分析数据", "表格分析"]],
-    ["ppt_generation", ["sn-ppt", "ppt", "幻灯片", "演示文稿"]],
-    ["u1_image", ["u1", "生图", "生成图片", "图像生成"]],
+    ["deep_research", ["sn-deep-research", "deep_research"]],
+    ["data_analysis", ["sn-da", "data_analysis"]],
+    ["ppt_generation", ["sn-ppt", "sn-ppt-workbench", "sn-ppt-entry", "ppt_generation"]],
+    ["u1_image", ["u1_image"]],
   ];
 
   return skillAliases.find(([, aliases]) =>

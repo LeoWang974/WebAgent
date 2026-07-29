@@ -64,7 +64,7 @@ def test_openclaw_adapter_can_build_local_cli_args():
     assert "--local" in " ".join(args)
 
 
-def test_openclaw_adapter_maps_webagent_skill_to_openclaw_prompt():
+def test_openclaw_adapter_keeps_skill_prompt_unchanged():
     adapter = OpenClawAdapter(agent_id="main", command_timeout_seconds=30)
     input_data = AgentRunCreate(
         content="请生成《未来餐桌》PPT",
@@ -77,14 +77,12 @@ def test_openclaw_adapter_maps_webagent_skill_to_openclaw_prompt():
     args = adapter._build_agent_cli_args(input_data)
     joined = " ".join(args)
 
-    assert "webagent_skill=ppt_generation" in message
-    assert "openclaw_capability=presentation" in message
-    assert "artifact_paths, artifact_type, source_dir, run_id, and title" in message
-    assert "请生成《未来餐桌》PPT" in message
-    assert "openclaw_capability=presentation" in joined
+    assert message == "请生成《未来餐桌》PPT"
+    assert "webagent_skill=ppt_generation" not in joined
+    assert "openclaw_capability=presentation" not in joined
 
 
-def test_openclaw_adapter_maps_html_generation_to_report_html_prompt():
+def test_openclaw_adapter_keeps_html_generation_prompt_unchanged():
     adapter = OpenClawAdapter(agent_id="main", command_timeout_seconds=30)
     input_data = AgentRunCreate(
         content="请使用 report.md，使用report-html-v2输出HTML文件",
@@ -95,10 +93,9 @@ def test_openclaw_adapter_maps_html_generation_to_report_html_prompt():
 
     message = adapter._build_openclaw_message(input_data)
 
-    assert "webagent_skill=html_generation" in message
-    assert "openclaw_capability=html_report_generation" in message
-    assert "report-html-v2 workflow" in message
-    assert "Expected artifact_type: html_page" in message
+    assert message == "请使用 report.md，使用report-html-v2输出HTML文件"
+    assert "webagent_skill=html_generation" not in message
+    assert "report-html-v2 workflow" not in message
 
 
 def test_openclaw_adapter_uses_longer_background_timeout_for_html_generation():

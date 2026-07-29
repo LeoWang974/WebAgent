@@ -12,5 +12,9 @@ def test_resolve_skill_key_detects_report_html_v2():
     )
 
 
+def test_resolve_skill_key_does_not_detect_plain_html_request():
+    assert resolve_skill_key("输出HTML文件", None) is None
+
+
 def test_resolve_skill_key_respects_explicit_skill_key():
     assert resolve_skill_key("输出HTML文件", "ppt_generation") == "ppt_generation"

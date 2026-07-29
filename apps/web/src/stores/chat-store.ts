@@ -124,6 +124,29 @@ function startAgentRunPolling(
     if (!run) {
       return;
     }
+    if (run.sessionId === get().currentSessionId) {
+      const backendMessages = await webAgentApi.listMessages(run.sessionId);
+      useChatStore.setState((state) => {
+        const existingById = new Map(state.messages.map((message) => [message.id, message]));
+        const currentPending = state.messages.filter(
+          (message) =>
+            message.sessionId === run.sessionId &&
+            message.role === "assistant" &&
+            message.isPending,
+        );
+        const pendingMessages = isTerminalRunStatus(run.status) ? [] : currentPending;
+        return {
+          messages: [
+            ...state.messages.filter((message) => message.sessionId !== run.sessionId),
+            ...backendMessages.map((message) => ({
+              ...message,
+              waitStartedAt: existingById.get(message.id)?.waitStartedAt,
+            })),
+            ...pendingMessages,
+          ],
+        };
+      });
+    }
     if (isTerminalRunStatus(run.status)) {
       setTimeout(() => unsubscribeAgentRun(run.id), 0);
       return;
@@ -851,6 +874,63 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
     }
 
+    let backendRunDiscoveryTimer: number | undefined;
+    const stopBackendRunDiscovery = () => {
+      if (backendRunDiscoveryTimer !== undefined) {
+        window.clearInterval(backendRunDiscoveryTimer);
+        backendRunDiscoveryTimer = undefined;
+      }
+    };
+
+    if (requestedSkill) {
+      const startedAtMs = Date.parse(now);
+      backendRunDiscoveryTimer = window.setInterval(() => {
+        void webAgentApi.listAgentRuns(sessionId).then((runs) => {
+          if (currentRunId !== runId) {
+            stopBackendRunDiscovery();
+            return;
+          }
+          const backendRun = runs.find((candidate) => {
+            if (
+              candidate.id.startsWith("run_") ||
+              candidate.sessionId !== sessionId ||
+              isTerminalRunStatus(candidate.status)
+            ) {
+              return false;
+            }
+            return Date.parse(candidate.startedAt) >= startedAtMs - 10_000;
+          });
+          if (!backendRun) {
+            return;
+          }
+
+          currentRunId = bindBackendRunId(set, currentRunId, backendRun.id);
+          set((state) => ({
+            activeAgentRunId:
+              state.activeAgentRunId === runId ? backendRun.id : state.activeAgentRunId,
+            agentRuns: state.agentRuns.map((runItem) =>
+              runItem.id === backendRun.id
+                ? {
+                    ...runItem,
+                    adapterKey: backendRun.adapterKey,
+                    completedAt: backendRun.completedAt,
+                    error: backendRun.error,
+                    progress: backendRun.progress,
+                    startedAt: backendRun.startedAt,
+                    status: backendRun.status,
+                    steps: backendRun.steps,
+                  }
+                : runItem,
+            ),
+          }));
+          subscribeAgentRunEvents(get, backendRun.id);
+          stopBackendRunDiscovery();
+        }).catch(() => {
+          // The streaming request still owns visible error reporting.
+        });
+      }, 1500);
+    }
+
     try {
       await webAgentApi.sendMessageStream(
         {
@@ -1149,6 +1229,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         ),
       });
     } finally {
+      stopBackendRunDiscovery();
       if (get().activeAgentRunId !== currentRunId) {
         activeRequestAbortController = undefined;
       }
