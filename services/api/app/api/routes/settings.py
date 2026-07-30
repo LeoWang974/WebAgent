@@ -147,7 +147,7 @@ async def check_runtime_model(
     current_user: User,
     model: ModelConfig,
 ) -> dict[str, Any]:
-    from app.api.routes.agent_runs import resolve_adapter_for_model
+    from app.services.agent_runs import resolve_adapter_for_model
 
     adapter_key, adapter = await resolve_adapter_for_model(db, current_user, model.id)
     if adapter is None:

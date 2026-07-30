@@ -384,7 +384,7 @@ async def enqueue_agent_run_message(
     current_user,
     resolved_skill_key: str | None,
 ):
-    from app.api.routes.agent_runs import (
+    from app.services.agent_runs import (
         create_db_agent_run,
         record_db_agent_run_event,
         resolve_adapter_for_model,
@@ -445,7 +445,7 @@ async def stream_queued_agent_run(
     current_user,
     resolved_skill_key: str | None,
 ):
-    from app.api.routes.agent_runs import TERMINAL_RUN_STATUSES
+    from app.services.agent_runs import TERMINAL_RUN_STATUSES
 
     user_message, run = await enqueue_agent_run_message(
         db,
@@ -741,7 +741,7 @@ async def send_session_message(
     run = None
 
     try:
-        from app.api.routes.agent_runs import (
+        from app.services.agent_runs import (
             create_db_agent_run,
             finish_db_agent_run,
             record_db_agent_run_event,
@@ -824,7 +824,7 @@ async def send_session_message(
     except Exception as error:
         assistant_content = f"Agent runtime error: {error}"
         if run is not None:
-            from app.api.routes.agent_runs import finish_db_agent_run
+            from app.services.agent_runs import finish_db_agent_run
 
             await finish_db_agent_run(
                 db,
@@ -880,13 +880,13 @@ async def stream_session_message(
         run_started_monotonic = asyncio.get_running_loop().time()
 
         try:
-            from app.api.routes.agent_runs import (
+            from app.services.agent_run_executor import _complete_plain_chat_with_sensenova
+            from app.services.agent_runs import (
                 create_db_agent_run,
                 finish_db_agent_run,
                 record_db_agent_run_event,
                 resolve_adapter_for_model,
             )
-            from app.services.agent_run_executor import _complete_plain_chat_with_sensenova
 
             requested_runtime_adapter = input_data.adapter_key in {
                 "hermes",
@@ -1535,7 +1535,7 @@ async def stream_session_message(
             )
         except AgentRunCancelled:
             if run is not None:
-                from app.api.routes.agent_runs import finish_db_agent_run
+                from app.services.agent_runs import finish_db_agent_run
 
                 await finish_db_agent_run(
                     db,
@@ -1565,7 +1565,7 @@ async def stream_session_message(
         except AgentRunTimeout as error:
             logger.warning("Agent stream timed out: %s", error)
             if run is not None:
-                from app.api.routes.agent_runs import finish_db_agent_run, record_db_agent_run_event
+                from app.services.agent_runs import finish_db_agent_run, record_db_agent_run_event
 
                 await record_db_agent_run_event(
                     db,
@@ -1605,7 +1605,7 @@ async def stream_session_message(
             )
         except asyncio.CancelledError:
             if run is not None:
-                from app.api.routes.agent_runs import finish_db_agent_run
+                from app.services.agent_runs import finish_db_agent_run
 
                 artifact_result = await db.execute(
                     select(Artifact.id)
@@ -1645,7 +1645,7 @@ async def stream_session_message(
             if run is not None and adapter is not None and hasattr(adapter, "cancel_run"):
                 await adapter.cancel_run(run.id)
             if run is not None:
-                from app.api.routes.agent_runs import finish_db_agent_run, record_db_agent_run_event
+                from app.services.agent_runs import finish_db_agent_run, record_db_agent_run_event
 
                 await record_db_agent_run_event(
                     db,

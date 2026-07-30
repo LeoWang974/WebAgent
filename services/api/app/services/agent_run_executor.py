@@ -7,11 +7,6 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.routes.agent_runs import (
-    finish_db_agent_run,
-    record_db_agent_run_event,
-    resolve_adapter_for_model,
-)
 from app.api.routes.sessions import (
     AgentRunCancelled,
     AgentRunTimeout,
@@ -30,6 +25,11 @@ from app.services.adapter_limiter import (
     acquire_adapter_capacity,
 )
 from app.services.agent_run_workspace import run_workspace_dir
+from app.services.agent_runs import (
+    finish_db_agent_run,
+    record_db_agent_run_event,
+    resolve_adapter_for_model,
+)
 from app.services.agent_runtime_context import build_user_runtime_context
 from app.services.artifact_discovery import (
     create_pptx_from_html_artifacts,
@@ -81,6 +81,7 @@ async def _load_run_context(
     payload = queued_event.payload if queued_event is not None else {}
     return run, conversation, user, payload or {}
 
+
 async def execute_queued_agent_run(run_id: str) -> None:
     async with AsyncSessionLocal() as db:
         await _execute_queued_agent_run(db, run_id)
@@ -127,12 +128,7 @@ async def _complete_plain_chat_with_sensenova(
         raise RuntimeError(f"SenseNova chat request failed: {error}") from error
 
     payload = response.json()
-    reply = (
-        payload.get("choices", [{}])[0]
-        .get("message", {})
-        .get("content", "")
-        .strip()
-    )
+    reply = payload.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
     if not reply:
         raise RuntimeError("SenseNova chat returned an empty response.")
 
@@ -562,9 +558,7 @@ async def _discover_and_persist_artifacts(
             if getattr(artifact, "path", "")
         ]
     event_path_candidates: list[str] = []
-    result = await db.execute(
-        select(AgentRunEvent).where(AgentRunEvent.run_id == run.id)
-    )
+    result = await db.execute(select(AgentRunEvent).where(AgentRunEvent.run_id == run.id))
     for event in result.scalars().all():
         event_path_candidates.extend(extract_artifact_path_strings(event.payload or {}))
     for path in event_path_candidates:
@@ -659,10 +653,13 @@ async def _discover_and_persist_artifacts(
         for artifact in stored_artifacts
         if developer_mode or not is_debug_artifact(artifact)
     ]
-    response_artifacts = visible_current_run_artifacts or sorted(
-        visible_stored_artifacts,
-        key=artifact_display_priority,
-    )[-1:]
+    response_artifacts = (
+        visible_current_run_artifacts
+        or sorted(
+            visible_stored_artifacts,
+            key=artifact_display_priority,
+        )[-1:]
+    )
     artifact_discovery_summary["stored_count"] = len(stored_artifacts)
     return response_artifacts
 
