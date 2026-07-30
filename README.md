@@ -184,7 +184,12 @@ CCI web port convention:
 - Web app: `http://<cci-host>:3000/app`
 - API health: `http://<cci-host>:8010/api/health`
 - `scripts/cci-start.sh` defaults to `WEB_PORT=3000` for bare Linux runs.
+- `scripts/cci-status.sh` checks API/web readiness and tails recent logs.
+- `scripts/cci-stop.sh` stops pid-file managed API, worker, and web processes.
 - Docker files remain development artifacts and are not the CCI deployment path.
+
+Detailed CCI bare-metal runtime, environment, log, and troubleshooting notes live in
+[`docs/CCI_BARE_METAL.md`](docs/CCI_BARE_METAL.md).
 
 The Windows PowerShell scripts remain local development helpers, not Linux
 service runners:

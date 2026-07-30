@@ -50,8 +50,6 @@ NON_ARTIFACT_MARKERS = {
     "\\.hermes\\skills\\",
     "/node_modules/",
     "\\node_modules\\",
-    "/source_cache/",
-    "\\source_cache\\",
 }
 ARTIFACT_PATH_RE = re.compile(
     r"(?P<path>(?:[A-Za-z]:\\|/mnt/[^/]+/|/home/|/tmp/)[^\"'<>|`\r\n]+?\.(?:md|html?|pptx|png|jpe?g|csv|xlsx|json))",
@@ -203,6 +201,48 @@ def _artifact_type(path: Path) -> ArtifactType:
     return "markdown_report"
 
 
+def _artifact_role(path: Path, artifact_type: ArtifactType) -> str:
+    normalized = str(path).replace("\\", "/").lower()
+    filename = path.name.lower()
+    stem = path.stem.lower()
+    intermediate_names = {
+        "blueprint.json",
+        "briefing.json",
+        "evidence.json",
+        "info_pack.json",
+        "outline.json",
+        "plan.json",
+        "raw_documents.json",
+        "task_pack.json",
+        "blueprint.md",
+        "briefing.md",
+        "outline.md",
+        "plan.md",
+    }
+    intermediate_markers = {
+        "/source_cache/",
+        "/sub_reports/",
+        "/sub-reports/",
+        "/evidence/",
+        "/cache/",
+        "/tmp/",
+    }
+
+    if artifact_type == "debug_json" or filename in intermediate_names:
+        return "intermediate"
+    if any(marker in normalized for marker in intermediate_markers):
+        return "intermediate"
+    if artifact_type == "markdown_report" and stem in {
+        "plan",
+        "outline",
+        "briefing",
+        "blueprint",
+        "evidence",
+    }:
+        return "intermediate"
+    return "primary"
+
+
 def _valid_artifact_type(value: object, fallback: ArtifactType) -> ArtifactType:
     supported = set(ArtifactType.__args__)
     return value if isinstance(value, str) and value in supported else fallback
@@ -260,8 +300,11 @@ def _metadata(
     *,
     original_path: str | None = None,
 ) -> dict:
+    artifact_role = _artifact_role(path, artifact_type)
     base = {
+        "artifactRole": artifact_role,
         "contentHash": _file_sha256(path),
+        "developerOnly": artifact_role == "intermediate",
         "filename": path.name,
         "normalizedPath": _normalized_path_key(path),
         "path": str(path),

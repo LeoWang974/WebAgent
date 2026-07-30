@@ -22,21 +22,8 @@ export function detectRequestedSkill(
   content: string,
   explicitSkillKey?: SkillKey,
 ): SkillKey | undefined {
-  if (explicitSkillKey) {
-    return explicitSkillKey;
-  }
-
-  const normalized = content.toLowerCase();
-  const skillAliases: Array<[SkillKey, string[]]> = [
-    ["deep_research", ["sn-deep-research", "deep_research"]],
-    ["data_analysis", ["sn-da", "data_analysis"]],
-    ["ppt_generation", ["sn-ppt", "sn-ppt-workbench", "sn-ppt-entry", "ppt_generation"]],
-    ["u1_image", ["u1_image"]],
-  ];
-
-  return skillAliases.find(([, aliases]) =>
-    aliases.some((alias) => normalized.includes(alias.toLowerCase())),
-  )?.[0];
+  void content;
+  return explicitSkillKey;
 }
 
 export function isDefaultSessionTitle(title?: string) {
@@ -48,6 +35,7 @@ export function generateSessionTitle(content: string, skillKey?: SkillKey) {
   const skillPrefix: Record<SkillKey, string> = {
     data_analysis: "数据分析",
     deep_research: "深度调研",
+    html_generation: "HTML生成",
     ppt_generation: "PPT生成",
     u1_image: "图像生成",
   };

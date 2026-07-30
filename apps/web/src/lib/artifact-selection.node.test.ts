@@ -25,7 +25,7 @@ test("artifact_created selects a higher-priority artifact from the same run", ()
   assert.equal(
     shouldSelectCreatedArtifact({
       currentSelectedArtifact: artifact("report", "markdown_report", { runId: "run_1" }),
-      eventArtifact: artifact("image", "image_result", { runId: "run_1" }),
+      eventArtifact: artifact("deck", "ppt_deck", { runId: "run_1" }),
       selectedBelongsToTargetMessage: true,
     }),
     true,
@@ -48,6 +48,19 @@ test("artifact_created does not let debug JSON steal focus from user artifacts",
     shouldSelectCreatedArtifact({
       currentSelectedArtifact: artifact("report", "markdown_report"),
       eventArtifact: artifact("briefing", "debug_json"),
+      selectedBelongsToTargetMessage: true,
+    }),
+    false,
+  );
+});
+
+test("artifact_created does not let intermediate artifacts steal focus", () => {
+  assert.equal(
+    shouldSelectCreatedArtifact({
+      currentSelectedArtifact: artifact("deck", "ppt_deck"),
+      eventArtifact: artifact("plan", "markdown_report", {
+        metadata: { artifactRole: "intermediate", developerOnly: true },
+      }),
       selectedBelongsToTargetMessage: true,
     }),
     false,

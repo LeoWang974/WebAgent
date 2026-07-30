@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="${WEBAGENT_ROOT:-/mnt/afs/tj_share/webagent-cci}"
 REPO_DIR="$ROOT_DIR/repo/WebAgent"
 LOG_DIR="$ROOT_DIR/logs"
+RUN_DIR="$ROOT_DIR/run"
 PYTHON_BIN="$ROOT_DIR/runtime/conda-webagent/bin/python"
 AGENT_ENV="$ROOT_DIR/secrets/agent-pack.env"
 AGENT_BIN_DIR="$ROOT_DIR/runtime/agent-home/.local/bin"
@@ -16,6 +17,7 @@ DEFAULT_CORS_ORIGINS="http://localhost:$WEB_PORT,http://127.0.0.1:$WEB_PORT,http
 
 cd "$REPO_DIR"
 mkdir -p "$LOG_DIR"
+mkdir -p "$RUN_DIR"
 
 if [ ! -x "$PYTHON_BIN" ]; then
   echo "Missing Python runtime: $PYTHON_BIN" >&2
@@ -84,9 +86,11 @@ done
 
 nohup "$PYTHON_BIN" -m uvicorn app.main:app --host 0.0.0.0 --port "$API_PORT" \
   >> "$LOG_DIR/webagent-api.log" 2>&1 &
+echo "$!" > "$RUN_DIR/webagent-api.pid"
 nohup "$PYTHON_BIN" -m celery -A app.workers.celery_app.celery_app worker \
   --loglevel=INFO -Q agent-runs --concurrency="${WORKER_CONCURRENCY:-2}" \
   >> "$LOG_DIR/webagent-worker.log" 2>&1 &
+echo "$!" > "$RUN_DIR/webagent-worker.pid"
 
 if ! command -v pnpm >/dev/null 2>&1; then
   echo "Missing pnpm on PATH; API and worker started, web was not started." >&2
@@ -116,6 +120,7 @@ NEXT_PUBLIC_API_ADAPTER=$WEB_PUBLIC_API_ADAPTER"
   NEXT_PUBLIC_API_ADAPTER="$WEB_PUBLIC_API_ADAPTER" \
   nohup pnpm --filter web exec next start -H 0.0.0.0 -p "$WEB_PORT" \
     >> "$LOG_DIR/webagent-web.log" 2>&1 &
+  echo "$!" > "$RUN_DIR/webagent-web.pid"
 fi
 
 for attempt in {1..30}; do

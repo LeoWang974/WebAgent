@@ -1,31 +1,35 @@
+import pytest
+
 from agent_runtime.adapters.hermes_adapter import HermesAdapter
+from agent_runtime.schemas import AgentRunCreate
 
 
-def test_hermes_deep_research_uses_sensenova_skill_entrypoint():
+def test_hermes_adapter_has_no_skill_mapping_helpers():
     adapter = HermesAdapter()
 
-    assert adapter._get_skills_for_skill("deep_research") == "sn-deep-research"
+    assert not hasattr(adapter, "_get_skills_for_skill")
+    assert not hasattr(adapter, "_get_toolsets_for_skill")
+    assert not hasattr(adapter, "_build_runtime_prompt")
 
 
-def test_hermes_ppt_generation_uses_workbench_skill_entrypoint():
+@pytest.mark.asyncio
+async def test_hermes_create_run_forwards_prompt_verbatim():
+    captured: dict[str, object] = {}
+
+    class FakeCli:
+        async def ask(self, **kwargs):
+            captured.update(kwargs)
+            return "session_1", "ok"
+
     adapter = HermesAdapter()
+    adapter.cli = FakeCli()
+    content = "请使用 sn-deep-research 调研《主题乐园》并输出 Markdown 报告。"
 
-    assert adapter._get_skills_for_skill("ppt_generation") == "sn-ppt-workbench"
+    run = await adapter.create_run(
+        AgentRunCreate(content=content, session_id="session_1", skill_key="deep_research")
+    )
 
-
-def test_hermes_deep_research_prompt_is_unchanged():
-    content = "请调研青年线下社交"
-
-    assert HermesAdapter._build_runtime_prompt(content, "deep_research") == content
-
-
-def test_hermes_serper_prompt_is_unchanged():
-    content = "请使用 Serper 搜索资料"
-
-    assert HermesAdapter._build_runtime_prompt(content, None) == content
-
-
-def test_hermes_plain_chat_prompt_is_unchanged():
-    content = "你好"
-
-    assert HermesAdapter._build_runtime_prompt(content, None) == content
+    assert run.output == "ok"
+    assert captured["question"] == content
+    assert captured["skills"] is None
+    assert captured["toolsets"] is None

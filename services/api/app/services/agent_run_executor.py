@@ -17,9 +17,9 @@ from app.api.routes.sessions import (
     AgentRunTimeout,
     discover_artifacts_with_retry,
     is_agent_run_cancelled,
-    is_low_value_runtime_update,
     persist_message,
     runtime_diagnostics,
+    should_suppress_stage_bubble,
 )
 from app.api.routes.settings import user_developer_mode
 from app.core.config import settings
@@ -38,7 +38,6 @@ from app.services.artifact_discovery import (
 )
 from app.services.model_runtime_config import model_runtime_config_builder
 from app.services.persistence import to_artifact, to_message, to_session
-from app.services.runtime_context_builder import build_runtime_content
 from app.services.session_artifacts import (
     artifact_display_priority,
     is_debug_artifact,
@@ -164,14 +163,21 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
     run_started_at = run.created_at or datetime.now()
     assistant_messages: list[Message] = []
     assistant_event_count = 0
+    stage_bubble_counts: dict[str, int] = {}
+    last_stage_bubble_key: str | None = None
     artifact_discovery_summary: dict[str, object] = {}
     adapter = None
     adapter_capacity_lease = None
     run_started_monotonic = asyncio.get_running_loop().time()
     model_runtime_config = model_runtime_config_builder.build_for_run(run)
+    requested_runtime_adapter = run.adapter_key in {"hermes", "openclaw"}
 
     try:
-        if skill_key is None and model_runtime_config.supports_openai_chat_completions():
+        if (
+            skill_key is None
+            and not requested_runtime_adapter
+            and model_runtime_config.supports_openai_chat_completions()
+        ):
             await _complete_plain_chat_with_sensenova(db, run, conversation, content)
             return
 
@@ -253,18 +259,10 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
             },
         )
 
-        runtime_content = await build_runtime_content(
-            db,
-            conversation.id,
-            content,
-            skill_key,
-            run.adapter_key,
-        )
-
         from agent_runtime.schemas import AgentRunCreate as AdapterAgentRunCreate
 
         adapter_input = AdapterAgentRunCreate(
-            content=runtime_content,
+            content=content,
             session_id=conversation.id,
             skill_key=skill_key,
             model_id=model_id,
@@ -335,8 +333,19 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
                     continue
 
                 progress = progress or min(90, 10 + assistant_event_count * 8)
-                if is_low_value_runtime_update(message_content, event_payload):
-                    if skill_key is None and elapsed_seconds >= 45:
+                should_suppress, stage_key = should_suppress_stage_bubble(
+                    message_content,
+                    event_payload,
+                    stage_bubble_counts,
+                    last_stage_bubble_key,
+                )
+                last_stage_bubble_key = stage_key
+                if should_suppress:
+                    if (
+                        skill_key is None
+                        and not requested_runtime_adapter
+                        and elapsed_seconds >= 45
+                    ):
                         if hasattr(adapter, "cancel_run"):
                             await adapter.cancel_run(run.id)
                         raise AgentRunTimeout(
@@ -350,7 +359,11 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
                         label=message_content,
                         status="running",
                         progress=progress,
-                        payload=event_payload,
+                        payload={
+                            **event_payload,
+                            "stageKey": stage_key,
+                            "suppressedStageBubble": True,
+                        },
                     )
                     continue
 
@@ -384,10 +397,11 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
                     payload={
                         "content": message_content,
                         "messageId": assistant_message.id,
+                        "stageKey": stage_key,
                         **event_payload,
                     },
                 )
-                if skill_key is None:
+                if skill_key is None and not requested_runtime_adapter:
                     break
         else:
             runtime_run = await adapter.create_run(adapter_input)
@@ -418,7 +432,7 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
         if await is_agent_run_cancelled(db, run.id):
             raise AgentRunCancelled()
 
-        if skill_key is None and assistant_messages:
+        if skill_key is None and not requested_runtime_adapter and assistant_messages:
             await _complete_run(db, run, conversation.id, assistant_messages[-1])
             return
 

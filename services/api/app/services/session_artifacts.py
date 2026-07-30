@@ -14,30 +14,45 @@ from app.models import Artifact, Conversation, ConversationShare
 
 
 def is_primary_report_artifact(artifact: Artifact) -> bool:
-    path = str((artifact.artifact_metadata or {}).get("path", "")).lower()
+    if is_debug_artifact(artifact):
+        return False
+    metadata = artifact.artifact_metadata or {}
+    path = str(metadata.get("path") or metadata.get("originalPath") or "").lower()
     title = artifact.title.lower()
     return artifact.type == "markdown_report" and (
         path.endswith("report.md")
         or path.endswith("final_report.md")
+        or "报告" in title
+        or "report" in title
         or title in {"report", "final_report", "final-report"}
     )
 
 
 def artifact_display_priority(artifact: Artifact) -> tuple[int, datetime]:
+    if is_debug_artifact(artifact):
+        return (0, artifact.created_at)
     type_priority = {
         "debug_json": 1,
-        "markdown_report": 10,
-        "data_table": 20,
-        "chart": 30,
-        "html_page": 40,
-        "ppt_deck": 80,
-        "image_result": 90,
+        "data_table": 60,
+        "chart": 60,
+        "image_result": 70,
+        "markdown_report": 75,
+        "html_page": 90,
+        "ppt_deck": 100,
     }
-    return (type_priority.get(artifact.type, 0), artifact.created_at)
+    priority = type_priority.get(artifact.type, 0)
+    if is_primary_report_artifact(artifact):
+        priority = max(priority, 80)
+    return (priority, artifact.created_at)
 
 
 def is_debug_artifact(artifact: Artifact) -> bool:
-    return artifact.type == "debug_json"
+    metadata = artifact.artifact_metadata or {}
+    return (
+        artifact.type == "debug_json"
+        or metadata.get("developerOnly") is True
+        or metadata.get("artifactRole") == "intermediate"
+    )
 
 
 def artifact_metadata_paths(metadata: dict) -> list[Path]:

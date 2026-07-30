@@ -803,6 +803,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const modelId = get().selectedModelId;
     const modelName = get().models.find((model) => model.id === modelId)?.name ?? "Agent";
     const requestedSkill = detectRequestedSkill(trimmed, skillKey);
+    const isRuntimeAdapterRun = adapterKey === "hermes" || adapterKey === "openclaw";
     let sessionId = get().currentSessionId;
     if (!sessionId) {
       const session = await get().createSession(requestedSkill);
@@ -834,7 +835,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const run: AgentRun = {
       id: runId,
       hasAssistantResponse: false,
-      isPlainChat: !requestedSkill,
+      isPlainChat: !requestedSkill && !isRuntimeAdapterRun,
       progress: 0,
       sessionId,
       startedAt: now,
@@ -851,7 +852,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       agentRuns: [run, ...state.agentRuns],
       error: undefined,
       messages: [...state.messages, optimisticUserMessage, pendingAssistantMessage],
-      selectedArtifactId: requestedSkill ? state.selectedArtifactId : undefined,
+      selectedArtifactId:
+        isRuntimeAdapterRun || requestedSkill ? state.selectedArtifactId : undefined,
       sessions: state.sessions.map((session) =>
         session.id === sessionId
           ? {
@@ -882,7 +884,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     };
 
-    if (requestedSkill) {
+    if (isRuntimeAdapterRun || requestedSkill) {
       const startedAtMs = Date.parse(now);
       backendRunDiscoveryTimer = window.setInterval(() => {
         void webAgentApi.listAgentRuns(sessionId).then((runs) => {
@@ -997,8 +999,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 sessionId,
                 modelName,
                 requestedSkill,
+                now,
               );
-              const shouldCreateNextPending = Boolean(requestedSkill);
+              const shouldCreateNextPending = Boolean(
+                isRuntimeAdapterRun || requestedSkill,
+              );
 
               if (pendingIndex >= 0) {
                 return {

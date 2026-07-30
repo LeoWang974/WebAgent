@@ -17,6 +17,7 @@ from app.services.persistence import (
     require_owner,
     to_artifact,
 )
+from app.services.session_artifacts import is_debug_artifact
 
 router = APIRouter()
 
@@ -33,14 +34,9 @@ MEDIA_TYPES = {
     ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 }
 
-DEBUG_ARTIFACT_TYPES = {"debug_json"}
 HTML_SLIDE_SUFFIXES = {".htm", ".html"}
 IMAGE_SLIDE_SUFFIXES = {".jpeg", ".jpg", ".png", ".webp"}
 DECK_SLIDE_SUFFIXES = HTML_SLIDE_SUFFIXES | IMAGE_SLIDE_SUFFIXES
-
-
-def is_debug_artifact(artifact: Artifact) -> bool:
-    return artifact.type in DEBUG_ARTIFACT_TYPES
 
 
 async def ensure_artifact_visible(

@@ -5,29 +5,34 @@ export function artifactDisplayPriority(artifact?: Artifact) {
     return -1;
   }
 
+  const metadata = artifact.metadata ?? {};
+  if (metadata.developerOnly === true || metadata.artifactRole === "intermediate") {
+    return 0;
+  }
+
   const priorities: Record<Artifact["type"], number> = {
-    chart: 30,
-    data_table: 20,
+    chart: 60,
+    data_table: 60,
     debug_json: 1,
-    html_page: 40,
-    image_result: 90,
-    markdown_report: 10,
-    ppt_deck: 80,
+    html_page: 90,
+    image_result: 70,
+    markdown_report: 75,
+    ppt_deck: 100,
   };
 
   const basePriority = priorities[artifact.type] ?? 0;
-  const metadata = artifact.metadata ?? {};
   const path = String(metadata.path ?? metadata.originalPath ?? "").toLowerCase();
   const isPrimaryReport =
     artifact.type === "markdown_report" &&
     (artifact.title.toLowerCase() === "report" ||
+      artifact.title.includes("报告") ||
       artifact.title.toLowerCase().startsWith("report-") ||
       path.endsWith("/report.md") ||
       path.endsWith("\\report.md") ||
       path.endsWith("/final_report.md") ||
       path.endsWith("\\final_report.md"));
 
-  return basePriority + (isPrimaryReport ? 5 : 0);
+  return isPrimaryReport ? Math.max(basePriority, 80) : basePriority;
 }
 
 interface ResolveArtifactSelectionInput {

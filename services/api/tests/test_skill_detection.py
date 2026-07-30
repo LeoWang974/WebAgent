@@ -4,18 +4,18 @@ from fastapi import HTTPException
 from app.api.routes.sessions import parse_model_config_directive, resolve_skill_key
 
 
-def test_resolve_skill_key_requires_explicit_skill_markers():
-    assert resolve_skill_key("请使用 sn-deep-research 调研主题乐园", None) == "deep_research"
-    assert resolve_skill_key("请使用 sn-da 分析这份表格", None) == "data_analysis"
-    assert resolve_skill_key("请使用 sn-ppt-workbench 生成 12 页 PPT", None) == "ppt_generation"
-    assert resolve_skill_key("请使用 u1_image 生成图片", None) == "u1_image"
-    assert resolve_skill_key("使用 report-html-v2 输出 HTML 文件", None) == "html_generation"
+def test_resolve_skill_key_does_not_parse_user_prompt_markers():
+    assert resolve_skill_key("请使用 sn-deep-research 调研主题乐园", None) is None
+    assert resolve_skill_key("请使用 sn-da 分析这份表格", None) is None
+    assert resolve_skill_key("请使用 sn-ppt-workbench 生成 12 页 PPT", None) is None
+    assert resolve_skill_key("请使用 u1_image 生成图片", None) is None
+    assert resolve_skill_key("使用 report-html-v2 输出 HTML 文件", None) is None
 
 
 def test_resolve_skill_key_does_not_guess_from_generic_words():
     assert resolve_skill_key("帮我调研主题乐园并输出报告", None) is None
     assert resolve_skill_key("最后生成一份 12 页 PPT 演示文稿", None) is None
-    assert resolve_skill_key("你好，请确认 HTML 和 PPT 产物链路测评开始。", None) is None
+    assert resolve_skill_key("你好，请确认 HTML 和 PPT 产物链路测试开始。", None) is None
 
 
 def test_resolve_skill_key_respects_explicit_value():

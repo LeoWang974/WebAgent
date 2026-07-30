@@ -52,9 +52,6 @@ from app.services.persistence import (
     to_message,
     to_session,
 )
-from app.services.runtime_context_builder import (
-    build_runtime_content as build_skill_runtime_content,
-)
 from app.services.session_artifacts import (
     artifact_display_priority,
     is_debug_artifact,
@@ -203,35 +200,77 @@ SSE_HEADERS = {
 }
 
 
+def normalize_runtime_update(content: str) -> str:
+    return re.sub(r"\s+", " ", content).strip().lower()
+
+
+def runtime_stage_key(content: str, event_payload: dict) -> str:
+    if event_payload.get("rawActivityHeartbeat"):
+        return "heartbeat"
+    normalized = normalize_runtime_update(content)
+    stage_patterns = [
+        ("complete", ("完成", "已生成", "completed", "succeeded", "done")),
+        ("export", ("导出", "转换", "pptx", "export")),
+        ("verify", ("验证", "校验", "检查", "validate", "verify")),
+        ("write", ("写作", "撰写", "生成报告", "markdown 报告", "write report", "writing")),
+        ("plan", ("规划", "大纲", "计划", "outline", "plan")),
+        ("fetch", ("抓取", "网页", "fetch", "crawl", "browser")),
+        ("search", ("搜索", "serper", "search")),
+        ("file_io", ("读取相关文件", "写入中间文件", "查找相关文件", "read_file", "write_file")),
+    ]
+    for key, markers in stage_patterns:
+        if any(marker in normalized for marker in markers):
+            return key
+    return f"message:{normalized[:96]}"
+
+
 def is_low_value_runtime_update(content: str, event_payload: dict) -> bool:
-    normalized = re.sub(r"\s+", " ", content).strip().lower()
+    normalized = normalize_runtime_update(content)
     if event_payload.get("rawActivityHeartbeat"):
         return True
     low_value_messages = {
+        "hermes is still running; raw output is being received.",
         "openclaw cli task status: running.",
+        "openclaw cli task is running.",
         "openclaw is still working; waiting for task progress.",
         "openclaw is still working; watching the report directory.",
         "openclaw is still working; waiting for report files.",
+        "正在读取相关文件...",
+        "正在写入中间文件...",
+        "正在查找相关文件和产物...",
+        "正在准备任务配置文件...",
     }
     return normalized in low_value_messages
 
 
-def resolve_skill_key(content: str, explicit_skill_key: str | None) -> str | None:
-    if explicit_skill_key:
-        return explicit_skill_key
+def should_suppress_stage_bubble(
+    content: str,
+    event_payload: dict,
+    stage_counts: dict[str, int],
+    last_stage_key: str | None,
+) -> tuple[bool, str]:
+    stage_key = runtime_stage_key(content, event_payload)
+    if is_low_value_runtime_update(content, event_payload):
+        return True, stage_key
+    if stage_key == last_stage_key and stage_key not in {"complete", "export"}:
+        return True, stage_key
+    count = stage_counts.get(stage_key, 0)
+    stage_counts[stage_key] = count + 1
+    repeat_limits = {
+        "search": 2,
+        "fetch": 2,
+        "plan": 2,
+        "write": 3,
+        "verify": 2,
+        "export": 3,
+        "file_io": 0,
+    }
+    limit = repeat_limits.get(stage_key)
+    return limit is not None and count >= limit, stage_key
 
-    normalized = content.lower()
-    explicit_aliases = [
-        ("html_generation", ["report-html-v2", "html_generation"]),
-        ("deep_research", ["sn-deep-research", "deep_research"]),
-        ("data_analysis", ["sn-da", "data_analysis"]),
-        ("ppt_generation", ["sn-ppt", "sn-ppt-workbench", "sn-ppt-entry", "ppt_generation"]),
-        ("u1_image", ["u1_image"]),
-    ]
-    for skill_key, aliases in explicit_aliases:
-        if any(alias in normalized for alias in aliases):
-            return skill_key
-    return None
+
+def resolve_skill_key(content: str, explicit_skill_key: str | None) -> str | None:
+    return explicit_skill_key
 
 
 async def discover_artifacts_with_retry(
@@ -721,13 +760,6 @@ async def send_session_message(
             conversation_id=session_id,
             model_runtime_config=model_runtime_config,
         )
-        runtime_content = await build_skill_runtime_content(
-            db,
-            session_id,
-            input_data.content,
-            resolved_skill_key,
-            adapter_key,
-        )
         run = await create_db_agent_run(
             db,
             session_id,
@@ -772,7 +804,7 @@ async def send_session_message(
 
             runtime_run = await adapter.create_run(
                 AdapterAgentRunCreate(
-                    content=runtime_content,
+                    content=input_data.content,
                     session_id=session_id,
                     skill_key=resolved_skill_key,
                     model_id=input_data.model_id,
@@ -837,6 +869,8 @@ async def stream_session_message(
         adapter_capacity_lease = None
         run: AgentRun | None = None
         assistant_event_count = 0
+        stage_bubble_counts: dict[str, int] = {}
+        last_stage_bubble_key: str | None = None
         artifact_discovery_summary: dict[str, object] = {}
         short_chat_fast_closed = False
         run_started_monotonic = asyncio.get_running_loop().time()
@@ -850,6 +884,10 @@ async def stream_session_message(
             )
             from app.services.agent_run_executor import _complete_plain_chat_with_sensenova
 
+            requested_runtime_adapter = input_data.adapter_key in {
+                "hermes",
+                "openclaw",
+            }
             model_config_values = parse_model_config_directive(input_data.content)
             if model_config_values is not None:
                 model = await apply_model_config_directive(
@@ -886,6 +924,7 @@ async def stream_session_message(
             )
             if (
                 resolved_skill_key is None
+                and not requested_runtime_adapter
                 and model_runtime_config.supports_openai_chat_completions()
             ):
                 run = await create_db_agent_run(
@@ -943,7 +982,7 @@ async def stream_session_message(
                         yield sse("assistant_done", done_payload)
                 return
 
-            if resolved_skill_key is None:
+            if resolved_skill_key is None and not requested_runtime_adapter:
                 run = await create_db_agent_run(
                     db,
                     session_id,
@@ -1008,14 +1047,6 @@ async def stream_session_message(
                 conversation_id=session_id,
                 model_runtime_config=model_runtime_config,
             )
-            runtime_content = await build_skill_runtime_content(
-                db,
-                session_id,
-                input_data.content,
-                resolved_skill_key,
-                adapter_key,
-            )
-
             run = await create_db_agent_run(
                 db,
                 session_id,
@@ -1086,7 +1117,7 @@ async def stream_session_message(
             from agent_runtime.schemas import AgentRunCreate as AdapterAgentRunCreate
 
             adapter_input = AdapterAgentRunCreate(
-                content=runtime_content,
+                content=input_data.content,
                 session_id=session_id,
                 skill_key=resolved_skill_key,
                 model_id=input_data.model_id,
@@ -1159,7 +1190,14 @@ async def stream_session_message(
                     if not content:
                         continue
 
-                    if is_low_value_runtime_update(content, event_payload):
+                    should_suppress, stage_key = should_suppress_stage_bubble(
+                        content,
+                        event_payload,
+                        stage_bubble_counts,
+                        last_stage_bubble_key,
+                    )
+                    last_stage_bubble_key = stage_key
+                    if should_suppress:
                         await record_db_agent_run_event(
                             db,
                             run,
@@ -1167,7 +1205,11 @@ async def stream_session_message(
                             label=content,
                             status="running",
                             progress=progress or min(90, 10 + assistant_event_count * 8),
-                            payload=event_payload,
+                            payload={
+                                **event_payload,
+                                "stageKey": stage_key,
+                                "suppressedStageBubble": True,
+                            },
                         )
                         continue
 
@@ -1197,6 +1239,7 @@ async def stream_session_message(
                         payload={
                             "content": content,
                             "messageId": assistant_message.id,
+                            "stageKey": stage_key,
                             **event_payload,
                         },
                     )
@@ -1209,7 +1252,7 @@ async def stream_session_message(
                             "runId": run.id,
                         },
                     )
-                    if resolved_skill_key is None:
+                    if resolved_skill_key is None and not requested_runtime_adapter:
                         short_chat_fast_closed = True
                         break
             else:
@@ -1248,7 +1291,11 @@ async def stream_session_message(
             if await is_agent_run_cancelled(db, run.id):
                 raise AgentRunCancelled()
 
-            if resolved_skill_key is None and assistant_messages:
+            if (
+                resolved_skill_key is None
+                and not requested_runtime_adapter
+                and assistant_messages
+            ):
                 assistant_message = assistant_messages[-1]
                 if short_chat_fast_closed:
                     await record_db_agent_run_event(

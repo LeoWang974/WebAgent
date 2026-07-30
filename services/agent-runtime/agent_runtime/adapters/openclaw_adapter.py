@@ -11,7 +11,6 @@ from ..schemas import AgentArtifactRef, AgentRun, AgentRunCreate, AgentRunEvent,
 from .base import AgentRuntimeAdapter
 from .openclaw_utils import (
     OPENCLAW_EVENT_PROTOCOL,
-    OPENCLAW_SKILL_NAMES,
     artifact_to_payload,
     clean_text_output,
     extract_output,
@@ -155,11 +154,10 @@ class OpenClawAdapter(AgentRuntimeAdapter):
         report_dirs.update(self._extract_file_parent_dirs(input_data.content))
 
         if input_data.skill_key:
-            skill_name = OPENCLAW_SKILL_NAMES.get(input_data.skill_key, input_data.skill_key)
             yield self._stage_event(
                 run_id,
                 "stage_started",
-                f"OpenClaw is running {skill_name}.",
+                "OpenClaw agent started.",
                 10,
             )
 
