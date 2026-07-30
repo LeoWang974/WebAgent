@@ -163,12 +163,16 @@ async def find_existing_artifact(
     session_id: str,
     artifact_type: str,
     metadata: dict,
+    run_id: str | None = None,
 ) -> Artifact | None:
     content_hash, candidate_paths = artifact_dedupe_keys(metadata)
+    conditions = [Artifact.conversation_id == session_id]
+    if run_id:
+        conditions.append(Artifact.run_id == run_id)
     if content_hash:
         result = await db.execute(
             select(Artifact).where(
-                Artifact.conversation_id == session_id,
+                *conditions,
                 Artifact.artifact_metadata["contentHash"].as_string() == content_hash,
             )
         )
@@ -179,7 +183,7 @@ async def find_existing_artifact(
     if candidate_paths:
         result = await db.execute(
             select(Artifact).where(
-                Artifact.conversation_id == session_id,
+                *conditions,
                 or_(
                     Artifact.artifact_metadata["path"].as_string().in_(candidate_paths),
                     Artifact.artifact_metadata["originalPath"].as_string().in_(candidate_paths),
@@ -197,7 +201,7 @@ async def find_existing_artifact(
     if content_hash:
         result = await db.execute(
             select(Artifact).where(
-                Artifact.conversation_id == session_id,
+                *conditions,
                 Artifact.type == artifact_type,
             )
         )
@@ -236,6 +240,7 @@ async def persist_discovered_artifacts(
             session_id,
             artifact_schema.type,
             metadata,
+            run_id,
         )
         if existing_artifact is not None:
             stored_artifacts.append(existing_artifact)

@@ -22,14 +22,10 @@ class HermesAdapter(AgentRuntimeAdapter):
 
     async def create_run(self, input_data: AgentRunCreate) -> AgentRun:
         try:
-            toolsets = self._get_toolsets_for_skill(input_data.skill_key)
-            skills = self._get_skills_for_skill(input_data.skill_key)
-            question = self._build_runtime_prompt(input_data.content, input_data.skill_key)
-
             session_id, response = await self.cli.ask(
-                question=question,
-                toolsets=toolsets,
-                skills=skills,
+                question=input_data.content,
+                toolsets=None,
+                skills=None,
             )
 
             run_id = (
@@ -184,16 +180,13 @@ class HermesAdapter(AgentRuntimeAdapter):
         self,
         input_data: AgentRunCreate,
     ) -> AsyncGenerator[AgentRunEvent, None]:
-        toolsets = self._get_toolsets_for_skill(input_data.skill_key)
-        skills = self._get_skills_for_skill(input_data.skill_key)
-        question = self._build_runtime_prompt(input_data.content, input_data.skill_key)
         event_index = 0
 
         async for event in self.cli.ask_stream_events(
-            question=question,
+            question=input_data.content,
             run_id=input_data.run_id,
-            toolsets=toolsets,
-            skills=skills,
+            toolsets=None,
+            skills=None,
         ):
             if hasattr(event, "content"):
                 content = str(event.content or "").strip()
@@ -245,25 +238,3 @@ class HermesAdapter(AgentRuntimeAdapter):
 
     def get_last_diagnostics(self) -> dict[str, object]:
         return dict(self.cli.last_diagnostics)
-
-    def _get_toolsets_for_skill(self, skill_key: str | None) -> str | None:
-        toolsets_map = {
-            "data_analysis": "file,terminal,web",
-            "deep_research": "web,terminal,file",
-            "ppt_generation": "file,web",
-            "u1_image": "image_gen,web,terminal,file",
-        }
-        return toolsets_map.get(skill_key)
-
-    def _get_skills_for_skill(self, skill_key: str | None) -> str | None:
-        skills_map = {
-            "data_analysis": "sn-da-excel-workflow",
-            "deep_research": "sn-deep-research",
-            "ppt_generation": "sn-ppt-workbench",
-            "u1_image": "sn-image-base",
-        }
-        return skills_map.get(skill_key)
-
-    @staticmethod
-    def _build_runtime_prompt(content: str, skill_key: str | None) -> str:
-        return content

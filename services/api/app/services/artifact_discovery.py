@@ -50,9 +50,11 @@ NON_ARTIFACT_MARKERS = {
     "\\.hermes\\skills\\",
     "/node_modules/",
     "\\node_modules\\",
+    "/source_cache/",
+    "\\source_cache\\",
 }
 ARTIFACT_PATH_RE = re.compile(
-    r"(?P<path>(?:[A-Za-z]:\\|/mnt/[a-zA-Z]/|/home/|/tmp/)[^\"'<>|`\r\n]+?\.(?:md|html?|pptx|png|jpe?g|csv|xlsx|json))",
+    r"(?P<path>(?:[A-Za-z]:\\|/mnt/[^/]+/|/home/|/tmp/)[^\"'<>|`\r\n]+?\.(?:md|html?|pptx|png|jpe?g|csv|xlsx|json))",
     re.IGNORECASE,
 )
 

@@ -33,6 +33,7 @@ from app.services.agent_run_workspace import run_workspace_dir
 from app.services.agent_runtime_context import build_user_runtime_context
 from app.services.artifact_discovery import (
     create_pptx_from_html_artifacts,
+    discover_related_artifact_paths,
     extract_artifact_path_strings,
 )
 from app.services.model_runtime_config import model_runtime_config_builder
@@ -430,6 +431,7 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
             adapter,
             artifact_discovery_summary,
             user,
+            content,
         )
         assistant_message = await _final_assistant_message(
             db,
@@ -527,6 +529,7 @@ async def _discover_and_persist_artifacts(
     adapter: object,
     artifact_discovery_summary: dict[str, object],
     user: User,
+    content: str = "",
 ):
     explicit_artifact_paths = (
         adapter.get_last_artifact_paths() if hasattr(adapter, "get_last_artifact_paths") else []
@@ -549,9 +552,19 @@ async def _discover_and_persist_artifacts(
     for path in event_path_candidates:
         if path not in explicit_artifact_paths:
             explicit_artifact_paths.append(path)
+    source_path_candidates = extract_artifact_path_strings(content)
+    related_source_artifact_paths = discover_related_artifact_paths(
+        source_path_candidates,
+        run_started_at,
+    )
+    for path in related_source_artifact_paths:
+        if path not in explicit_artifact_paths:
+            explicit_artifact_paths.append(path)
     artifact_discovery_summary.update(
         {
             "adapter_artifact_paths": list(explicit_artifact_paths),
+            "source_artifact_paths": source_path_candidates,
+            "related_source_artifact_paths": related_source_artifact_paths,
             "adapter_artifacts": [
                 {
                     "artifact_path": getattr(artifact, "path", None),

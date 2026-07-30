@@ -4,8 +4,21 @@ from pydantic import Field
 
 from app.schemas.base import ApiModel
 
-SkillKey = Literal["data_analysis", "deep_research", "ppt_generation", "u1_image"]
-SessionType = Literal["chat", "data_analysis", "deep_research", "ppt_generation", "u1_image"]
+SkillKey = Literal[
+    "data_analysis",
+    "deep_research",
+    "html_generation",
+    "ppt_generation",
+    "u1_image",
+]
+SessionType = Literal[
+    "chat",
+    "data_analysis",
+    "deep_research",
+    "html_generation",
+    "ppt_generation",
+    "u1_image",
+]
 SessionStatus = Literal["active", "running", "failed", "completed"]
 SessionVisibility = Literal["private", "shared", "public"]
 

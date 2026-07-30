@@ -1,6 +1,7 @@
 export type SkillKey =
   | "data_analysis"
   | "deep_research"
+  | "html_generation"
   | "ppt_generation"
   | "u1_image";
 
