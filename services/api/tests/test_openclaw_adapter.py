@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from agent_runtime.adapters import openclaw_adapter
 from agent_runtime.adapters.openclaw_adapter import OpenClawAdapter
 from agent_runtime.adapters.openclaw_utils import (
     OPENCLAW_EVENT_PROTOCOL,
@@ -29,7 +30,8 @@ def test_openclaw_adapter_builds_gateway_cli_args():
         assert args[:4] == ["wsl.exe", "--", "bash", "-lc"]
         assert "openclaw agent" in args[4]
     else:
-        assert args[:2] == ["openclaw", "agent"]
+        assert args[:2] == ["bash", "-lc"]
+        assert "openclaw agent" in args[2]
     joined = " ".join(args)
     assert "--local" not in joined
     assert "--agent" in joined
@@ -41,6 +43,28 @@ def test_openclaw_adapter_builds_gateway_cli_args():
     if os.name == "nt":
         assert "~/.hermes/.env" in joined
         assert "~/.openclaw/.env" in joined
+
+
+def test_openclaw_adapter_builds_posix_cli_with_runtime_env(monkeypatch):
+    monkeypatch.setattr(openclaw_adapter.os, "name", "posix")
+    adapter = OpenClawAdapter(
+        agent_id="main",
+        command_timeout_seconds=30,
+        home_dir="/tmp/webagent-runtime/openclaw-home",
+        skills_dir="/tmp/webagent-runtime/skills",
+    )
+
+    args = adapter._build_agent_cli_args(
+        AgentRunCreate(content="hello", session_id="session_123", run_id="run_123")
+    )
+
+    assert args[:2] == ["bash", "-lc"]
+    command = args[2]
+    assert "openclaw agent" in command
+    assert "HOME=${HOME:-/tmp/webagent-runtime/openclaw-home}" in command
+    assert "OPENCLAW_HOME=${OPENCLAW_HOME:-/tmp/webagent-runtime/openclaw-home}" in command
+    assert "OPENCLAW_SKILLS_DIR=${OPENCLAW_SKILLS_DIR:-/tmp/webagent-runtime/skills}" in command
+    assert "~/.openclaw/.env" in command
 
 
 def test_openclaw_adapter_injects_default_skills_dir_for_wsl_commands():

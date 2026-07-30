@@ -410,16 +410,24 @@ class HermesCliWrapper:
         lower = normalized.lower()
         if re.search(r"\bpage[_-]?\d+\.(?:html?|png|jpe?g)\b", lower):
             match = re.search(r"page[_-]?(\d+)", lower)
-            return f"正在生成第 {int(match.group(1))} 页幻灯片..." if match else "正在生成幻灯片页面..."
+            if match:
+                return f"正在生成第 {int(match.group(1))} 页幻灯片..."
+            return "正在生成幻灯片页面..."
         if "serper" in lower or "google.serper.dev" in lower:
             return "正在使用 Serper 搜索资料..."
-        if "curl " in lower or "http" in lower and any(word in lower for word in ("search", "fetch", "crawl")):
+        if "curl " in lower or (
+            "http" in lower and any(word in lower for word in ("search", "fetch", "crawl"))
+        ):
             return "正在抓取和整理网页资料..."
         if "read_file" in lower or re.search(r"\bread\s+", lower):
             return "正在读取相关文件..."
         if "write_file" in lower or re.search(r"\bwrite\s+", lower):
             return "正在写入中间文件..."
-        if "search_files" in lower or re.search(r"\bfind\s+", lower) or re.search(r"\bgrep\s+", lower):
+        if (
+            "search_files" in lower
+            or re.search(r"\bfind\s+", lower)
+            or re.search(r"\bgrep\s+", lower)
+        ):
             return "正在查找相关文件和产物..."
         if "run_stage.py" in lower and "export" in lower:
             return "正在导出 PPTX 文件..."

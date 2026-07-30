@@ -44,6 +44,10 @@ class ModelRuntimeConfig:
         if provider == "sensenova":
             values.update(
                 {
+                    "SN_API_KEY": self.api_key,
+                    "SN_BASE_URL": self.base_url,
+                    "SN_CHAT_API_KEY": self.api_key,
+                    "SN_TEXT_API_KEY": self.api_key,
                     "SENSENOVA_API_KEY": self.api_key,
                     "SENSENOVA_BASE_URL": self.base_url,
                     "OPENAI_API_KEY": self.api_key,
@@ -53,6 +57,10 @@ class ModelRuntimeConfig:
         elif provider in OPENAI_COMPATIBLE_PROVIDERS:
             values.update(
                 {
+                    "SN_API_KEY": self.api_key,
+                    "SN_BASE_URL": self.base_url,
+                    "SN_CHAT_API_KEY": self.api_key,
+                    "SN_TEXT_API_KEY": self.api_key,
                     "OPENAI_API_KEY": self.api_key,
                     "OPENAI_BASE_URL": self.base_url,
                 }

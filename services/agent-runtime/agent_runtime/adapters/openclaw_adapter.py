@@ -416,14 +416,18 @@ class OpenClawAdapter(AgentRuntimeAdapter):
             self.mode = previous_mode
 
     def _build_cli_args(self, args: list[str]) -> list[str]:
+        if os.name == "nt" and self.cli_path != "openclaw":
+            return [self.cli_path, *args]
+
+        executable = "openclaw" if os.name == "nt" else self.cli_path
+        command = " ".join(shlex.quote(str(arg)) for arg in [executable, *args])
+        command = self._with_runtime_env(
+            command,
+            self._runtime_env(),
+        )
         if os.name == "nt" and self.cli_path == "openclaw":
-            command = " ".join(shlex.quote(str(arg)) for arg in ["openclaw", *args])
-            command = self._with_runtime_env(
-                command,
-                self._runtime_env(),
-            )
             return ["wsl.exe", "--", "bash", "-lc", command]
-        return [self.cli_path, *args]
+        return ["bash", "-lc", command]
 
     def _build_shell_args(self, command: str) -> list[str]:
         command = self._with_runtime_env(

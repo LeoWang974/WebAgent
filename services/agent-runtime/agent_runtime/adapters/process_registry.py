@@ -3,7 +3,6 @@ import json
 import os
 from pathlib import Path
 
-
 REGISTRY_ROOT = Path(__file__).resolve().parents[4] / "runtime" / "agent-processes"
 
 

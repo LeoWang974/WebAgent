@@ -9,6 +9,7 @@ PYTHON_BIN="$ROOT_DIR/runtime/conda-webagent/bin/python"
 AGENT_ENV="$ROOT_DIR/secrets/agent-pack.env"
 AGENT_BIN_DIR="$ROOT_DIR/runtime/agent-home/.local/bin"
 HERMES_NODE_DIR="$ROOT_DIR/runtime/agent-home/.hermes/node/bin"
+HERMES_PPT_EXPORT_DIR="$ROOT_DIR/runtime/agent-home/.hermes/skills/sn-ppt-standard/scripts/export_pptx"
 WEB_PORT="${WEB_PORT:-3000}"
 API_PORT="${API_PORT:-8010}"
 WEB_PUBLIC_API_BASE_URL="${NEXT_PUBLIC_API_BASE_URL:-}"
@@ -32,10 +33,15 @@ if [ -f "$AGENT_ENV" ]; then
 fi
 
 export PATH="$AGENT_BIN_DIR:$HERMES_NODE_DIR:$PATH"
+export LD_LIBRARY_PATH="$ROOT_DIR/runtime/conda-webagent/lib:${LD_LIBRARY_PATH:-}"
 export PYTHONPATH="$REPO_DIR/services/api:$REPO_DIR/services/agent-runtime"
 export BACKEND_CORS_ORIGINS="${BACKEND_CORS_ORIGINS:-$DEFAULT_CORS_ORIGINS}"
 export SN_API_KEY="${SN_API_KEY:-${SENSENOVA_API_KEY:-${OPENAI_API_KEY:-${LLM_API_KEY:-}}}}"
 export SN_BASE_URL="${SN_BASE_URL:-${SENSENOVA_BASE_URL:-${OPENAI_BASE_URL:-${LLM_BASE_URL:-}}}}"
+export SN_TEXT_API_KEY="${SN_TEXT_API_KEY:-$SN_API_KEY}"
+export SN_CHAT_API_KEY="${SN_CHAT_API_KEY:-$SN_API_KEY}"
+export SN_TEXT_BASE_URL="${SN_TEXT_BASE_URL:-$SN_BASE_URL}"
+export SN_CHAT_BASE_URL="${SN_CHAT_BASE_URL:-$SN_BASE_URL}"
 
 CA_BUNDLE="${SSL_CERT_FILE:-${REQUESTS_CA_BUNDLE:-}}"
 if [ -n "$CA_BUNDLE" ] && [ ! -f "$CA_BUNDLE" ]; then
@@ -53,6 +59,30 @@ for command_name in hermes openclaw; do
     exit 1
   fi
 done
+
+if ! "$PYTHON_BIN" - <<'PY' >/dev/null 2>&1
+import httpx
+PY
+then
+  echo "Missing httpx in WebAgent Python runtime; installing into $PYTHON_BIN environment." >&2
+  "$PYTHON_BIN" -m pip install httpx >> "$LOG_DIR/webagent-api.log" 2>&1 || {
+    echo "Unable to install httpx automatically. PPT skills may fail inside Python stages." >&2
+  }
+fi
+
+if command -v pnpm >/dev/null 2>&1; then
+  if ! pnpm exec playwright --version >/dev/null 2>&1; then
+    echo "Playwright CLI is unavailable from pnpm; PPTX export may not work." >&2
+  elif ! pnpm exec playwright install chromium >> "$LOG_DIR/webagent-web.log" 2>&1; then
+    echo "Playwright Chromium install failed. On CCI, install system browser dependencies or preinstall Chromium." >&2
+  fi
+fi
+
+if [ -d "$HERMES_PPT_EXPORT_DIR" ] && command -v npx >/dev/null 2>&1; then
+  if ! (cd "$HERMES_PPT_EXPORT_DIR" && npx playwright install chromium) >> "$LOG_DIR/webagent-web.log" 2>&1; then
+    echo "Hermes PPT Playwright browser install failed. PPTX export may not work." >&2
+  fi
+fi
 
 for pattern in \
   "uvicorn app.main:app --host 0.0.0.0 --port $API_PORT" \

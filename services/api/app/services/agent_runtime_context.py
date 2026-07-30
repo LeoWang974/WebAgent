@@ -1,3 +1,4 @@
+import json
 import re
 import shutil
 from dataclasses import dataclass
@@ -70,6 +71,42 @@ def _copy_file_once(source: Path, destination: Path) -> None:
         return
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, destination)
+
+
+def _sync_openclaw_config(source_home: Path, destination_home: Path) -> None:
+    for relative_path in (
+        Path(".openclaw") / "openclaw.json",
+        Path(".openclaw") / ".env",
+    ):
+        _copy_file_once(source_home / relative_path, destination_home / relative_path)
+    _write_runtime_env_values(
+        destination_home / ".openclaw" / ".env",
+        _openclaw_gateway_env_values(destination_home / ".openclaw" / "openclaw.json"),
+    )
+
+
+def _openclaw_gateway_env_values(config_path: Path) -> dict[str, str | None]:
+    values: dict[str, str | None] = {
+        "OPENCLAW_GATEWAY_URL": environ.get("OPENCLAW_GATEWAY_URL"),
+    }
+    if not config_path.exists():
+        return values
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return values
+    gateway = config.get("gateway") if isinstance(config, dict) else None
+    auth = gateway.get("auth") if isinstance(gateway, dict) else None
+    token = auth.get("token") if isinstance(auth, dict) else None
+    if isinstance(token, str) and token.strip():
+        values.update(
+            {
+                "OPENCLAW_GATEWAY_TOKEN": token.strip(),
+                "OPENCLAW_GATEWAY_AUTH_TOKEN": token.strip(),
+                "OPENCLAW_TOKEN": token.strip(),
+            }
+        )
+    return values
 
 
 def _ensure_shared_openclaw_skills(source: Path) -> Path:
@@ -248,7 +285,7 @@ def build_user_runtime_context(
     base_hermes_home = Path(settings.hermes_home).expanduser()
     _copy_file_once(base_hermes_home / ".env", hermes_home / ".env")
     _ensure_hermes_config(base_hermes_home, hermes_home, model_runtime_config)
-    _copy_file_once(Path.home() / ".openclaw" / ".env", openclaw_home / ".openclaw" / ".env")
+    _sync_openclaw_config(Path.home(), openclaw_home)
     _sync_runtime_env(
         hermes_home / ".env",
         openclaw_home / ".openclaw" / ".env",
