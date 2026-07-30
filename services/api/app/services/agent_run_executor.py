@@ -697,6 +697,9 @@ async def _complete_run(
 ) -> None:
     conversation = await refresh_conversation(db, conversation_id)
     conversation.status = "active"
+    if await is_agent_run_cancelled(db, run.id):
+        await db.commit()
+        return
     await finish_db_agent_run(
         db,
         run,

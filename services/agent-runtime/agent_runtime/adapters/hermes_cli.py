@@ -9,6 +9,12 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
+from .process_registry import (
+    register_run_process,
+    terminate_registered_run_process,
+    unregister_run_process,
+)
+
 logger = logging.getLogger(__name__)
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
@@ -524,14 +530,14 @@ class HermesCliWrapper:
             await process.wait()
 
     async def cancel_run(self, run_id: str) -> bool:
-        process = self.active_processes.get(run_id)
-        if process is None:
-            return False
-
-        logger.info("Cancelling Hermes CLI process for run_id=%s", run_id)
         self.cancelled_run_ids.add(run_id)
-        await self._terminate_process_tree(process)
-        return True
+        process = self.active_processes.get(run_id)
+        logger.info("Cancelling Hermes CLI process for run_id=%s", run_id)
+        cancelled = False
+        if process is not None:
+            await self._terminate_process_tree(process)
+            cancelled = True
+        return await terminate_registered_run_process(run_id) or cancelled
 
     @staticmethod
     def _is_completion_signal(text: str) -> bool:
@@ -753,6 +759,7 @@ class HermesCliWrapper:
         )
         if run_id:
             self.active_processes[run_id] = process
+            register_run_process("hermes", run_id, process.pid)
 
         in_hermes_box = False
         box_lines: list[str] = []
@@ -1022,6 +1029,8 @@ class HermesCliWrapper:
         finally:
             if run_id and self.active_processes.get(run_id) is process:
                 self.active_processes.pop(run_id, None)
+            if run_id:
+                unregister_run_process(run_id, process.pid)
 
         if process.returncode == 0 and not emitted_output:
             fallback_content = "Hermes completed. Discovering generated artifacts."

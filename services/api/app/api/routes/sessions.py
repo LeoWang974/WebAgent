@@ -852,7 +852,10 @@ async def stream_session_message(
 ) -> StreamingResponse:
     await get_conversation_or_404(db, session_id, current_user, require_write=True)
     resolved_skill_key = resolve_skill_key(input_data.content, input_data.skill_key)
-    if settings.agent_run_queue_enabled and resolved_skill_key is not None:
+    requested_runtime_adapter = input_data.adapter_key in {"hermes", "openclaw"}
+    if settings.agent_run_queue_enabled and (
+        resolved_skill_key is not None or requested_runtime_adapter
+    ):
         return StreamingResponse(
             stream_queued_agent_run(db, session_id, input_data, current_user, resolved_skill_key),
             media_type="text/event-stream",

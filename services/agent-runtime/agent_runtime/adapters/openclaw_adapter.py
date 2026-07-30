@@ -24,6 +24,11 @@ from .openclaw_utils import (
     source_dir_from_path,
     title_from_path,
 )
+from .process_registry import (
+    register_run_process,
+    terminate_registered_run_process,
+    unregister_run_process,
+)
 
 
 class OpenClawAdapter(AgentRuntimeAdapter):
@@ -109,6 +114,7 @@ class OpenClawAdapter(AgentRuntimeAdapter):
             except TimeoutError:
                 process.kill()
                 await process.wait()
+        await terminate_registered_run_process(run_id)
         await self._cancel_openclaw_tasks(run_id)
         return AgentRun(
             id=run_id,
@@ -235,6 +241,7 @@ class OpenClawAdapter(AgentRuntimeAdapter):
             }
         finally:
             self.active_processes.pop(run_id, None)
+            unregister_run_process(run_id, getattr(process, "pid", None))
 
         raw_stdout = stdout.decode("utf-8", errors="replace")
         raw_stderr = stderr.decode("utf-8", errors="replace")
@@ -364,6 +371,7 @@ class OpenClawAdapter(AgentRuntimeAdapter):
             stderr=asyncio.subprocess.PIPE,
         )
         self.active_processes[run_id] = process
+        register_run_process("openclaw", run_id, process.pid)
         return process
 
     @staticmethod
