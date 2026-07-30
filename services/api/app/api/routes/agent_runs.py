@@ -23,9 +23,11 @@ from app.services.persistence import get_conversation_or_404
 
 try:
     from agent_runtime.adapters import HermesAdapter, OpenClawAdapter
+    from agent_runtime.adapters.process_registry import terminate_registered_run_process
 except ImportError:
     HermesAdapter = None
     OpenClawAdapter = None
+    terminate_registered_run_process = None
 
 router = APIRouter()
 ACTIVE_RUN_STATUSES = {"queued", "running", "tool_calling", "rendering"}
@@ -410,6 +412,11 @@ async def record_db_agent_run_event(
     step_status: str = "completed",
     payload: dict | None = None,
 ) -> DBAgentRunEvent:
+    await db.refresh(run)
+    terminal_statuses = {"completed", "failed", "cancelled", "disconnected"}
+    if run.status in terminal_statuses and status not in terminal_statuses:
+        status = run.status
+        progress = run.progress
     run.status = status or run.status
     if progress is not None:
         run.progress = progress
@@ -586,23 +593,40 @@ async def cancel_agent_run(
 ) -> schemas.AgentRun:
     run = await get_db_agent_run(db, run_id, current_user)
     await get_conversation_or_404(db, run.conversation_id, current_user, require_write=True)
-    model_runtime_config = model_runtime_config_builder.build_for_run(run)
-    _, adapter = await resolve_adapter_for_model(
-        db,
-        current_user,
-        adapter_key=run.adapter_key,
-        conversation_id=run.conversation_id,
-        run_id=run.id,
-        model_runtime_config=model_runtime_config,
-    )
     adapter_cancelled = False
     adapter_error = None
+    if terminate_registered_run_process is not None:
+        try:
+            adapter_cancelled = await terminate_registered_run_process(run_id)
+        except Exception as error:
+            adapter_error = str(error)
+    model_runtime_config = model_runtime_config_builder.build_for_run(run)
+    adapter = None
+    try:
+        _, adapter = await resolve_adapter_for_model(
+            db,
+            current_user,
+            adapter_key=run.adapter_key,
+            conversation_id=run.conversation_id,
+            run_id=run.id,
+            model_runtime_config=model_runtime_config,
+        )
+    except Exception as error:
+        adapter_error = str(error) if adapter_error is None else adapter_error
     if adapter is not None:
         try:
             await adapter.cancel_run(run_id)
             adapter_cancelled = True
         except Exception as error:
             adapter_error = str(error)
+    if terminate_registered_run_process is not None:
+        try:
+            await asyncio.sleep(1)
+            adapter_cancelled = (
+                await terminate_registered_run_process(run_id) or adapter_cancelled
+            )
+        except Exception as error:
+            adapter_error = str(error) if adapter_error is None else adapter_error
     event = await finish_db_agent_run(
         db,
         run,

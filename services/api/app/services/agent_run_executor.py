@@ -197,6 +197,8 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
             run_id=run.id,
             model_runtime_config=model_runtime_config,
         )
+        if await is_agent_run_cancelled(db, run.id):
+            raise AgentRunCancelled()
         run.adapter_key = adapter_key or run.adapter_key
         await record_db_agent_run_event(
             db,
@@ -258,6 +260,8 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
                 "adapterLockScope": user_runtime_context.adapter_lock_scope(),
             },
         )
+        if await is_agent_run_cancelled(db, run.id):
+            raise AgentRunCancelled()
 
         from agent_runtime.schemas import AgentRunCreate as AdapterAgentRunCreate
 

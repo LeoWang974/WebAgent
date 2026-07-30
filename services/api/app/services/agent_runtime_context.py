@@ -56,11 +56,19 @@ def runtime_run_dir(
 def _copy_skills_once(source: Path, destination: Path) -> Path:
     if destination.exists():
         return destination
-    if source.exists():
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(source, destination, ignore=shutil.ignore_patterns(".git"))
-    else:
-        destination.mkdir(parents=True, exist_ok=True)
+    try:
+        if source.exists():
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(
+                source,
+                destination,
+                ignore=shutil.ignore_patterns(".git"),
+                dirs_exist_ok=True,
+            )
+        else:
+            destination.mkdir(parents=True, exist_ok=True)
+    except FileExistsError:
+        return destination
     return destination
 
 

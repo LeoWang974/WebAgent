@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException, Query, Response
 from fastapi.responses import FileResponse
 from sqlalchemy import or_, select
 
@@ -226,19 +226,30 @@ def dedupe_slide_artifacts(artifacts: list[Artifact]) -> list[Artifact]:
 async def list_artifacts(
     db: DbSession,
     current_user: CurrentUser,
+    session_id: str | None = Query(default=None, alias="sessionId"),
+    session_id_snake: str | None = Query(default=None, alias="session_id"),
+    run_id: str | None = Query(default=None, alias="runId"),
+    run_id_snake: str | None = Query(default=None, alias="run_id"),
 ) -> list[schemas.Artifact]:
+    resolved_session_id = session_id or session_id_snake
+    resolved_run_id = run_id or run_id_snake
+    visibility_filter = or_(
+        Conversation.user_id == current_user.id,
+        Conversation.visibility == "public",
+        (Conversation.visibility == "shared")
+        & (ConversationShare.user_id == current_user.id),
+    )
+    filters = [visibility_filter]
+    if resolved_session_id:
+        filters.append(Artifact.conversation_id == resolved_session_id)
+    if resolved_run_id:
+        filters.append(Artifact.run_id == resolved_run_id)
+
     result = await db.execute(
         select(Artifact)
         .join(Conversation)
         .outerjoin(ConversationShare, ConversationShare.conversation_id == Conversation.id)
-        .where(
-            or_(
-                Conversation.user_id == current_user.id,
-                Conversation.visibility == "public",
-                (Conversation.visibility == "shared")
-                & (ConversationShare.user_id == current_user.id),
-            )
-        )
+        .where(*filters)
         .order_by(Artifact.created_at.desc())
     )
     developer_mode = await user_developer_mode(db, current_user)

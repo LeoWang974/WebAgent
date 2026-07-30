@@ -353,6 +353,7 @@ async def discover_artifacts_with_retry(
 
 
 async def is_agent_run_cancelled(db: AsyncSession, run_id: str) -> bool:
+    db.expire_all()
     result = await db.execute(select(AgentRun.status).where(AgentRun.id == run_id))
     return result.scalar_one_or_none() == "cancelled"
 
@@ -1116,6 +1117,8 @@ async def stream_session_message(
                     "userRuntimeRoot": str(user_runtime_context.root_dir),
                 },
             )
+            if await is_agent_run_cancelled(db, run.id):
+                raise AgentRunCancelled()
 
             from agent_runtime.schemas import AgentRunCreate as AdapterAgentRunCreate
 

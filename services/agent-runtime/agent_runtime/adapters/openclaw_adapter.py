@@ -369,6 +369,7 @@ class OpenClawAdapter(AgentRuntimeAdapter):
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            **({"start_new_session": True} if os.name != "nt" else {}),
         )
         self.active_processes[run_id] = process
         register_run_process("openclaw", run_id, process.pid)

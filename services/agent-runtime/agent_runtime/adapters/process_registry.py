@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import signal
 from pathlib import Path
 
 REGISTRY_ROOT = Path(__file__).resolve().parents[4] / "runtime" / "agent-processes"
@@ -10,7 +11,7 @@ def register_run_process(adapter: str, run_id: str | None, pid: int | None) -> N
     if not run_id or not pid:
         return
     REGISTRY_ROOT.mkdir(parents=True, exist_ok=True)
-    payload = {"adapter": adapter, "run_id": run_id, "pid": pid}
+    payload = {"adapter": adapter, "run_id": run_id, "pid": pid, "pgid": _process_group_id(pid)}
     _registry_path(run_id).write_text(json.dumps(payload), encoding="utf-8")
 
 
@@ -33,8 +34,10 @@ def unregister_run_process(run_id: str | None, pid: int | None = None) -> None:
 
 
 async def terminate_registered_run_process(run_id: str) -> bool:
-    pids = _registered_pids(run_id)
+    pids, pgids = _registered_process_targets(run_id)
     killed = False
+    for pgid in pgids:
+        killed = await terminate_process_group(pgid) or killed
     for pid in pids:
         killed = await terminate_process_tree(pid) or killed
     marker_killed = await terminate_processes_by_marker(run_id)
@@ -65,6 +68,25 @@ async def terminate_process_tree(pid: int) -> bool:
     await _kill_posix(targets, signal="-TERM")
     await asyncio.sleep(2)
     await _kill_posix(targets, signal="-KILL")
+    return True
+
+
+async def terminate_process_group(pgid: int) -> bool:
+    if os.name == "nt" or pgid <= 0:
+        return False
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return False
+    await asyncio.sleep(2)
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    except PermissionError:
+        pass
     return True
 
 
@@ -103,17 +125,30 @@ def _registry_path(run_id: str) -> Path:
     return REGISTRY_ROOT / f"{safe_run_id}.json"
 
 
-def _registered_pids(run_id: str) -> list[int]:
+def _process_group_id(pid: int) -> int | None:
+    if os.name == "nt":
+        return None
+    try:
+        pgid = os.getpgid(pid)
+    except ProcessLookupError:
+        return None
+    return pgid if pgid == pid else None
+
+
+def _registered_process_targets(run_id: str) -> tuple[list[int], list[int]]:
     path = _registry_path(run_id)
     if not path.exists():
-        return []
+        return [], []
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         path.unlink(missing_ok=True)
-        return []
+        return [], []
     pid = payload.get("pid")
-    return [pid] if isinstance(pid, int) else []
+    pgid = payload.get("pgid")
+    pids = [pid] if isinstance(pid, int) else []
+    pgids = [pgid] if isinstance(pgid, int) else []
+    return pids, pgids
 
 
 async def _descendant_pids(pid: int) -> list[int]:

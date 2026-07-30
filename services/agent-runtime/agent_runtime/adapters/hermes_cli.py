@@ -564,7 +564,6 @@ class HermesCliWrapper:
             "\u8f6c\u6362\u5b8c\u6210",
             "finalreportcompleted",
             "reportcompleted",
-            "duration:",
             "resumethissessionwith:",
         ]
         return any(marker in normalized for marker in completion_markers)
@@ -662,6 +661,7 @@ class HermesCliWrapper:
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            **({"start_new_session": True} if os.name != "nt" else {}),
         )
 
         stdout, stderr = await process.communicate()
