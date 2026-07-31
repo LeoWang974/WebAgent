@@ -135,6 +135,40 @@ def test_create_artifacts_from_refs_preserves_openclaw_protocol_metadata(tmp_pat
         mock_store.artifacts[:] = original_artifacts
 
 
+def test_create_artifacts_from_refs_marks_source_cache_as_intermediate(tmp_path: Path):
+    original_artifacts = list(mock_store.artifacts)
+    try:
+        mock_store.artifacts.clear()
+        source_cache = tmp_path / "source_cache"
+        source_cache.mkdir()
+        cache_file = source_cache / "jd_news.html"
+        cache_file.write_text("<html><body>cached source</body></html>", encoding="utf-8")
+
+        artifacts = create_artifacts_from_refs(
+            "session_1",
+            [
+                AgentArtifactRef(
+                    path=str(cache_file),
+                    artifact_type="html_page",
+                    run_id="agent_run_1",
+                    source_dir=str(source_cache),
+                    title="jd_news",
+                )
+            ],
+            run_id="webagent_run_1",
+        )
+
+        assert len(artifacts) == 1
+        artifact = artifacts[0]
+        assert artifact.type == "html_page"
+        assert artifact.metadata
+        assert artifact.metadata["artifactRole"] == "intermediate"
+        assert artifact.metadata["developerOnly"] is True
+        assert artifact.metadata["originalPath"] == str(cache_file)
+    finally:
+        mock_store.artifacts[:] = original_artifacts
+
+
 def test_discover_related_artifact_paths_finds_html_slides_for_pptx(tmp_path: Path):
     deck = tmp_path / "deck.pptx"
     slide = tmp_path / "page_001.html"

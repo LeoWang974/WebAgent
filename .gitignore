@@ -39,11 +39,18 @@ Thumbs.db
 .idea/
 
 # Generated files
+/.hermes/
 /uploads/
+/output/
 /outputs/
 /storage/
 /artifacts/
 /runtime/
+/deep-research-reports/
+/ppt_decks/
+/*.html
+/*.md
+!/README.md
 /D:\\WebAgentArtifacts/
 services/api/deep-research-reports/
 services/api/uploads/

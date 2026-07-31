@@ -310,7 +310,8 @@ def _metadata(
     *,
     original_path: str | None = None,
 ) -> dict:
-    artifact_role = _artifact_role(path, artifact_type)
+    role_path = Path(original_path) if original_path else path
+    artifact_role = _artifact_role(role_path, artifact_type)
     base = {
         "artifactRole": artifact_role,
         "contentHash": _file_sha256(path),
