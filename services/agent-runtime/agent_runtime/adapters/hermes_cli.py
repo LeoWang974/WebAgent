@@ -642,51 +642,6 @@ class HermesCliWrapper:
 
         return False, None
 
-    async def ask(
-        self,
-        question: str,
-        session_id: str | None = None,
-        toolsets: str | None = None,
-        skills: str | None = None,
-        model: str | None = None,
-    ) -> tuple[str, str]:
-        process = await asyncio.create_subprocess_exec(
-            *self._build_chat_exec_args(
-                question,
-                session_id=session_id,
-                toolsets=toolsets,
-                skills=skills,
-                model=model,
-                quiet_query=True,
-            ),
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            **({"start_new_session": True} if os.name != "nt" else {}),
-        )
-
-        stdout, stderr = await process.communicate()
-        stdout_str = stdout.decode("utf-8", errors="replace").strip()
-        stderr_str = stderr.decode("utf-8", errors="replace").strip()
-        self.last_artifact_paths = []
-        self.last_artifacts = []
-        self._remember_artifact_paths(stdout_str)
-        self._remember_artifact_paths(stderr_str)
-        self.last_diagnostics = {
-            "artifact_paths": list(self.last_artifact_paths),
-            "artifacts": list(self.last_artifacts),
-            "exit_code": process.returncode,
-            "last_stage": None,
-            "stderr_tail": stderr_str[-2000:],
-            "stdout_tail": stdout_str[-2000:],
-        }
-
-        if process.returncode != 0:
-            error_msg = stderr_str or f"Hermes exited with code {process.returncode}"
-            raise RuntimeError(f"Hermes CLI error: {error_msg}")
-
-        return self._parse_output(stdout_str)
-
     async def ask_stream(
         self,
         question: str,

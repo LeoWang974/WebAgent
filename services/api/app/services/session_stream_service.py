@@ -21,7 +21,7 @@ from app.services.artifact_discovery import (
     create_pptx_from_html_artifacts,
     discover_artifacts_with_retry,
 )
-from app.services.model_runtime_config import model_runtime_config_builder
+from app.services.model_runtime_config import ADAPTER_MODEL_ALIASES, model_runtime_config_builder
 from app.services.persistence import (
     get_conversation_or_404,
     persist_message,
@@ -91,13 +91,7 @@ async def apply_model_config_directive(
     values: dict[str, str],
 ) -> ModelConfig:
     model: ModelConfig | None = None
-    if model_id and model_id not in {
-        "hermes",
-        "openclaw",
-        "sensenova",
-        "model_hermes",
-        "model_openclaw",
-    }:
+    if model_id and model_id not in ADAPTER_MODEL_ALIASES:
         result = await db.execute(
             select(ModelConfig).where(
                 ModelConfig.id == model_id,

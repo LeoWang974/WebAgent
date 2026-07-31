@@ -15,7 +15,6 @@ from typing import Any
 from app import schemas
 from app.core.config import settings
 from app.schemas.artifact import ArtifactType
-from app.services import mock_store
 from app.services.agent_run_workspace import run_artifacts_dir
 
 SUPPORTED_SUFFIXES = {
@@ -422,16 +421,6 @@ def _content(path: Path, artifact_type: ArtifactType) -> str | None:
     return None
 
 
-def _existing_artifact_keys() -> tuple[set[str], set[str]]:
-    existing_paths = {
-        str((artifact.metadata or {}).get("path"))
-        for artifact in mock_store.artifacts
-        if artifact.metadata
-    }
-    existing_ids = {artifact.id for artifact in mock_store.artifacts}
-    return existing_paths, existing_ids
-
-
 def _artifact_from_path(
     session_id: str,
     path: Path,
@@ -649,7 +638,8 @@ def create_artifacts_from_paths(
     paths: list[str],
     run_id: str | None = None,
 ) -> list[schemas.Artifact]:
-    existing_paths, existing_ids = _existing_artifact_keys()
+    existing_paths: set[str] = set()
+    existing_ids: set[str] = set()
     existing_hashes: set[str] = set()
     artifacts: list[schemas.Artifact] = []
 
@@ -730,7 +720,8 @@ def create_artifacts_from_refs(
     artifact_refs: list[object],
     run_id: str | None = None,
 ) -> list[schemas.Artifact]:
-    existing_paths, existing_ids = _existing_artifact_keys()
+    existing_paths: set[str] = set()
+    existing_ids: set[str] = set()
     existing_hashes: set[str] = set()
     artifacts: list[schemas.Artifact] = []
 
@@ -933,7 +924,8 @@ def discover_artifacts_since(
     run_id: str | None = None,
 ) -> list[schemas.Artifact]:
     since = _as_local_naive(since)
-    existing_paths, existing_ids = _existing_artifact_keys()
+    existing_paths: set[str] = set()
+    existing_ids: set[str] = set()
     existing_hashes: set[str] = set()
     discovered: list[schemas.Artifact] = []
 

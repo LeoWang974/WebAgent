@@ -1,6 +1,7 @@
 import pytest
 
 from agent_runtime.adapters.hermes_adapter import HermesAdapter
+from agent_runtime.adapters.hermes_cli import HermesStreamEvent
 from agent_runtime.schemas import AgentRunCreate
 
 
@@ -17,9 +18,13 @@ async def test_hermes_create_run_forwards_prompt_verbatim():
     captured: dict[str, object] = {}
 
     class FakeCli:
-        async def ask(self, **kwargs):
+        last_artifact_paths: list[str] = []
+        last_artifacts: list[dict] = []
+        last_diagnostics: dict[str, object] = {}
+
+        async def ask_stream_events(self, **kwargs):
             captured.update(kwargs)
-            return "session_1", "ok"
+            yield HermesStreamEvent(event_type="completed", content="ok")
 
     adapter = HermesAdapter()
     adapter.cli = FakeCli()

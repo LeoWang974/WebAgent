@@ -2,7 +2,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from agent_runtime.schemas import AgentArtifactRef
-from app.services import mock_store
 from app.services.artifact_discovery import (
     _candidate_roots,
     _normalized_path_key,
@@ -31,48 +30,36 @@ def test_candidate_roots_include_hermes_deep_research_reports():
 
 
 def test_create_artifacts_from_paths_dedupes_by_content_hash(tmp_path: Path):
-    original_artifacts = list(mock_store.artifacts)
-    try:
-        mock_store.artifacts.clear()
-        first = tmp_path / "report.md"
-        second = tmp_path / "copy.md"
-        first.write_text("# Report\nsame content", encoding="utf-8")
-        second.write_text("# Report\nsame content", encoding="utf-8")
+    first = tmp_path / "report.md"
+    second = tmp_path / "copy.md"
+    first.write_text("# Report\nsame content", encoding="utf-8")
+    second.write_text("# Report\nsame content", encoding="utf-8")
 
-        artifacts = create_artifacts_from_paths("session_1", [str(first), str(second)])
+    artifacts = create_artifacts_from_paths("session_1", [str(first), str(second)])
 
-        assert len(artifacts) == 1
-        assert artifacts[0].type == "markdown_report"
-        assert artifacts[0].content == "# Report\nsame content"
-        assert artifacts[0].metadata
-        assert artifacts[0].metadata["contentHash"]
-    finally:
-        mock_store.artifacts[:] = original_artifacts
+    assert len(artifacts) == 1
+    assert artifacts[0].type == "markdown_report"
+    assert artifacts[0].content == "# Report\nsame content"
+    assert artifacts[0].metadata
+    assert artifacts[0].metadata["contentHash"]
 
 
 def test_create_artifacts_from_paths_supports_debug_json(tmp_path: Path):
-    original_artifacts = list(mock_store.artifacts)
-    try:
-        mock_store.artifacts.clear()
-        json_file = tmp_path / "briefing.json"
-        json_file.write_text('{"topic":"future food","steps":2}', encoding="utf-8")
+    json_file = tmp_path / "briefing.json"
+    json_file.write_text('{"topic":"future food","steps":2}', encoding="utf-8")
 
-        artifacts = create_artifacts_from_paths("session_1", [str(json_file)])
+    artifacts = create_artifacts_from_paths("session_1", [str(json_file)])
 
-        assert len(artifacts) == 1
-        assert artifacts[0].type == "debug_json"
-        assert artifacts[0].content == '{"topic":"future food","steps":2}'
-        assert artifacts[0].metadata
-        assert artifacts[0].metadata["filename"] == "briefing.json"
-    finally:
-        mock_store.artifacts[:] = original_artifacts
+    assert len(artifacts) == 1
+    assert artifacts[0].type == "debug_json"
+    assert artifacts[0].content == '{"topic":"future food","steps":2}'
+    assert artifacts[0].metadata
+    assert artifacts[0].metadata["filename"] == "briefing.json"
 
 
 def test_create_artifacts_from_paths_ignores_runtime_temp_json():
-    original_artifacts = list(mock_store.artifacts)
     runtime_file = _repo_root() / "runtime" / "openclaw_smoke_snapshot.json"
     try:
-        mock_store.artifacts.clear()
         runtime_file.parent.mkdir(parents=True, exist_ok=True)
         runtime_file.write_text('{"status":"running"}', encoding="utf-8")
 
@@ -80,93 +67,77 @@ def test_create_artifacts_from_paths_ignores_runtime_temp_json():
 
         assert artifacts == []
     finally:
-        mock_store.artifacts[:] = original_artifacts
         runtime_file.unlink(missing_ok=True)
 
 
 def test_create_artifacts_from_paths_ignores_runtime_skill_docs(tmp_path: Path):
-    original_artifacts = list(mock_store.artifacts)
-    try:
-        mock_store.artifacts.clear()
-        skill_doc = tmp_path / ".hermes" / "skills" / "SenseNova-Skills" / "docs" / "skill.md"
-        skill_doc.parent.mkdir(parents=True, exist_ok=True)
-        skill_doc.write_text("# Skill docs\n", encoding="utf-8")
+    skill_doc = tmp_path / ".hermes" / "skills" / "SenseNova-Skills" / "docs" / "skill.md"
+    skill_doc.parent.mkdir(parents=True, exist_ok=True)
+    skill_doc.write_text("# Skill docs\n", encoding="utf-8")
 
-        artifacts = create_artifacts_from_paths("session_1", [str(skill_doc)])
+    artifacts = create_artifacts_from_paths("session_1", [str(skill_doc)])
 
-        assert artifacts == []
-    finally:
-        mock_store.artifacts[:] = original_artifacts
+    assert artifacts == []
 
 
 def test_create_artifacts_from_refs_preserves_openclaw_protocol_metadata(tmp_path: Path):
-    original_artifacts = list(mock_store.artifacts)
-    try:
-        mock_store.artifacts.clear()
-        report = tmp_path / "openclaw-report.md"
-        report.write_text("# OpenClaw Report\n", encoding="utf-8")
+    report = tmp_path / "openclaw-report.md"
+    report.write_text("# OpenClaw Report\n", encoding="utf-8")
 
-        artifacts = create_artifacts_from_refs(
-            "session_1",
-            [
-                AgentArtifactRef(
-                    path=str(report),
-                    artifact_type="markdown_report",
-                    run_id="openclaw_run_1",
-                    source_dir=str(tmp_path),
-                    title="OpenClaw 标准报告",
-                )
-            ],
-            run_id="webagent_run_1",
-        )
+    artifacts = create_artifacts_from_refs(
+        "session_1",
+        [
+            AgentArtifactRef(
+                path=str(report),
+                artifact_type="markdown_report",
+                run_id="openclaw_run_1",
+                source_dir=str(tmp_path),
+                title="OpenClaw 标准报告",
+            )
+        ],
+        run_id="webagent_run_1",
+    )
 
-        assert len(artifacts) == 1
-        artifact = artifacts[0]
-        assert artifact.type == "markdown_report"
-        assert artifact.title == "OpenClaw 标准报告"
-        assert artifact.content == "# OpenClaw Report\n"
-        assert artifact.metadata
-        assert artifact.metadata["adapterProtocol"] == "openclaw.artifact.v1"
-        assert artifact.metadata["adapterRunId"] == "openclaw_run_1"
-        assert artifact.metadata["adapterSourceDir"] == str(tmp_path)
-        assert artifact.metadata["adapterTitle"] == "OpenClaw 标准报告"
-        assert artifact.metadata["adapterType"] == "markdown_report"
-    finally:
-        mock_store.artifacts[:] = original_artifacts
+    assert len(artifacts) == 1
+    artifact = artifacts[0]
+    assert artifact.type == "markdown_report"
+    assert artifact.title == "OpenClaw 标准报告"
+    assert artifact.content == "# OpenClaw Report\n"
+    assert artifact.metadata
+    assert artifact.metadata["adapterProtocol"] == "openclaw.artifact.v1"
+    assert artifact.metadata["adapterRunId"] == "openclaw_run_1"
+    assert artifact.metadata["adapterSourceDir"] == str(tmp_path)
+    assert artifact.metadata["adapterTitle"] == "OpenClaw 标准报告"
+    assert artifact.metadata["adapterType"] == "markdown_report"
 
 
 def test_create_artifacts_from_refs_marks_source_cache_as_intermediate(tmp_path: Path):
-    original_artifacts = list(mock_store.artifacts)
-    try:
-        mock_store.artifacts.clear()
-        source_cache = tmp_path / "source_cache"
-        source_cache.mkdir()
-        cache_file = source_cache / "jd_news.html"
-        cache_file.write_text("<html><body>cached source</body></html>", encoding="utf-8")
+    source_cache = tmp_path / "source_cache"
+    source_cache.mkdir()
+    cache_file = source_cache / "jd_news.html"
+    cache_file.write_text("<html><body>cached source</body></html>", encoding="utf-8")
 
-        artifacts = create_artifacts_from_refs(
-            "session_1",
-            [
-                AgentArtifactRef(
-                    path=str(cache_file),
-                    artifact_type="html_page",
-                    run_id="agent_run_1",
-                    source_dir=str(source_cache),
-                    title="jd_news",
-                )
-            ],
-            run_id="webagent_run_1",
-        )
+    artifacts = create_artifacts_from_refs(
+        "session_1",
+        [
+            AgentArtifactRef(
+                path=str(cache_file),
+                artifact_type="html_page",
+                run_id="agent_run_1",
+                source_dir=str(source_cache),
+                title="jd_news",
+            )
+        ],
+        run_id="webagent_run_1",
+    )
 
-        assert len(artifacts) == 1
-        artifact = artifacts[0]
-        assert artifact.type == "html_page"
-        assert artifact.metadata
-        assert artifact.metadata["artifactRole"] == "intermediate"
-        assert artifact.metadata["developerOnly"] is True
-        assert artifact.metadata["originalPath"] == str(cache_file)
-    finally:
-        mock_store.artifacts[:] = original_artifacts
+    assert len(artifacts) == 1
+    artifact = artifacts[0]
+    assert artifact.type == "html_page"
+    assert artifact.metadata
+    assert artifact.metadata["artifactRole"] == "intermediate"
+    assert artifact.metadata["developerOnly"] is True
+    assert artifact.metadata["originalPath"] == str(cache_file)
 
 
 def test_discover_related_artifact_paths_finds_html_slides_for_pptx(tmp_path: Path):

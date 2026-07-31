@@ -18,14 +18,6 @@ export function isTerminalRunStatus(status: AgentRun["status"]) {
   return TERMINAL_RUN_STATUSES.includes(status);
 }
 
-export function detectRequestedSkill(
-  content: string,
-  explicitSkillKey?: SkillKey,
-): SkillKey | undefined {
-  void content;
-  return explicitSkillKey;
-}
-
 export function isDefaultSessionTitle(title?: string) {
   const normalized = (title ?? "").trim().toLowerCase();
   return !normalized || normalized === "新对话" || normalized === "new conversation";

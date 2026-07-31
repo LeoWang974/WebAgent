@@ -233,7 +233,6 @@ async def send_session_message(
 
 
 @router.post("/{session_id}/messages/stream")
-@router.post("/{session_id}/messages/stream")
 async def stream_session_message(
     session_id: str,
     input_data: schemas.MessageCreate,
@@ -241,6 +240,8 @@ async def stream_session_message(
     current_user: CurrentUser,
 ) -> StreamingResponse:
     return await stream_session_message_response(session_id, input_data, db, current_user)
+
+
 @router.get("/{session_id}/artifacts", response_model=list[schemas.Artifact])
 async def list_session_artifacts(
     session_id: str,

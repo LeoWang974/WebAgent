@@ -46,6 +46,7 @@ Thumbs.db
 /storage/
 /artifacts/
 /runtime/
+services/runtime/
 /deep-research-reports/
 /ppt_decks/
 /*.html

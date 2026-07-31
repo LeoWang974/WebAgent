@@ -22,17 +22,16 @@ class HermesAdapter(AgentRuntimeAdapter):
 
     async def create_run(self, input_data: AgentRunCreate) -> AgentRun:
         try:
-            session_id, response = await self.cli.ask(
-                question=input_data.content,
-                toolsets=None,
-                skills=None,
-            )
+            output_chunks: list[str] = []
+            async for event in self.stream_response_events(input_data):
+                if event.output:
+                    output_chunks.append(event.output)
+                elif event.step and event.step.label:
+                    output_chunks.append(event.step.label)
 
-            run_id = (
-                f"run_hermes_{session_id}"
-                if session_id
-                else f"run_hermes_{input_data.session_id}"
-            )
+            response = "\n\n".join(chunk for chunk in output_chunks if chunk).strip()
+
+            run_id = input_data.run_id or f"run_hermes_{input_data.session_id}"
             run = AgentRun(
                 id=run_id,
                 session_id=input_data.session_id,
@@ -41,7 +40,7 @@ class HermesAdapter(AgentRuntimeAdapter):
                 progress=100,
                 steps=[
                     AgentRunStep(
-                        id=f"step_{session_id}_1",
+                        id=f"{run_id}_step_1",
                         label="Completed",
                         status="completed",
                         timestamp=now_iso(),
@@ -49,7 +48,7 @@ class HermesAdapter(AgentRuntimeAdapter):
                 ],
                 started_at=now_iso(),
                 completed_at=now_iso(),
-                output=response,
+                output=response or "Hermes agent run completed.",
             )
 
             return run

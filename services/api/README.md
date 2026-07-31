@@ -1,6 +1,6 @@
 # API Service
 
-FastAPI backend skeleton for WebAgent.
+FastAPI backend for WebAgent.
 
 ## Local setup
 
@@ -35,13 +35,8 @@ celery -A app.workers.celery_app.celery_app worker --loglevel=info
 
 - FastAPI app entrypoint and CORS
 - Pydantic schemas aligned with the frontend adapter contract
-- Mock API routes for auth, sessions, messages, artifacts, files, agent runs, models, skills, and settings
-- SSE mock endpoint for agent run progress
-- SQLAlchemy model skeleton for the MVP tables
-- Alembic migration scaffold
+- Database-backed routes for auth, sessions, messages, artifacts, files, agent runs, models, skills, settings, folders, and admin users
+- SSE endpoint for queued and direct agent run progress
+- SQLAlchemy models and Alembic migrations for the current core tables
 - Celery worker scaffold backed by Redis
 - Scheduled SenseNova skills updater for Hermes and OpenClaw
-
-## Next backend step
-
-Replace `app.services.mock_store` with SQLAlchemy repositories and create the first Alembic migration.

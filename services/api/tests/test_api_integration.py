@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from agent_runtime.schemas import AgentArtifactRef, AgentRunEvent, AgentRunStep
 from app.core.config import settings
 from app.core.security import create_access_token
-from app.models import AgentRun, Artifact, Conversation, Message, ModelConfig, User
+from app.models import AgentRun, Artifact, Conversation, FileAsset, Message, ModelConfig, User
 from app.models import AgentRunEvent as DBAgentRunEvent
 from app.services.artifact_discovery import create_artifacts_from_paths
 from app.services.model_runtime_config import model_runtime_config_from_model
@@ -219,6 +219,105 @@ async def test_model_config_accepts_separate_runtime_model_name(
 
     assert runtime_config.model_name == "sensenova-6.7-flash-lite"
     assert runtime_config.base_url == "https://token.sensenova.cn/v1"
+
+
+@pytest.mark.asyncio
+async def test_file_upload_persists_and_links_to_session(
+    api_client: AsyncClient,
+    auth_headers: dict[str, dict[str, str]],
+    db_sessionmaker: async_sessionmaker[AsyncSession],
+):
+    session_response = await api_client.post(
+        "/api/sessions",
+        json={"title": "File upload session"},
+        headers=auth_headers["owner"],
+    )
+    assert session_response.status_code == 200
+    session_id = session_response.json()["id"]
+
+    upload_response = await api_client.post(
+        "/api/files",
+        data={"session_id": session_id},
+        files={"file": ("note.txt", b"hello from db", "text/plain")},
+        headers=auth_headers["owner"],
+    )
+    assert upload_response.status_code == 200
+    uploaded = upload_response.json()
+    assert uploaded["filename"] == "note.txt"
+    assert uploaded["sessionId"] == session_id
+
+    session_files_response = await api_client.get(
+        f"/api/sessions/{session_id}/files",
+        headers=auth_headers["owner"],
+    )
+    assert session_files_response.status_code == 200
+    assert [item["id"] for item in session_files_response.json()] == [uploaded["id"]]
+
+    async with db_sessionmaker() as db:
+        file_asset = await db.get(FileAsset, uploaded["id"])
+        assert file_asset is not None
+        assert file_asset.conversation_id == session_id
+        assert file_asset.filename == "note.txt"
+        assert file_asset.storage_key
+        assert Path(file_asset.storage_key).exists()
+
+
+@pytest.mark.asyncio
+async def test_non_stream_message_enqueues_agent_run(
+    api_client: AsyncClient,
+    auth_headers: dict[str, dict[str, str]],
+    db_sessionmaker: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+):
+    queued_run_ids: list[str] = []
+
+    async def fake_resolve_adapter_for_model(*args, **kwargs):
+        return "hermes", object()
+
+    def fake_apply_async(args, **kwargs):
+        queued_run_ids.append(args[0])
+
+    monkeypatch.setattr(
+        "app.services.agent_runs.resolve_adapter_for_model",
+        fake_resolve_adapter_for_model,
+    )
+    monkeypatch.setattr(
+        "app.workers.agent_run_tasks.execute_agent_run_task.apply_async",
+        fake_apply_async,
+    )
+
+    session_response = await api_client.post(
+        "/api/sessions",
+        json={"title": "Queued send session"},
+        headers=auth_headers["owner"],
+    )
+    assert session_response.status_code == 200
+    session_id = session_response.json()["id"]
+
+    response = await api_client.post(
+        f"/api/sessions/{session_id}/messages",
+        json={"content": "请生成报告", "modelId": "model_hermes", "adapterKey": "hermes"},
+        headers=auth_headers["owner"],
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["session"]["status"] == "running"
+    assert payload["messages"][0]["role"] == "user"
+    assert payload["messages"][1]["role"] == "assistant"
+    assert payload["messages"][1]["content"].startswith("Agent run queued. Run ID:")
+    assert len(queued_run_ids) == 1
+
+    async with db_sessionmaker() as db:
+        run = await db.get(AgentRun, queued_run_ids[0])
+        assert run is not None
+        assert run.conversation_id == session_id
+        assert run.status == "queued"
+        events = (
+            (await db.execute(select(DBAgentRunEvent).where(DBAgentRunEvent.run_id == run.id)))
+            .scalars()
+            .all()
+        )
+        assert any(event.event_type == "queued" for event in events)
 
 
 @pytest.mark.asyncio

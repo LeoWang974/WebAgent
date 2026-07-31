@@ -12,7 +12,6 @@ import { applyAgentRunEventState } from "./event-handlers";
 import {
   createId,
   createPendingAssistantMessage,
-  detectRequestedSkill,
   generateSessionTitle,
   hasPendingAssistantMessage,
   isDefaultSessionTitle,
@@ -691,7 +690,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const adapterKey = get().selectedAgentKey;
     const modelId = get().selectedModelId;
     const modelName = get().models.find((model) => model.id === modelId)?.name ?? "Agent";
-    const requestedSkill = detectRequestedSkill(trimmed, skillKey);
+    const requestedSkill = skillKey;
     const isRuntimeAdapterRun = adapterKey === "hermes" || adapterKey === "openclaw";
     let sessionId = get().currentSessionId;
     if (!sessionId) {
