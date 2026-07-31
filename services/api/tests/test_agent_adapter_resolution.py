@@ -1,5 +1,5 @@
-from app.api.routes.agent_runs import _infer_adapter_key_from_model
 from app.models import ModelConfig
+from app.services.agent_runs import _infer_adapter_key_from_model
 
 
 def make_model(name: str, provider: str = "openai_compatible", base_url: str | None = None):

@@ -17,8 +17,19 @@ def safe_runtime_segment(value: str, fallback: str = "user") -> str:
     return cleaned[:96] or fallback
 
 
+def path_from_runtime_setting(value: str) -> Path:
+    normalized = value.strip().replace("\\", "/")
+    if os_name == "nt":
+        match = re.match(r"^/mnt/([a-zA-Z])/(.*)$", normalized)
+        if match:
+            drive = match.group(1).upper()
+            rest = match.group(2).replace("/", "\\")
+            return Path(f"{drive}:\\{rest}")
+    return Path(value).expanduser()
+
+
 def runtime_root() -> Path:
-    root = Path(settings.agent_runtime_user_root)
+    root = path_from_runtime_setting(settings.agent_runtime_user_root)
     if not root.is_absolute():
         root = Path(__file__).resolve().parents[4] / root
     root.mkdir(parents=True, exist_ok=True)

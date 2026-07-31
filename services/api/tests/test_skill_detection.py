@@ -1,7 +1,8 @@
 import pytest
 from fastapi import HTTPException
 
-from app.api.routes.sessions import parse_model_config_directive, resolve_skill_key
+from app.services.session_message_service import resolve_skill_key
+from app.services.session_stream_service import parse_model_config_directive
 
 
 def test_resolve_skill_key_does_not_parse_user_prompt_markers():

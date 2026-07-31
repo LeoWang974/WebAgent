@@ -1,4 +1,4 @@
-from app.api.routes.sessions import resolve_skill_key
+from app.services.session_message_service import resolve_skill_key
 
 
 def test_resolve_skill_key_does_not_detect_report_html_v2_from_prompt():

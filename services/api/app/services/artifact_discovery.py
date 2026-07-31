@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import csv
 import hashlib
@@ -47,6 +48,87 @@ OUTPUT_PATH_MARKERS = {
     "\\images\\",
     "\\ppt_decks\\",
 }
+
+
+def dedupe_discovered_artifacts(artifacts: list[schemas.Artifact]) -> list[schemas.Artifact]:
+    deduped: list[schemas.Artifact] = []
+    seen: set[str] = set()
+    for artifact in artifacts:
+        metadata = artifact.metadata or {}
+        keys = [
+            artifact.id,
+            str(metadata.get("contentHash") or ""),
+            str(metadata.get("normalizedPath") or ""),
+            str(metadata.get("originalNormalizedPath") or ""),
+            str(metadata.get("path") or ""),
+            str(metadata.get("originalPath") or ""),
+        ]
+        present_keys = {item for item in keys if item}
+        if present_keys & seen:
+            continue
+        seen.update(present_keys)
+        deduped.append(artifact)
+    return deduped
+
+
+def explicit_artifact_source_dirs(explicit_artifacts: list[object] | None) -> list[str]:
+    source_dirs: list[str] = []
+    for artifact_ref in explicit_artifacts or []:
+        value = (
+            artifact_ref.get("source_dir") or artifact_ref.get("sourceDir")
+            if isinstance(artifact_ref, dict)
+            else getattr(artifact_ref, "source_dir", None)
+        )
+        if isinstance(value, str) and value:
+            source_dirs.append(value)
+    return source_dirs
+
+
+async def discover_artifacts_with_retry(
+    session_id: str,
+    since: datetime,
+    explicit_artifact_paths: list[str],
+    run_id: str | None,
+    explicit_artifacts: list[object] | None = None,
+) -> list[schemas.Artifact]:
+    for attempt in range(5):
+        discovered_artifacts = create_artifacts_from_refs(
+            session_id,
+            explicit_artifacts or [],
+            run_id,
+        )
+        if not discovered_artifacts:
+            discovered_artifacts = create_artifacts_from_paths(
+                session_id,
+                explicit_artifact_paths,
+                run_id,
+            )
+        if discovered_artifacts:
+            related_paths = discover_related_artifact_paths(
+                explicit_artifact_paths,
+                since,
+                source_dirs=explicit_artifact_source_dirs(explicit_artifacts),
+            )
+            if related_paths:
+                discovered_artifacts.extend(
+                    create_artifacts_from_paths(session_id, related_paths, run_id)
+                )
+                discovered_artifacts = dedupe_discovered_artifacts(discovered_artifacts)
+        if not discovered_artifacts:
+            session_artifact_paths = discover_artifact_paths_from_hermes_sessions(since)
+            discovered_artifacts = create_artifacts_from_paths(
+                session_id,
+                session_artifact_paths,
+                run_id,
+            )
+        if not discovered_artifacts:
+            discovered_artifacts = discover_artifacts_since(session_id, since, run_id)
+        if discovered_artifacts or attempt == 4:
+            return dedupe_discovered_artifacts(discovered_artifacts)
+        await asyncio.sleep(2)
+    return []
+
+
 NON_ARTIFACT_MARKERS = {
     "/.hermes/skills/",
     "\\.hermes\\skills\\",

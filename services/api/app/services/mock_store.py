@@ -5,7 +5,6 @@ from app.schemas import (
     AgentRun,
     Artifact,
     DataContextSettings,
-    FileAsset,
     Message,
     ModelConfig,
     Session,
@@ -71,8 +70,6 @@ artifacts: list[Artifact] = [
         ),
     )
 ]
-
-files: list[FileAsset] = []
 
 runs: list[AgentRun] = []
 

@@ -5,6 +5,7 @@ from app.core.config import settings
 from app.services.adapter_limiter import adapter_lock_scope
 from app.services.agent_runtime_context import (
     build_user_runtime_context,
+    path_from_runtime_setting,
     safe_runtime_segment,
 )
 from app.services.model_runtime_config import ModelRuntimeConfig
@@ -13,6 +14,14 @@ from app.services.model_runtime_config import ModelRuntimeConfig
 def test_safe_runtime_segment_strips_path_unsafe_characters():
     assert safe_runtime_segment("user/with\\slashes and spaces") == "user-with-slashes and spaces"
     assert safe_runtime_segment("../") == "user"
+
+
+def test_path_from_runtime_setting_accepts_wsl_drive_path_on_windows(monkeypatch):
+    monkeypatch.setattr("app.services.agent_runtime_context.os_name", "nt")
+
+    path = path_from_runtime_setting("/mnt/d/gitWorkSpace/WebAgent/runtime/users")
+
+    assert str(path) == r"D:\gitWorkSpace\WebAgent\runtime\users"
 
 
 def test_build_user_runtime_context_creates_per_conversation_dirs(

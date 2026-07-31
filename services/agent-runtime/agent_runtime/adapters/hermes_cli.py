@@ -551,6 +551,7 @@ class HermesCliWrapper:
     def _is_completion_signal(text: str) -> bool:
         normalized = re.sub(r"\s+", "", text.lower())
         completion_markers = [
+            "duration:",
             "\u62a5\u544a\u5df2\u5b8c\u6210",
             "\u62a5\u544a\u5df2\u751f\u6210",
             "\u62a5\u544a\u5b8c\u6210",

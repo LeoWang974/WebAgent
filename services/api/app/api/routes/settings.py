@@ -108,6 +108,16 @@ def get_input_value(input_data: dict[str, Any], camel_key: str, snake_key: str, 
     return default
 
 
+def get_model_name_input(input_data: dict[str, Any], default: str) -> str:
+    value = (
+        get_input_value(input_data, "modelName", "model_name")
+        or input_data.get("model")
+        or input_data.get("name")
+        or default
+    )
+    return str(value).strip() or default
+
+
 def is_runtime_adapter_model(model: ModelConfig) -> bool:
     marker = f"{model.name or ''} {model.base_url or ''}".lower()
     return not model.encrypted_api_key and (
@@ -419,7 +429,7 @@ async def add_model(
         base_url=get_input_value(input_data, "baseUrl", "base_url"),
         encrypted_api_key=api_key,
         is_available=True,
-        name=input_data.get("name", "Custom model"),
+        name=get_model_name_input(input_data, "Custom model"),
         provider=input_data.get("provider", "custom"),
         is_default=False,
     )
@@ -437,7 +447,7 @@ async def update_model(
     current_user: CurrentUser,
 ) -> schemas.ModelConfig:
     model = await get_user_model(db, current_user, model_id)
-    model.name = input_data.get("name", model.name)
+    model.name = get_model_name_input(input_data, model.name)
     model.provider = input_data.get("provider", model.provider)
     model.base_url = get_input_value(input_data, "baseUrl", "base_url", model.base_url)
     api_key = get_input_value(input_data, "apiKey", "api_key")

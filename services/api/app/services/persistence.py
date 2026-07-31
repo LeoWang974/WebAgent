@@ -11,7 +11,7 @@ from app import schemas
 from app.core.config import settings
 from app.core.security import decode_access_token, hash_password
 from app.db.session import get_db
-from app.models import Artifact, Conversation, ConversationShare, Message, User
+from app.models import Artifact, Conversation, ConversationShare, FileAsset, Message, User
 
 DEFAULT_DEV_EMAIL = "demo@webagent.local"
 
@@ -168,6 +168,38 @@ def to_message(message: Message) -> schemas.Message:
         created_at=message.created_at.isoformat(),
         artifact_ids=message.artifact_ids,
     )
+
+
+def to_file_asset(file_asset: FileAsset) -> schemas.FileAsset:
+    return schemas.FileAsset(
+        content_type=file_asset.content_type,
+        created_at=file_asset.created_at.isoformat(),
+        filename=file_asset.filename,
+        id=file_asset.id,
+        metadata=file_asset.file_metadata,
+        session_id=file_asset.conversation_id,
+        size=file_asset.size,
+        url=(file_asset.file_metadata or {}).get("url") if file_asset.file_metadata else None,
+    )
+
+
+async def persist_message(
+    db: AsyncSession,
+    session_id: str,
+    role: str,
+    content: str,
+    artifact_ids: list[str] | None = None,
+) -> Message:
+    message = Message(
+        conversation_id=session_id,
+        role=role,
+        content=content,
+        artifact_ids=artifact_ids,
+    )
+    db.add(message)
+    await db.commit()
+    await db.refresh(message)
+    return message
 
 
 def to_artifact(artifact: Artifact, *, include_payload: bool = True) -> schemas.Artifact:

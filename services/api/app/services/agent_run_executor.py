@@ -8,15 +8,6 @@ from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.routes.sessions import (
-    AgentRunCancelled,
-    AgentRunTimeout,
-    discover_artifacts_with_retry,
-    is_agent_run_cancelled,
-    persist_message,
-    runtime_diagnostics,
-    should_suppress_stage_bubble,
-)
 from app.api.routes.settings import DEFAULT_INTERFACE, to_interface_schema
 from app.core.config import settings
 from app.db.session import AsyncSessionLocal
@@ -35,16 +26,24 @@ from app.services.agent_runtime_context import build_user_runtime_context
 from app.services.artifact_discovery import (
     create_markdown_artifact_from_content,
     create_pptx_from_html_artifacts,
+    discover_artifacts_with_retry,
     discover_related_artifact_paths,
     extract_artifact_path_strings,
 )
 from app.services.model_runtime_config import model_runtime_config_builder
-from app.services.persistence import to_artifact, to_message, to_session
+from app.services.persistence import persist_message, to_artifact, to_message, to_session
 from app.services.session_artifacts import (
     artifact_display_priority,
     is_debug_artifact,
     persist_discovered_artifacts,
     refresh_conversation,
+)
+from app.services.session_stream_service import (
+    AgentRunCancelled,
+    AgentRunTimeout,
+    is_agent_run_cancelled,
+    runtime_diagnostics,
+    should_suppress_stage_bubble,
 )
 
 logger = logging.getLogger(__name__)

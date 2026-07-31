@@ -9,12 +9,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agent_runtime.schemas import AgentArtifactRef, AgentRunEvent, AgentRunStep
-from app.api.routes.sessions import persist_discovered_artifacts
 from app.core.config import settings
 from app.core.security import create_access_token
-from app.models import AgentRun, Artifact, Conversation, Message, User
+from app.models import AgentRun, Artifact, Conversation, Message, ModelConfig, User
 from app.models import AgentRunEvent as DBAgentRunEvent
 from app.services.artifact_discovery import create_artifacts_from_paths
+from app.services.model_runtime_config import model_runtime_config_from_model
+from app.services.session_artifacts import persist_discovered_artifacts
 
 
 def parse_sse_events(payload: str) -> list[tuple[str, dict]]:
@@ -187,6 +188,37 @@ async def test_register_accepts_username_without_email(api_client: AsyncClient):
     assert payload["accessToken"]
     assert payload["user"]["email"] == "no-email-user@webagent.local"
     assert payload["user"]["username"] == "no-email-user"
+
+
+@pytest.mark.asyncio
+async def test_model_config_accepts_separate_runtime_model_name(
+    api_client: AsyncClient,
+    auth_headers: dict[str, dict[str, str]],
+    db_sessionmaker: async_sessionmaker[AsyncSession],
+):
+    response = await api_client.post(
+        "/api/settings/models",
+        json={
+            "apiKey": "user-key",
+            "baseUrl": "https://token.sensenova.cn/v1",
+            "modelName": "sensenova-6.7-flash-lite",
+            "name": "Slow test display label",
+            "provider": "sensenova",
+        },
+        headers=auth_headers["owner"],
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["name"] == "sensenova-6.7-flash-lite"
+
+    async with db_sessionmaker() as db:
+        model = await db.get(ModelConfig, payload["id"])
+        assert model is not None
+        runtime_config = model_runtime_config_from_model(model)
+
+    assert runtime_config.model_name == "sensenova-6.7-flash-lite"
+    assert runtime_config.base_url == "https://token.sensenova.cn/v1"
 
 
 @pytest.mark.asyncio
@@ -549,7 +581,7 @@ async def test_agent_run_sse_persists_events_and_artifact(
         return "hermes", fake_adapter
 
     monkeypatch.setattr(
-        "app.api.routes.agent_runs.resolve_adapter_for_model",
+        "app.services.agent_runs.resolve_adapter_for_model",
         fake_resolve_adapter_for_model,
     )
 
@@ -613,7 +645,7 @@ async def test_raw_activity_heartbeat_does_not_create_assistant_message(
         return "hermes", fake_adapter
 
     monkeypatch.setattr(
-        "app.api.routes.agent_runs.resolve_adapter_for_model",
+        "app.services.agent_runs.resolve_adapter_for_model",
         fake_resolve_adapter_for_model,
     )
 
@@ -621,7 +653,7 @@ async def test_raw_activity_heartbeat_does_not_create_assistant_message(
         return []
 
     monkeypatch.setattr(
-        "app.api.routes.sessions.discover_artifacts_with_retry",
+        "app.services.session_stream_service.discover_artifacts_with_retry",
         fake_discover_artifacts_with_retry,
     )
 
@@ -759,7 +791,7 @@ async def test_agent_run_stream_idle_timeout_records_diagnostics(
         return "hermes", fake_adapter
 
     monkeypatch.setattr(
-        "app.api.routes.agent_runs.resolve_adapter_for_model",
+        "app.services.agent_runs.resolve_adapter_for_model",
         fake_resolve_adapter_for_model,
     )
     previous_idle_timeout = settings.agent_run_idle_timeout_seconds
@@ -816,8 +848,8 @@ async def test_short_chat_fast_closes_after_first_response(
     monkeypatch: pytest.MonkeyPatch,
 ):
     async def fake_complete_plain_chat(db, run, conversation, content):
-        from app.api.routes.agent_runs import finish_db_agent_run, record_db_agent_run_event
-        from app.api.routes.sessions import persist_message
+        from app.services.agent_runs import finish_db_agent_run, record_db_agent_run_event
+        from app.services.persistence import persist_message
 
         assistant_message = await persist_message(
             db,

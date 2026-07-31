@@ -8,6 +8,7 @@ import {
 import { settingsApi, webAgentApi } from "@/services";
 import { ApiError } from "@/services/api-client";
 import type { AgentRunUnsubscribe } from "@/services/adapters/types";
+import { applyAgentRunEventState } from "./event-handlers";
 import {
   createId,
   createPendingAssistantMessage,
@@ -251,119 +252,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   testingModelId: undefined,
   updatingSkillKey: undefined,
   applyAgentRunEvent: (event) => {
-    const terminal = isTerminalRunStatus(event.status);
-    set((state) => ({
-      activeAgentRunId:
-        state.activeAgentRunId === event.runId && terminal
-          ? undefined
-          : state.activeAgentRunId,
-      agentRuns: state.agentRuns.map((run) => {
-        if (run.id !== event.runId) {
-          return run;
-        }
-
-        const hasExistingStep = run.steps.some((step) => step.id === event.step.id);
-        const previousSteps = run.steps.map((step) => {
-          if (step.id === event.step.id) {
-            return event.step;
-          }
-          return step.status === "running"
-            ? { ...step, status: "completed" as const }
-            : step;
-        });
-
-        const nextRun = {
-          ...run,
-          completedAt: event.completedAt,
-          error: event.error,
-          progress: event.progress,
-          status: event.status,
-          steps: hasExistingStep ? previousSteps : [...previousSteps, event.step],
-        };
-        if (event.payload?.messageId && event.payload?.content) {
-          nextRun.hasAssistantResponse = true;
-        }
-        return nextRun;
-      }),
-      messages: terminal
-        ? state.messages.filter(
-            (message) =>
-              !(
-                message.role === "assistant" &&
-                message.isPending &&
-                state.agentRuns.some(
-                  (run) => run.id === event.runId && run.sessionId === message.sessionId,
-                )
-              ),
-          )
-        : (() => {
-            const run = state.agentRuns.find((item) => item.id === event.runId);
-            const content =
-              typeof event.payload?.content === "string" ? event.payload.content.trim() : "";
-            const messageId =
-              typeof event.payload?.messageId === "string" ? event.payload.messageId : "";
-            if (run && content && messageId) {
-              if (state.messages.some((message) => message.id === messageId)) {
-                return state.messages;
-              }
-              const pendingIndex = state.messages.findIndex(
-                (message) =>
-                  message.sessionId === run.sessionId &&
-                  message.role === "assistant" &&
-                  message.isPending,
-              );
-              const createdAt = event.step.timestamp;
-              const completedMessage: Message = {
-                id: messageId,
-                sessionId: run.sessionId,
-                role: "assistant",
-                content,
-                createdAt,
-                waitStartedAt:
-                  pendingIndex >= 0
-                    ? state.messages[pendingIndex].waitStartedAt
-                    : run.startedAt,
-              };
-              const shouldKeepPending = !terminal && !run.isPlainChat;
-              const nextPending = shouldKeepPending
-                ? createPendingAssistantMessage(
-                    run.sessionId,
-                    run.adapterKey ?? "Agent",
-                    run.title === "Agent request" ? undefined : run.title,
-                    createdAt,
-                  )
-                : undefined;
-              if (pendingIndex >= 0) {
-                return [
-                  ...state.messages.slice(0, pendingIndex),
-                  completedMessage,
-                  ...(nextPending ? [nextPending] : []),
-                  ...state.messages.slice(pendingIndex + 1),
-                ];
-              }
-              return [...state.messages, completedMessage, ...(nextPending ? [nextPending] : [])];
-            }
-
-            return state.messages.map((message) => {
-            if (
-              message.role !== "assistant" ||
-              !message.isPending ||
-              !event.step?.label
-            ) {
-              return message;
-            }
-            const run = state.agentRuns.find((item) => item.id === event.runId);
-            if (!run || run.sessionId !== message.sessionId) {
-              return message;
-            }
-            return {
-              ...message,
-              pendingLabel: event.step.label,
-              waitStartedAt: message.waitStartedAt ?? run.startedAt,
-            };
-            });
-          })(),
-    }));
+    set((state) => applyAgentRunEventState(state, event));
   },
   addModel: async (input) => {
     set({ error: undefined });

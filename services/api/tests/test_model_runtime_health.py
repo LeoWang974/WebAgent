@@ -38,7 +38,7 @@ async def test_runtime_model_reports_openclaw_health_failure(monkeypatch):
         return "openclaw", FailingOpenClawAdapter()
 
     monkeypatch.setattr(
-        "app.api.routes.agent_runs.resolve_adapter_for_model",
+        "app.services.agent_runs.resolve_adapter_for_model",
         fake_resolve_adapter_for_model,
     )
 
@@ -62,7 +62,7 @@ async def test_runtime_model_reports_openclaw_health_exception(monkeypatch):
         return "openclaw", RaisingOpenClawAdapter()
 
     monkeypatch.setattr(
-        "app.api.routes.agent_runs.resolve_adapter_for_model",
+        "app.services.agent_runs.resolve_adapter_for_model",
         fake_resolve_adapter_for_model,
     )
 
