@@ -252,6 +252,18 @@ def should_suppress_stage_bubble(
     stage_key = runtime_stage_key(content, event_payload)
     if is_low_value_runtime_update(content, event_payload):
         return True, stage_key
+    protocol = str(event_payload.get("protocol") or "")
+    event_type = str(
+        event_payload.get("hermesEventType") or event_payload.get("openclawEventType") or ""
+    )
+    if protocol and event_type in {
+        "stage_started",
+        "tool_call",
+        "artifact_found",
+        "completed",
+    }:
+        stage_counts[stage_key] = stage_counts.get(stage_key, 0) + 1
+        return False, stage_key
     if stage_key == last_stage_key and stage_key not in {"complete", "export"}:
         return True, stage_key
     count = stage_counts.get(stage_key, 0)

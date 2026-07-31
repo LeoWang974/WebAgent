@@ -34,12 +34,14 @@ IGNORED_FILENAMES = {"request.md"}
 OUTPUT_PATH_MARKERS = {
     "/deep-research-reports/",
     "/reports/",
+    "/output/",
     "/outputs/",
     "/artifacts/",
     "/images/",
     "/ppt_decks/",
     "\\deep-research-reports\\",
     "\\reports\\",
+    "\\output\\",
     "\\outputs\\",
     "\\artifacts\\",
     "\\images\\",
@@ -52,7 +54,13 @@ NON_ARTIFACT_MARKERS = {
     "\\node_modules\\",
 }
 ARTIFACT_PATH_RE = re.compile(
-    r"(?P<path>(?:[A-Za-z]:\\|/mnt/[^/]+/|/home/|/tmp/)[^\"'<>|`\r\n]+?\.(?:md|html?|pptx|png|jpe?g|csv|xlsx|json))",
+    r"(?P<path>(?:[A-Za-z]:\\|/mnt/[^/]+/|/home/|/tmp/|(?:\.?/)?(?:output|outputs|artifacts|ppt_decks|deep-research-reports)/)[^\"'<>|`\r\n]+?\.(?:md|html?|pptx|png|jpe?g|csv|xlsx|json))",
+    re.IGNORECASE,
+)
+ARTIFACT_FILENAME_RE = re.compile(
+    r"(?<![\w./\\-])"
+    r"(?P<path>[\w\u4e00-\u9fff][\w\u4e00-\u9fff ._-]{0,180}"
+    r"\.(?:md|html?|pptx|png|jpe?g|csv|xlsx|json))(?=$|[\s`'\"),.;:])",
     re.IGNORECASE,
 )
 
@@ -69,7 +77,9 @@ def _candidate_roots() -> list[Path]:
         repo_root / "services" / "api" / "deep-research-reports",
         repo_root / "ppt_decks",
         repo_root / "artifacts",
+        repo_root / "output",
         repo_root / "outputs",
+        repo_root / ".hermes" / "plans",
         user_home / "Desktop",
         user_home / "Documents" / "WebAgent",
         user_home / "Documents" / "deep-research-reports",
@@ -372,6 +382,19 @@ def _artifact_from_path(
 
 def _normalize_path(raw_path: str) -> Path:
     match = raw_path.strip().strip(".,;:)]}\"'").replace("\\", "/")
+    relative_match = match.lstrip("./")
+    if relative_match.startswith(
+        (
+            "output/",
+            "outputs/",
+            "artifacts/",
+            "ppt_decks/",
+            "deep-research-reports/",
+        )
+    ):
+        return _repo_root() / relative_match
+    if "/" not in relative_match and Path(relative_match).suffix.lower() in SUPPORTED_SUFFIXES:
+        return _repo_root() / relative_match
     if match.startswith("/mnt/") and len(match) > 6 and match[6] == "/":
         drive = match[5].upper()
         rest = match[7:].replace("/", "\\")
@@ -473,6 +496,10 @@ def _extract_path_strings(value: Any) -> list[str]:
     if isinstance(value, str):
         for match in ARTIFACT_PATH_RE.finditer(value):
             paths.append(match.group("path"))
+        for match in ARTIFACT_FILENAME_RE.finditer(value):
+            filename = match.group("path").strip()
+            if filename not in paths:
+                paths.append(filename)
         return paths
     if isinstance(value, dict):
         for item in value.values():
@@ -583,6 +610,36 @@ def create_artifacts_from_paths(
         reverse=True,
     )
     return artifacts
+
+
+def create_markdown_artifact_from_content(
+    session_id: str,
+    content: str,
+    run_id: str | None = None,
+    *,
+    title: str = "agent-generated-report",
+) -> schemas.Artifact | None:
+    normalized = content.strip()
+    if len(normalized) < 500:
+        return None
+    if "#" not in normalized and "\n\n" not in normalized:
+        return None
+
+    artifact_dir = _runtime_artifacts_dir(run_id)
+    safe_title = re.sub(r"[^\w\u4e00-\u9fff.-]+", "-", title, flags=re.UNICODE).strip("-")
+    if not safe_title:
+        safe_title = "agent-generated-report"
+    digest = hashlib.sha1(normalized.encode("utf-8", errors="ignore")).hexdigest()[:10]
+    path = artifact_dir / f"{safe_title}-{digest}.md"
+    path.write_text(normalized, encoding="utf-8")
+    return _artifact_from_path(
+        session_id,
+        path,
+        artifact_type_override="markdown_report",
+        metadata_extra={"source": "assistant_output_fallback"},
+        original_path="assistant_output",
+        title_override=safe_title,
+    )
 
 
 def create_artifacts_from_refs(

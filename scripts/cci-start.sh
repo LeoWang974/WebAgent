@@ -12,6 +12,8 @@ HERMES_NODE_DIR="$ROOT_DIR/runtime/agent-home/.hermes/node/bin"
 HERMES_PPT_EXPORT_DIR="$ROOT_DIR/runtime/agent-home/.hermes/skills/sn-ppt-standard/scripts/export_pptx"
 WEB_PORT="${WEB_PORT:-3000}"
 API_PORT="${API_PORT:-8010}"
+WORKER_POOL="${WORKER_POOL:-solo}"
+WORKER_CONCURRENCY="${WORKER_CONCURRENCY:-1}"
 WEB_PUBLIC_API_BASE_URL="${NEXT_PUBLIC_API_BASE_URL:-}"
 WEB_PUBLIC_API_ADAPTER="${NEXT_PUBLIC_API_ADAPTER:-fastapi}"
 DEFAULT_CORS_ORIGINS="http://localhost:$WEB_PORT,http://127.0.0.1:$WEB_PORT,http://localhost:3300,http://127.0.0.1:3300,http://localhost:3002,http://127.0.0.1:3002"
@@ -118,7 +120,7 @@ nohup "$PYTHON_BIN" -m uvicorn app.main:app --host 0.0.0.0 --port "$API_PORT" \
   >> "$LOG_DIR/webagent-api.log" 2>&1 &
 echo "$!" > "$RUN_DIR/webagent-api.pid"
 nohup "$PYTHON_BIN" -m celery -A app.workers.celery_app.celery_app worker \
-  --loglevel=INFO -Q agent-runs --concurrency="${WORKER_CONCURRENCY:-2}" \
+  --loglevel=INFO -Q agent-runs --pool="$WORKER_POOL" --concurrency="$WORKER_CONCURRENCY" \
   >> "$LOG_DIR/webagent-worker.log" 2>&1 &
 echo "$!" > "$RUN_DIR/webagent-worker.pid"
 

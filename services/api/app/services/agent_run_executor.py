@@ -4,6 +4,7 @@ import subprocess
 from datetime import datetime
 
 import httpx
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,10 +17,10 @@ from app.api.routes.sessions import (
     runtime_diagnostics,
     should_suppress_stage_bubble,
 )
-from app.api.routes.settings import user_developer_mode
+from app.api.routes.settings import DEFAULT_INTERFACE, to_interface_schema
 from app.core.config import settings
 from app.db.session import AsyncSessionLocal
-from app.models import AgentRun, AgentRunEvent, Conversation, Message, User
+from app.models import AgentRun, AgentRunEvent, Conversation, Message, User, UserSettings
 from app.services.adapter_limiter import (
     AdapterCapacityTimeout,
     acquire_adapter_capacity,
@@ -32,6 +33,7 @@ from app.services.agent_runs import (
 )
 from app.services.agent_runtime_context import build_user_runtime_context
 from app.services.artifact_discovery import (
+    create_markdown_artifact_from_content,
     create_pptx_from_html_artifacts,
     discover_related_artifact_paths,
     extract_artifact_path_strings,
@@ -80,6 +82,39 @@ async def _load_run_context(
     queued_event = result.scalars().first()
     payload = queued_event.payload if queued_event is not None else {}
     return run, conversation, user, payload or {}
+
+
+async def _user_developer_mode_by_id(db: AsyncSession, user_id: str) -> bool:
+    result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
+    user_settings = result.scalar_one_or_none()
+    if user_settings is None:
+        user_settings = UserSettings(
+            user_id=user_id,
+            data_context={},
+            interface=DEFAULT_INTERFACE,
+        )
+        db.add(user_settings)
+        await db.commit()
+    return to_interface_schema(user_settings).developer_mode
+
+
+async def _message_snapshot(db: AsyncSession, message: Message) -> tuple[str, dict]:
+    message_id = message.__dict__.get("id")
+    if message_id is None:
+        identity = sa_inspect(message).identity
+        message_id = identity[0] if identity else None
+    if message_id is None:
+        raise RuntimeError("Assistant message identity is unavailable.")
+
+    required_fields = {"id", "conversation_id", "role", "content", "created_at", "artifact_ids"}
+    if not required_fields.issubset(message.__dict__):
+        loaded_message = await db.get(Message, message_id)
+        if loaded_message is None:
+            raise RuntimeError(f"Assistant message not found: {message_id}")
+        message = loaded_message
+
+    content = str(message.__dict__.get("content") or "")
+    return content, to_message(message).model_dump(by_alias=True)
 
 
 async def execute_queued_agent_run(run_id: str) -> None:
@@ -146,11 +181,27 @@ async def _complete_plain_chat_with_sensenova(
             "messageId": assistant_message.id,
         },
     )
-    await _complete_run(db, run, conversation.id, assistant_message)
+    await _complete_run(
+        db,
+        run,
+        conversation.id,
+        *(await _message_snapshot(db, assistant_message)),
+    )
 
 
 async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
     run, conversation, user, queued_payload = await _load_run_context(db, run_id)
+    run_id_value = run.id
+    conversation_id = conversation.id
+    user_id = user.id
+    current_adapter_key = run.adapter_key
+    logger.info(
+        "Queued agent run loaded: run_id=%s conversation_id=%s adapter=%s status=%s",
+        run_id_value,
+        conversation_id,
+        current_adapter_key,
+        run.status,
+    )
     if run.status == "cancelled":
         return
     content = str(queued_payload.get("content") or "")
@@ -158,6 +209,7 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
     skill_key = queued_payload.get("skillKey")
     run_started_at = run.created_at or datetime.now()
     assistant_messages: list[Message] = []
+    assistant_output_parts: list[str] = []
     assistant_event_count = 0
     stage_bubble_counts: dict[str, int] = {}
     last_stage_bubble_key: str | None = None
@@ -166,7 +218,7 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
     adapter_capacity_lease = None
     run_started_monotonic = asyncio.get_running_loop().time()
     model_runtime_config = model_runtime_config_builder.build_for_run(run)
-    requested_runtime_adapter = run.adapter_key in {"hermes", "openclaw"}
+    requested_runtime_adapter = current_adapter_key in {"hermes", "openclaw"}
 
     try:
         if (
@@ -179,23 +231,35 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
 
         user_runtime_context = build_user_runtime_context(
             user,
-            conversation.id,
-            run_id=run.id,
+            conversation_id,
+            run_id=run_id_value,
             model_runtime_config=model_runtime_config,
         )
-        run_workspace = run_workspace_dir(run.id, conversation.id, user.id)
+        run_workspace = run_workspace_dir(run_id_value, conversation_id, user_id)
+        logger.info(
+            "Resolving adapter for queued run: run_id=%s adapter=%s",
+            run_id_value,
+            current_adapter_key,
+        )
         adapter_key, adapter = await resolve_adapter_for_model(
             db,
             user,
             model_id,
-            adapter_key=run.adapter_key,
-            conversation_id=conversation.id,
-            run_id=run.id,
+            adapter_key=current_adapter_key,
+            conversation_id=conversation_id,
+            run_id=run_id_value,
             model_runtime_config=model_runtime_config,
         )
-        if await is_agent_run_cancelled(db, run.id):
+        if await is_agent_run_cancelled(db, run_id_value):
             raise AgentRunCancelled()
-        run.adapter_key = adapter_key or run.adapter_key
+        current_adapter_key = adapter_key or current_adapter_key
+        run.adapter_key = current_adapter_key
+        logger.info(
+            "Resolved adapter for queued run: run_id=%s adapter=%s available=%s",
+            run_id_value,
+            current_adapter_key,
+            adapter is not None,
+        )
         await record_db_agent_run_event(
             db,
             run,
@@ -208,7 +272,7 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
                 "content": content,
                 "modelId": model_id,
                 "skillKey": skill_key,
-                "adapterKey": run.adapter_key,
+                "adapterKey": current_adapter_key,
                 "adapterLockScope": user_runtime_context.adapter_lock_scope(),
                 "userRuntimeRoot": str(user_runtime_context.root_dir),
                 "workspaceDir": str(run_workspace),
@@ -218,55 +282,57 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
             raise RuntimeError("No agent runtime adapter is available.")
 
         async def on_adapter_capacity_wait(elapsed_seconds: float) -> None:
-            if await is_agent_run_cancelled(db, run.id):
+            if await is_agent_run_cancelled(db, run_id_value):
                 raise AgentRunCancelled()
             await record_db_agent_run_event(
                 db,
                 run,
                 event_type="adapter_capacity_wait",
                 label=(
-                    f"Waiting for {run.adapter_key or 'agent'} adapter capacity "
+                    f"Waiting for {current_adapter_key or 'agent'} adapter capacity "
                     f"({int(elapsed_seconds)}s)."
                 ),
                 status="running",
-                progress=run.progress,
+                progress=5,
                 step_status="running",
                 payload={
-                    "adapterKey": run.adapter_key,
+                    "adapterKey": current_adapter_key,
                     "elapsedSeconds": int(elapsed_seconds),
                 },
             )
 
         adapter_capacity_lease = await acquire_adapter_capacity(
-            run.adapter_key,
-            run.id,
+            current_adapter_key,
+            run_id_value,
             scope=user_runtime_context.adapter_lock_scope(),
             on_wait=on_adapter_capacity_wait,
         )
+        logger.info("Acquired adapter capacity lease object: run_id=%s", run_id_value)
         await adapter_capacity_lease.__aenter__()
+        logger.info("Entered adapter capacity lease: run_id=%s", run_id_value)
         await record_db_agent_run_event(
             db,
             run,
             event_type="adapter_capacity_acquired",
-            label=f"Acquired {run.adapter_key or 'agent'} adapter capacity.",
+            label=f"Acquired {current_adapter_key or 'agent'} adapter capacity.",
             status="running",
-            progress=run.progress,
+            progress=5,
             payload={
-                "adapterKey": run.adapter_key,
+                "adapterKey": current_adapter_key,
                 "adapterLockScope": user_runtime_context.adapter_lock_scope(),
             },
         )
-        if await is_agent_run_cancelled(db, run.id):
+        if await is_agent_run_cancelled(db, run_id_value):
             raise AgentRunCancelled()
 
         from agent_runtime.schemas import AgentRunCreate as AdapterAgentRunCreate
 
         adapter_input = AdapterAgentRunCreate(
             content=content,
-            session_id=conversation.id,
+            session_id=conversation_id,
             skill_key=skill_key,
             model_id=model_id,
-            run_id=run.id,
+            run_id=run_id_value,
         )
 
         if hasattr(adapter, "stream_response_events") or hasattr(adapter, "stream_response"):
@@ -275,12 +341,17 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
                 if hasattr(adapter, "stream_response_events")
                 else adapter.stream_response(adapter_input)
             )
+            logger.info(
+                "Starting adapter stream loop: run_id=%s adapter=%s",
+                run_id_value,
+                current_adapter_key,
+            )
             while True:
                 elapsed_seconds = asyncio.get_running_loop().time() - run_started_monotonic
                 overall_remaining = settings.agent_run_overall_timeout_seconds - elapsed_seconds
                 if overall_remaining <= 0:
                     if hasattr(adapter, "cancel_run"):
-                        await adapter.cancel_run(run.id)
+                        await adapter.cancel_run(run_id_value)
                     raise AgentRunTimeout(
                         "overall_timeout",
                         "Agent run exceeded the overall task timeout.",
@@ -296,12 +367,14 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
                     else "idle_timeout"
                 )
                 try:
+                    logger.info("Waiting for adapter stream chunk: run_id=%s", run_id_value)
                     chunk = await asyncio.wait_for(stream.__anext__(), timeout=wait_timeout)
+                    logger.info("Received adapter stream chunk: run_id=%s", run_id_value)
                 except StopAsyncIteration:
                     break
                 except TimeoutError as error:
                     if hasattr(adapter, "cancel_run"):
-                        await adapter.cancel_run(run.id)
+                        await adapter.cancel_run(run_id_value)
                     if timeout_type == "overall_timeout":
                         raise AgentRunTimeout(
                             "overall_timeout",
@@ -315,7 +388,7 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
                         ),
                     ) from error
 
-                if await is_agent_run_cancelled(db, run.id):
+                if await is_agent_run_cancelled(db, run_id_value):
                     raise AgentRunCancelled()
 
                 if hasattr(chunk, "step"):
@@ -347,7 +420,7 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
                         and elapsed_seconds >= 45
                     ):
                         if hasattr(adapter, "cancel_run"):
-                            await adapter.cancel_run(run.id)
+                            await adapter.cancel_run(run_id_value)
                         raise AgentRunTimeout(
                             "plain_chat_timeout",
                             "Plain chat did not return a visible response within 45 seconds.",
@@ -381,10 +454,11 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
 
                 assistant_message = await persist_message(
                     db,
-                    conversation.id,
+                    conversation_id,
                     "assistant",
                     message_content,
                 )
+                assistant_output_parts.append(message_content)
                 assistant_messages.append(assistant_message)
                 assistant_event_count += 1
                 await record_db_agent_run_event(
@@ -405,7 +479,7 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
                     break
         else:
             runtime_run = await adapter.create_run(adapter_input)
-            if await is_agent_run_cancelled(db, run.id):
+            if await is_agent_run_cancelled(db, run_id_value):
                 raise AgentRunCancelled()
             message_content = (
                 getattr(runtime_run, "output", None)
@@ -414,10 +488,11 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
             )
             assistant_message = await persist_message(
                 db,
-                conversation.id,
+                conversation_id,
                 "assistant",
                 message_content,
             )
+            assistant_output_parts.append(message_content)
             assistant_messages.append(assistant_message)
             await record_db_agent_run_event(
                 db,
@@ -429,29 +504,44 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
                 payload={"content": message_content, "messageId": assistant_message.id},
             )
 
-        if await is_agent_run_cancelled(db, run.id):
+        if await is_agent_run_cancelled(db, run_id_value):
             raise AgentRunCancelled()
 
         if skill_key is None and not requested_runtime_adapter and assistant_messages:
-            await _complete_run(db, run, conversation.id, assistant_messages[-1])
+            assistant_message = assistant_messages[-1]
+            await _complete_run(
+                db,
+                run,
+                conversation_id,
+                *(await _message_snapshot(db, assistant_message)),
+            )
             return
 
+        fresh_run = await db.get(AgentRun, run_id_value)
+        if fresh_run is None:
+            return
+        run = fresh_run
         response_artifacts = await _discover_and_persist_artifacts(
             db,
             run,
-            conversation.id,
+            conversation_id,
             skill_key,
             run_started_at,
             adapter,
             artifact_discovery_summary,
-            user,
+            user_id,
             content,
+            "\n\n".join(assistant_output_parts),
         )
         assistant_message = await _final_assistant_message(
             db,
-            conversation.id,
+            conversation_id,
             assistant_messages,
             response_artifacts,
+        )
+        assistant_message_content, assistant_message_payload = await _message_snapshot(
+            db,
+            assistant_message,
         )
         for artifact in sorted(response_artifacts, key=artifact_display_priority):
             await record_db_agent_run_event(
@@ -466,19 +556,33 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
                     "artifactId": artifact.id,
                     "artifactType": artifact.type,
                     "messageId": assistant_message.id,
-                    "sessionId": conversation.id,
+                    "sessionId": conversation_id,
                     "title": artifact.title,
                 },
             )
 
-        await _complete_run(db, run, conversation.id, assistant_message)
+        await _complete_run(
+            db,
+            run,
+            conversation_id,
+            assistant_message_content,
+            assistant_message_payload,
+        )
     except AgentRunCancelled:
+        await db.rollback()
+        run = await db.get(AgentRun, run_id_value)
+        if run is None:
+            return
         await finish_db_agent_run(db, run, status="cancelled", label="Agent run cancelled")
-        conversation = await refresh_conversation(db, conversation.id)
+        conversation = await refresh_conversation(db, conversation_id)
         conversation.status = "active"
         await db.commit()
     except AgentRunTimeout as error:
         logger.warning("Queued agent run timed out: %s", error)
+        await db.rollback()
+        run = await db.get(AgentRun, run_id_value)
+        if run is None:
+            return
         await record_db_agent_run_event(
             db,
             run,
@@ -496,9 +600,13 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
             label=f"Agent run timeout: {error.timeout_type}",
             error=str(error),
         )
-        await _fail_conversation(db, run, conversation.id, f"Agent runtime timeout: {error}")
+        await _fail_conversation(db, run, conversation_id, f"Agent runtime timeout: {error}")
     except AdapterCapacityTimeout as error:
         logger.warning("Queued agent run could not acquire adapter capacity: %s", error)
+        await db.rollback()
+        run = await db.get(AgentRun, run_id_value)
+        if run is None:
+            return
         await finish_db_agent_run(
             db,
             run,
@@ -506,11 +614,15 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
             label="Agent adapter capacity wait timed out",
             error=str(error),
         )
-        await _fail_conversation(db, run, conversation.id, f"Agent runtime error: {error}")
+        await _fail_conversation(db, run, conversation_id, f"Agent runtime error: {error}")
     except Exception as error:
         logger.exception("Queued agent run failed")
         if adapter is not None and hasattr(adapter, "cancel_run"):
-            await adapter.cancel_run(run.id)
+            await adapter.cancel_run(run_id_value)
+        await db.rollback()
+        run = await db.get(AgentRun, run_id_value)
+        if run is None:
+            return
         await record_db_agent_run_event(
             db,
             run,
@@ -528,7 +640,7 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
             label="Agent run failed",
             error=str(error),
         )
-        await _fail_conversation(db, run, conversation.id, f"Agent runtime error: {error}")
+        await _fail_conversation(db, run, conversation_id, f"Agent runtime error: {error}")
     finally:
         if adapter_capacity_lease is not None:
             await adapter_capacity_lease.__aexit__(None, None, None)
@@ -542,9 +654,11 @@ async def _discover_and_persist_artifacts(
     run_started_at: datetime,
     adapter: object,
     artifact_discovery_summary: dict[str, object],
-    user: User,
+    user_id: str,
     content: str = "",
+    assistant_output: str = "",
 ):
+    run_id_value = run.id
     explicit_artifact_paths = (
         adapter.get_last_artifact_paths() if hasattr(adapter, "get_last_artifact_paths") else []
     )
@@ -558,13 +672,18 @@ async def _discover_and_persist_artifacts(
             if getattr(artifact, "path", "")
         ]
     event_path_candidates: list[str] = []
-    result = await db.execute(select(AgentRunEvent).where(AgentRunEvent.run_id == run.id))
+    result = await db.execute(select(AgentRunEvent).where(AgentRunEvent.run_id == run_id_value))
     for event in result.scalars().all():
         event_path_candidates.extend(extract_artifact_path_strings(event.payload or {}))
     for path in event_path_candidates:
         if path not in explicit_artifact_paths:
             explicit_artifact_paths.append(path)
     source_path_candidates = extract_artifact_path_strings(content)
+    source_path_candidates.extend(
+        path
+        for path in extract_artifact_path_strings(assistant_output)
+        if path not in source_path_candidates
+    )
     related_source_artifact_paths = discover_related_artifact_paths(
         source_path_candidates,
         run_started_at,
@@ -593,7 +712,7 @@ async def _discover_and_persist_artifacts(
         conversation_id,
         run_started_at,
         explicit_artifact_paths,
-        run.id,
+        run_id_value,
         explicit_artifacts,
     )
     if (
@@ -605,7 +724,7 @@ async def _discover_and_persist_artifacts(
             pptx_artifact = create_pptx_from_html_artifacts(
                 conversation_id,
                 discovered_artifacts,
-                run.id,
+                run_id_value,
                 settings.agent_run_ppt_export_timeout_seconds,
             )
             if pptx_artifact is not None:
@@ -620,9 +739,29 @@ async def _discover_and_persist_artifacts(
         db,
         conversation_id,
         discovered_artifacts,
-        run.id,
+        run_id_value,
     )
-    current_run_artifacts = [artifact for artifact in stored_artifacts if artifact.run_id == run.id]
+    current_run_artifacts = [
+        artifact for artifact in stored_artifacts if artifact.run_id == run_id_value
+    ]
+    if not current_run_artifacts and assistant_output:
+        fallback_artifact = create_markdown_artifact_from_content(
+            conversation_id,
+            assistant_output,
+            run_id_value,
+        )
+        if fallback_artifact is not None:
+            stored_artifacts.extend(
+                await persist_discovered_artifacts(
+                    db,
+                    conversation_id,
+                    [fallback_artifact],
+                    run_id_value,
+                )
+            )
+            current_run_artifacts = [
+                artifact for artifact in stored_artifacts if artifact.run_id == run_id_value
+            ]
     required_primary_types = PRIMARY_ARTIFACT_TYPES_BY_SKILL.get(skill_key or "")
     if required_primary_types and not any(
         artifact.type in required_primary_types for artifact in current_run_artifacts
@@ -642,7 +781,7 @@ async def _discover_and_persist_artifacts(
             "PPTX export did not produce a .pptx file. "
             "HTML pages were preserved as fallback artifacts."
         )
-    developer_mode = await user_developer_mode(db, user)
+    developer_mode = await _user_developer_mode_by_id(db, user_id)
     visible_current_run_artifacts = [
         artifact
         for artifact in current_run_artifacts
@@ -694,11 +833,13 @@ async def _complete_run(
     db: AsyncSession,
     run: AgentRun,
     conversation_id: str,
-    assistant_message: Message,
+    assistant_message_content: str,
+    assistant_message_payload: dict,
 ) -> None:
+    run_id_value = run.id
     conversation = await refresh_conversation(db, conversation_id)
     conversation.status = "active"
-    if await is_agent_run_cancelled(db, run.id):
+    if await is_agent_run_cancelled(db, run_id_value):
         await db.commit()
         return
     await finish_db_agent_run(
@@ -706,7 +847,7 @@ async def _complete_run(
         run,
         status="completed",
         label="Agent run completed",
-        output=assistant_message.content,
+        output=assistant_message_content,
     )
     await db.commit()
     conversation = await refresh_conversation(db, conversation_id)
@@ -718,9 +859,9 @@ async def _complete_run(
         status="completed",
         progress=100,
         payload={
-            "message": to_message(assistant_message).model_dump(by_alias=True),
+            "message": assistant_message_payload,
             "session": to_session(conversation).model_dump(by_alias=True),
-            "runId": run.id,
+            "runId": run_id_value,
             "status": "completed",
         },
     )
