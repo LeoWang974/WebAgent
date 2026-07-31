@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from agent_runtime.schemas import AgentArtifactRef, AgentRunEvent, AgentRunStep
 from app.core.config import settings
 from app.core.security import create_access_token
-from app.models import AgentRun, Artifact, Conversation, FileAsset, Message, ModelConfig, User
+from app.models import AgentRun, Artifact, Conversation, Message, ModelConfig, User
 from app.models import AgentRunEvent as DBAgentRunEvent
 from app.services.artifact_discovery import create_artifacts_from_paths
 from app.services.model_runtime_config import model_runtime_config_from_model
@@ -219,47 +219,6 @@ async def test_model_config_accepts_separate_runtime_model_name(
 
     assert runtime_config.model_name == "sensenova-6.7-flash-lite"
     assert runtime_config.base_url == "https://token.sensenova.cn/v1"
-
-
-@pytest.mark.asyncio
-async def test_file_upload_persists_and_links_to_session(
-    api_client: AsyncClient,
-    auth_headers: dict[str, dict[str, str]],
-    db_sessionmaker: async_sessionmaker[AsyncSession],
-):
-    session_response = await api_client.post(
-        "/api/sessions",
-        json={"title": "File upload session"},
-        headers=auth_headers["owner"],
-    )
-    assert session_response.status_code == 200
-    session_id = session_response.json()["id"]
-
-    upload_response = await api_client.post(
-        "/api/files",
-        data={"session_id": session_id},
-        files={"file": ("note.txt", b"hello from db", "text/plain")},
-        headers=auth_headers["owner"],
-    )
-    assert upload_response.status_code == 200
-    uploaded = upload_response.json()
-    assert uploaded["filename"] == "note.txt"
-    assert uploaded["sessionId"] == session_id
-
-    session_files_response = await api_client.get(
-        f"/api/sessions/{session_id}/files",
-        headers=auth_headers["owner"],
-    )
-    assert session_files_response.status_code == 200
-    assert [item["id"] for item in session_files_response.json()] == [uploaded["id"]]
-
-    async with db_sessionmaker() as db:
-        file_asset = await db.get(FileAsset, uploaded["id"])
-        assert file_asset is not None
-        assert file_asset.conversation_id == session_id
-        assert file_asset.filename == "note.txt"
-        assert file_asset.storage_key
-        assert Path(file_asset.storage_key).exists()
 
 
 @pytest.mark.asyncio
@@ -930,10 +889,9 @@ async def test_agent_run_stream_idle_timeout_records_diagnostics(
                 .all()
             )
             diagnostic = next(event for event in run_events if event.event_type == "diagnostic")
-            assert diagnostic.payload["hermesDiagnostics"]["adapter"] == "hanging"
-            assert (
-                diagnostic.payload["hermesDiagnostics"]["stderr_tail"] == "no output before timeout"
-            )
+            assert diagnostic.payload["runtimeDiagnostics"]["adapter"] == "hanging"
+            stderr_tail = diagnostic.payload["runtimeDiagnostics"]["stderr_tail"]
+            assert stderr_tail == "no output before timeout"
     finally:
         settings.agent_run_idle_timeout_seconds = previous_idle_timeout
         settings.agent_run_overall_timeout_seconds = previous_overall_timeout

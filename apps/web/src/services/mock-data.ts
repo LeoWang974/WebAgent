@@ -7,6 +7,8 @@ import type {
   User,
 } from "@/types";
 
+// DEV-ONLY: static data used only when NEXT_PUBLIC_API_ADAPTER=mock.
+// Production and normal local integration flows should use the FastAPI adapter.
 export const mockUser: User = {
   id: "user_1",
   nickname: "WebAgent User",

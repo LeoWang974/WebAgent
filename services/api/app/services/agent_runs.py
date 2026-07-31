@@ -9,12 +9,12 @@ from app.core.config import settings
 from app.models import AgentRun as DBAgentRun
 from app.models import AgentRunEvent as DBAgentRunEvent
 from app.models import Conversation, ConversationShare, ModelConfig, User
-from app.services.agent_runtime_context import build_user_runtime_context
 from app.services.model_runtime_config import (
     ADAPTER_MODEL_ALIASES,
     ModelRuntimeConfig,
 )
 from app.services.persistence import get_conversation_or_404
+from app.services.runtime_environment import build_user_runtime_context
 
 try:
     from agent_runtime.adapters import HermesAdapter, OpenClawAdapter
@@ -216,10 +216,6 @@ async def resolve_adapter_for_model(
         run_id=run_id,
         model_runtime_config=model_runtime_config,
     )
-
-
-def _get_adapter(model_id: str | None, current_user: User):
-    return _resolve_adapter_compat(current_user, model_id=model_id)[1]
 
 
 def _event_to_step(event: DBAgentRunEvent) -> schemas.AgentRunStep:

@@ -13,10 +13,12 @@ pip install -e ".[dev]"
 Copy-Item .env.example .env
 ```
 
-Start dependencies from the repo root:
+Start PostgreSQL and Redis with your local service manager, then verify the
+database URL and Redis URL in `.env`. The current project no longer uses Docker
+as a development or CCI deployment path.
 
 ```powershell
-docker compose -f infra\docker-compose.yml up -d
+alembic upgrade head
 ```
 
 Run the API:

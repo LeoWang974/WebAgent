@@ -19,15 +19,7 @@ test("chat helper labels stay readable Chinese", () => {
 });
 
 test("chat helper does not contain known mojibake fragments", () => {
-  for (const fragment of [
-    "鏁版嵁",
-    "娣卞害",
-    "鐢熸垚",
-    "鏂颁换",
-    "姝ｅ湪",
-    "锛",
-    "€",
-  ]) {
+  for (const fragment of ["閺", "濞", "閻", "鐢", "鏂", "鈧", "锛"]) {
     assert.equal(source.includes(fragment), false, `Unexpected mojibake: ${fragment}`);
   }
 });

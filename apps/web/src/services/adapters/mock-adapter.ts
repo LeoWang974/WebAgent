@@ -32,6 +32,8 @@ import {
   mockUser,
 } from "../mock-data";
 
+// DEV-ONLY: mock adapter for isolated UI work.
+// Set NEXT_PUBLIC_API_ADAPTER=mock explicitly to use this path.
 let sessions: Session[] = [...mockSessions];
 let messages: Message[] = [...mockMessages];
 let artifacts: Artifact[] = [...mockArtifacts];

@@ -4,12 +4,28 @@ import {
   createPendingAssistantMessage,
   isTerminalRunStatus,
 } from "./chat-store-helpers";
-import type { AgentRun, AgentRunEvent, Message } from "@/types";
+import { shouldSelectCreatedArtifact } from "@/lib/artifact-selection";
+import type { SendMessageStreamEvent } from "@/services/adapters/types";
+import type { AgentRun, AgentRunEvent, Artifact, Message, Session } from "@/types";
 
 export interface AgentRunEventState {
   activeAgentRunId?: string;
   agentRuns: AgentRun[];
   messages: Message[];
+}
+
+export interface SendMessageStreamEventState extends AgentRunEventState {
+  artifacts: Artifact[];
+  selectedArtifactId?: string;
+  sessions: Session[];
+}
+
+export interface SendMessageStreamEventContext {
+  currentRunId: string;
+  isRuntimeAdapterRun: boolean;
+  modelName: string;
+  requestedSkill?: string;
+  sessionId: string;
 }
 
 export function applyAgentRunEventState(
@@ -136,4 +152,226 @@ function applyRunningAgentRunEventMessages(
       waitStartedAt: message.waitStartedAt ?? matchingRun.startedAt,
     };
   });
+}
+
+export function applySendMessageStreamEventState(
+  state: SendMessageStreamEventState,
+  event: SendMessageStreamEvent,
+  context: SendMessageStreamEventContext,
+): Partial<SendMessageStreamEventState> {
+  if (event.type === "run_started") {
+    return applyStreamRunStarted(state, event);
+  }
+  if (event.type === "assistant_delta") {
+    return applyStreamAssistantDelta(state, event, context);
+  }
+  if (event.type === "artifact_created") {
+    return applyStreamArtifactCreated(state, event);
+  }
+  if (event.type === "assistant_done") {
+    return applyStreamAssistantDone(state, event, context);
+  }
+  return {};
+}
+
+function applyStreamRunStarted(
+  state: SendMessageStreamEventState,
+  event: Extract<SendMessageStreamEvent, { type: "run_started" }>,
+) {
+  return {
+    activeAgentRunId:
+      state.activeAgentRunId && state.agentRuns.some((run) => run.id === event.runId)
+        ? event.runId
+        : state.activeAgentRunId,
+    agentRuns: state.agentRuns.map((run) =>
+      run.id === event.runId
+        ? {
+            ...run,
+            progress: event.progress,
+            status: event.status,
+          }
+        : run,
+    ),
+  };
+}
+
+function applyStreamAssistantDelta(
+  state: SendMessageStreamEventState,
+  event: Extract<SendMessageStreamEvent, { type: "assistant_delta" }>,
+  context: SendMessageStreamEventContext,
+) {
+  const chunk = event.content.trim();
+  if (!chunk) {
+    return {};
+  }
+
+  const now = new Date().toISOString();
+  const currentRun = state.agentRuns.find((run) => run.id === context.currentRunId);
+  const nextProgress = Math.min(90, (currentRun?.progress ?? 5) + 8);
+  const pendingIndex = state.messages.findIndex(
+    (message) =>
+      message.sessionId === context.sessionId &&
+      message.role === "assistant" &&
+      message.isPending,
+  );
+  const completedMessage: Message = {
+    id: event.messageId,
+    sessionId: context.sessionId,
+    role: "assistant",
+    content: chunk,
+    createdAt: now,
+    waitStartedAt: pendingIndex >= 0 ? state.messages[pendingIndex].waitStartedAt : undefined,
+  };
+  const shouldCreateNextPending = Boolean(context.isRuntimeAdapterRun || context.requestedSkill);
+  const nextPendingMessage = shouldCreateNextPending
+    ? createPendingAssistantMessage(
+        context.sessionId,
+        context.modelName,
+        context.requestedSkill,
+        now,
+      )
+    : undefined;
+
+  const nextMessages =
+    pendingIndex >= 0
+      ? [
+          ...state.messages.slice(0, pendingIndex),
+          completedMessage,
+          ...(nextPendingMessage ? [nextPendingMessage] : []),
+          ...state.messages.slice(pendingIndex + 1),
+        ]
+      : [
+          ...state.messages,
+          completedMessage,
+          ...(nextPendingMessage ? [nextPendingMessage] : []),
+        ];
+
+  return {
+    agentRuns: state.agentRuns.map((run) =>
+      run.id === context.currentRunId
+        ? {
+            ...run,
+            hasAssistantResponse: true,
+            progress: nextProgress,
+            status: "running" as const,
+            steps: [
+              ...run.steps.map((step) =>
+                step.status === "running" ? { ...step, status: "completed" as const } : step,
+              ),
+              {
+                id: event.messageId,
+                label: chunk,
+                status: "completed" as const,
+                timestamp: now,
+              },
+            ],
+          }
+        : run,
+    ),
+    messages: nextMessages,
+  };
+}
+
+function applyStreamArtifactCreated(
+  state: SendMessageStreamEventState,
+  event: Extract<SendMessageStreamEvent, { type: "artifact_created" }>,
+) {
+  const currentSelectedArtifact = state.artifacts.find(
+    (artifact) => artifact.id === state.selectedArtifactId,
+  );
+  const targetMessage = state.messages.find((message) => message.id === event.messageId);
+  const selectedBelongsToTargetMessage =
+    !!state.selectedArtifactId && !!targetMessage?.artifactIds?.includes(state.selectedArtifactId);
+  const artifacts = state.artifacts.some((artifact) => artifact.id === event.artifact.id)
+    ? state.artifacts.map((artifact) =>
+        artifact.id === event.artifact.id ? event.artifact : artifact,
+      )
+    : [event.artifact, ...state.artifacts];
+
+  const shouldSelectArtifact = shouldSelectCreatedArtifact({
+    currentSelectedArtifact,
+    eventArtifact: event.artifact,
+    selectedBelongsToTargetMessage,
+  });
+
+  return {
+    artifacts,
+    messages: state.messages.map((message) =>
+      message.id === event.messageId
+        ? {
+            ...message,
+            artifactIds: Array.from(new Set([...(message.artifactIds ?? []), event.artifact.id])),
+          }
+        : message,
+    ),
+    selectedArtifactId: shouldSelectArtifact ? event.artifact.id : state.selectedArtifactId,
+  };
+}
+
+function applyStreamAssistantDone(
+  state: SendMessageStreamEventState,
+  event: Extract<SendMessageStreamEvent, { type: "assistant_done" }>,
+  context: SendMessageStreamEventContext,
+) {
+  const completedAt = new Date().toISOString();
+  const finalStatus = event.status ?? "completed";
+  const existingMessage = state.messages.find((message) => message.id === event.message.id);
+  const pendingIndex = state.messages.findIndex(
+    (message) =>
+      message.sessionId === context.sessionId &&
+      message.role === "assistant" &&
+      message.isPending,
+  );
+  let messages = state.messages.filter(
+    (message) =>
+      !(
+        message.sessionId === context.sessionId &&
+        message.role === "assistant" &&
+        message.isPending
+      ),
+  );
+
+  if (existingMessage) {
+    messages = messages.map((message) =>
+      message.id === event.message.id
+        ? {
+            ...event.message,
+            createdAt: existingMessage.createdAt,
+            waitStartedAt: existingMessage.waitStartedAt,
+          }
+        : message,
+    );
+  } else if (pendingIndex >= 0) {
+    messages = [
+      ...state.messages.slice(0, pendingIndex),
+      {
+        ...event.message,
+        createdAt: completedAt,
+        waitStartedAt: state.messages[pendingIndex].waitStartedAt,
+      },
+      ...state.messages.slice(pendingIndex + 1).filter((message) => !message.isPending),
+    ];
+  } else {
+    messages = [...messages, event.message];
+  }
+
+  return {
+    activeAgentRunId:
+      state.activeAgentRunId === context.currentRunId ? undefined : state.activeAgentRunId,
+    agentRuns: state.agentRuns.map((run) =>
+      run.id === context.currentRunId
+        ? {
+            ...run,
+            completedAt,
+            hasAssistantResponse: true,
+            progress: finalStatus === "completed" ? 100 : run.progress,
+            status: finalStatus,
+          }
+        : run,
+    ),
+    messages,
+    sessions: state.sessions.map((session) =>
+      session.id === event.session.id ? event.session : session,
+    ),
+  };
 }

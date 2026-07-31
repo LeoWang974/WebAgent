@@ -1,32 +1,22 @@
 import pytest
 from fastapi import HTTPException
 
-from app.services.session_message_service import resolve_skill_key
-from app.services.session_stream_service import parse_model_config_directive
+from app.services.model_config_directive import parse_model_config_directive
+from app.services.session_message_service import get_explicit_skill_key
 
 
-def test_resolve_skill_key_does_not_parse_user_prompt_markers():
-    assert resolve_skill_key("请使用 sn-deep-research 调研主题乐园", None) is None
-    assert resolve_skill_key("请使用 sn-da 分析这份表格", None) is None
-    assert resolve_skill_key("请使用 sn-ppt-workbench 生成 12 页 PPT", None) is None
-    assert resolve_skill_key("请使用 u1_image 生成图片", None) is None
-    assert resolve_skill_key("使用 report-html-v2 输出 HTML 文件", None) is None
+def test_get_explicit_skill_key_does_not_parse_user_prompt_markers():
+    assert get_explicit_skill_key(None) is None
 
 
-def test_resolve_skill_key_does_not_guess_from_generic_words():
-    assert resolve_skill_key("帮我调研主题乐园并输出报告", None) is None
-    assert resolve_skill_key("最后生成一份 12 页 PPT 演示文稿", None) is None
-    assert resolve_skill_key("你好，请确认 HTML 和 PPT 产物链路测试开始。", None) is None
-
-
-def test_resolve_skill_key_respects_explicit_value():
-    assert resolve_skill_key("普通聊天", "deep_research") == "deep_research"
+def test_get_explicit_skill_key_respects_explicit_value():
+    assert get_explicit_skill_key("deep_research") == "deep_research"
 
 
 def test_parse_model_config_directive_supports_hermes_yaml_block():
     values = parse_model_config_directive(
         """
-        基于以下格式，调整正在使用的模型
+        Update the active model based on this config:
         t ~/.hermes/config.yaml
         model:
           default: bailian/deepseek-v4-pro

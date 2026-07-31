@@ -15,5 +15,11 @@ export function resolveApiAdapterMode(): ApiAdapterMode {
     return rawAdapterMode;
   }
 
-  return "mock";
+  if (process.env.NODE_ENV === "development") {
+    console.warn(
+      "NEXT_PUBLIC_API_ADAPTER is not set. Falling back to fastapi; set NEXT_PUBLIC_API_ADAPTER=mock explicitly for mock data.",
+    );
+  }
+
+  return "fastapi";
 }

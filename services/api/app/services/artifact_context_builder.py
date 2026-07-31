@@ -163,14 +163,14 @@ def skill_type_score(skill_key: str, artifact_type: str, adapter_key: str | None
 
 
 def artifact_quality_score(artifact: Artifact, path: str) -> int:
-    title = artifact.title.lower()
     normalized_path = path.lower()
+    filename = normalized_path.rsplit("/", 1)[-1]
     score = 0
     if (
         normalized_path.endswith("/report.md")
         or normalized_path.endswith("/final_report.md")
-        or "深度研究报告" in title
-        or "深度调研报告" in title
+        or filename in {"report.md", "final_report.md"}
+        or (artifact.type == "markdown_report" and "report" in filename)
     ):
         score += 40
     if (

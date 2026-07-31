@@ -1,10 +1,14 @@
-﻿from types import SimpleNamespace
+from types import SimpleNamespace
 
 import pytest
 
-from app.services import agent_runtime_context
-from app.services.agent_runtime_context import build_user_runtime_context
-from app.services.runtime_context_builder import build_runtime_content, normalize_runtime_path
+from app.services import runtime_environment
+from app.services.artifact_context_builder import (
+    artifact_quality_score,
+    build_runtime_content,
+    normalize_runtime_path,
+)
+from app.services.runtime_environment import build_user_runtime_context
 
 
 class FakeScalars:
@@ -48,8 +52,17 @@ def test_normalize_runtime_path_handles_windows_and_wsl_paths():
     assert normalize_runtime_path("/home/demo/report.md") == "/home/demo/report.md"
 
 
+def test_artifact_quality_score_uses_path_and_type_not_chinese_title():
+    score = artifact_quality_score(
+        artifact("theme-park-market", "markdown_report", "/home/demo/theme-park-report.md"),
+        "/home/demo/theme-park-report.md",
+    )
+
+    assert score >= 40
+
+
 @pytest.mark.asyncio
-async def test_runtime_context_builder_injects_limited_deep_research_context():
+async def test_artifact_context_builder_injects_limited_deep_research_context():
     result = await build_runtime_content(
         FakeDb(
             [
@@ -71,7 +84,7 @@ async def test_runtime_context_builder_injects_limited_deep_research_context():
 
 
 @pytest.mark.asyncio
-async def test_runtime_context_builder_prioritizes_final_reports_and_limits_paths():
+async def test_artifact_context_builder_prioritizes_final_reports_and_limits_paths():
     artifacts = [
         artifact("plan", "markdown_report", "/home/demo/reports/plan.md"),
         artifact("未来餐桌深度研究报告", "markdown_report", "/home/demo/reports/report.md"),
@@ -100,7 +113,7 @@ async def test_runtime_context_builder_prioritizes_final_reports_and_limits_path
 
 
 @pytest.mark.asyncio
-async def test_runtime_context_builder_uses_openclaw_context_style_and_limits_paths():
+async def test_artifact_context_builder_uses_openclaw_context_style_and_limits_paths():
     result = await build_runtime_content(
         FakeDb(
             [
@@ -124,7 +137,7 @@ async def test_runtime_context_builder_uses_openclaw_context_style_and_limits_pa
 
 
 @pytest.mark.asyncio
-async def test_runtime_context_builder_injects_markdown_for_openclaw_html_generation():
+async def test_artifact_context_builder_injects_markdown_for_openclaw_html_generation():
     result = await build_runtime_content(
         FakeDb(
             [
@@ -162,20 +175,20 @@ def test_user_runtime_context_copies_openclaw_gateway_config(tmp_path, monkeypat
     openclaw_skills = tmp_path / "openclaw-skills"
     openclaw_skills.mkdir()
 
-    monkeypatch.setattr(agent_runtime_context.Path, "home", lambda: fake_home)
+    monkeypatch.setattr(runtime_environment.Path, "home", lambda: fake_home)
     monkeypatch.setattr(
-        agent_runtime_context.settings,
+        runtime_environment.settings,
         "agent_runtime_user_root",
         str(tmp_path / "runtime"),
     )
-    monkeypatch.setattr(agent_runtime_context.settings, "hermes_home", str(hermes_home))
+    monkeypatch.setattr(runtime_environment.settings, "hermes_home", str(hermes_home))
     monkeypatch.setattr(
-        agent_runtime_context.settings,
+        runtime_environment.settings,
         "hermes_skills_dir",
         str(hermes_home / "skills"),
     )
     monkeypatch.setattr(
-        agent_runtime_context.settings,
+        runtime_environment.settings,
         "openclaw_skills_dir",
         str(openclaw_skills),
     )

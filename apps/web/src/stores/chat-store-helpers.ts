@@ -81,8 +81,6 @@ export function pendingMessageForRun(run: AgentRun, modelName = "Agent"): Messag
 export function hasPendingAssistantMessage(messages: Message[], sessionId: string) {
   return messages.some(
     (message) =>
-      message.sessionId === sessionId &&
-      message.role === "assistant" &&
-      message.isPending,
+      message.sessionId === sessionId && message.role === "assistant" && message.isPending,
   );
 }

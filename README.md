@@ -57,83 +57,6 @@ Default URLs:
 
 The dev scripts stop stale listeners on their fixed ports before starting. Close the spawned PowerShell window or press `Ctrl+C` to stop a service.
 
-## Local Docker Packaging
-
-Docker packaging is provided for the WebAgent application services:
-
-- `postgres`: PostgreSQL 16
-- `redis`: Redis 7
-- `api`: FastAPI + Alembic + WebAgent backend
-- `worker`: Celery Agent Run worker that consumes Redis queued long tasks
-- `web`: Next.js production server
-
-Create the Docker environment file:
-
-```powershell
-Copy-Item .env.docker.example .env.docker
-```
-
-Then edit `.env.docker` and fill required secrets such as:
-
-- `JWT_SECRET_KEY`
-- `SENSENOVA_API_KEY`
-- runtime addresses or binary paths for Hermes/OpenClaw
-
-Build and start locally:
-
-```powershell
-docker compose --env-file .env.docker up --build
-```
-
-Open:
-
-- Web app: `http://localhost:3002/app`
-- API health: `http://localhost:8010/api/health`
-
-Stop services:
-
-```powershell
-docker compose --env-file .env.docker down
-```
-
-Reset local Docker database and Redis volumes:
-
-```powershell
-docker compose --env-file .env.docker down -v
-```
-
-Important runtime note: the WebAgent images do not bundle Hermes, OpenClaw, or
-agent_pack. They are expected to be installed on the host/server and exposed to
-the API container through configured CLI paths, mounted directories, or gateway
-URLs such as `OPENCLAW_BASE_URL=ws://host.docker.internal:18789`.
-
-Docker mode enables queued Agent Runs by default:
-
-- `AGENT_RUN_QUEUE_ENABLED=true`
-- `AGENT_RUN_QUEUE_NAME=agent-runs`
-- `AGENT_RUN_WORKSPACE_ROOT=/app/runtime/agent-runs`
-- `WORKER_CONCURRENCY=1`
-- `HERMES_ADAPTER_CONCURRENCY=1`
-- `OPENCLAW_ADAPTER_CONCURRENCY=1`
-
-In this mode the API process accepts the chat/SSE request and writes queued run
-metadata, while the `worker` process executes Hermes/OpenClaw and writes run
-events, messages, and artifacts back to PostgreSQL. Keep Redis and the worker
-running for long tasks.
-
-Start multiple worker containers locally:
-
-```powershell
-docker compose --env-file .env.docker up --build -d --scale worker=2
-```
-
-The recommended first production setting is multiple worker containers with
-`WORKER_CONCURRENCY=1`, plus adapter-level Redis locks. This allows separate
-queued jobs to be picked up quickly while keeping each runtime adapter within
-its configured safe capacity. Increase `HERMES_ADAPTER_CONCURRENCY` or
-`OPENCLAW_ADAPTER_CONCURRENCY` only after validating that the corresponding CLI,
-gateway, credentials, and output directories are safe under parallel long tasks.
-
 ## Tests And Build
 
 Backend:
@@ -186,7 +109,6 @@ CCI web port convention:
 - `scripts/cci-start.sh` defaults to `WEB_PORT=3000` for bare Linux runs.
 - `scripts/cci-status.sh` checks API/web readiness and tails recent logs.
 - `scripts/cci-stop.sh` stops pid-file managed API, worker, and web processes.
-- Docker files remain development artifacts and are not the CCI deployment path.
 
 Detailed CCI bare-metal runtime, environment, log, and troubleshooting notes live in
 [`docs/CCI_BARE_METAL.md`](docs/CCI_BARE_METAL.md).
@@ -311,8 +233,8 @@ After migration, the next planned development areas are:
 
 - User multi-threading: allow users to run and observe multiple Agent Runs without
   blocking unrelated conversations.
-- Linux/CCI deployment: validate Docker image build, runtime mounts, environment
-  variables, and container networking.
+- Linux/CCI deployment: continue validating the bare-process runtime, environment
+  variables, process supervision, and SSH tunnel access.
 - OpenClaw protocolization: move from fallback text/directory discovery toward
   explicit `openclaw.event.v1` events.
 - Permission hardening: continue validating private, shared, and public session

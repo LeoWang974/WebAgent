@@ -13,6 +13,8 @@ import type {
   SettingsApiAdapter,
 } from "./types";
 
+// DEV-ONLY: mock settings adapter for isolated UI work.
+// Set NEXT_PUBLIC_API_ADAPTER=mock explicitly to use this path.
 let user: User = { ...mockUser };
 let models: ModelConfig[] = [...mockModels];
 let skills: Skill[] = [...mockSkills];

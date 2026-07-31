@@ -9,13 +9,24 @@ from time import monotonic
 
 from ..schemas import AgentArtifactRef, AgentRun, AgentRunCreate, AgentRunEvent, AgentRunStep
 from .base import AgentRuntimeAdapter
+from .openclaw_commands import (
+    build_agent_cli_args,
+    build_cli_args,
+    build_openclaw_message,
+    build_shell_args,
+    with_runtime_env,
+)
+from .openclaw_artifact_finder import (
+    find_recent_openclaw_artifacts,
+    find_report_artifacts,
+)
+from .openclaw_protocol_events import protocol_events_from_tasks
+from .openclaw_task_polling import poll_task_family_snapshot
 from .openclaw_utils import (
-    OPENCLAW_EVENT_PROTOCOL,
     artifact_to_payload,
     clean_text_output,
     extract_output,
     extract_paths,
-    extract_protocol_events,
     extract_structured_artifacts,
     guess_artifact_type,
     is_openclaw_bootstrap_path,
@@ -388,25 +399,17 @@ class OpenClawAdapter(AgentRuntimeAdapter):
             return await process.communicate()
 
     def _build_agent_cli_args(self, input_data: AgentRunCreate) -> list[str]:
-        timeout = str(max(1, self.command_timeout_seconds))
-        args = [
-            "agent",
-            "--agent",
-            self.agent_id,
-            "--message",
-            self._build_openclaw_message(input_data),
-            "--json",
-            "--timeout",
-            timeout,
-        ]
-        if self.mode == "local_cli":
-            args.insert(1, "--local")
-        if input_data.session_id:
-            args.extend(["--session-id", input_data.session_id])
-        return self._build_cli_args(args)
+        return build_agent_cli_args(
+            input_data,
+            agent_id=self.agent_id,
+            cli_path=self.cli_path,
+            command_timeout_seconds=self.command_timeout_seconds,
+            mode=self.mode,
+            runtime_env=self._runtime_env(),
+        )
 
     def _build_openclaw_message(self, input_data: AgentRunCreate) -> str:
-        return input_data.content
+        return build_openclaw_message(input_data)
 
     def _build_local_cli_args(self, input_data: AgentRunCreate) -> list[str]:
         previous_mode = self.mode
@@ -417,50 +420,14 @@ class OpenClawAdapter(AgentRuntimeAdapter):
             self.mode = previous_mode
 
     def _build_cli_args(self, args: list[str]) -> list[str]:
-        if os.name == "nt" and self.cli_path != "openclaw":
-            return [self.cli_path, *args]
-
-        executable = "openclaw" if os.name == "nt" else self.cli_path
-        command = " ".join(shlex.quote(str(arg)) for arg in [executable, *args])
-        command = self._with_runtime_env(
-            command,
-            self._runtime_env(),
-        )
-        if os.name == "nt" and self.cli_path == "openclaw":
-            return ["wsl.exe", "--", "bash", "-lc", command]
-        return ["bash", "-lc", command]
+        return build_cli_args(args, cli_path=self.cli_path, runtime_env=self._runtime_env())
 
     def _build_shell_args(self, command: str) -> list[str]:
-        command = self._with_runtime_env(
-            command,
-            self._runtime_env(),
-        )
-        if os.name == "nt":
-            return ["wsl.exe", "--", "bash", "-lc", command]
-        return ["bash", "-lc", command]
+        return build_shell_args(command, self._runtime_env())
 
     @staticmethod
     def _with_runtime_env(command: str, extra_env: dict[str, str | None] | None = None) -> str:
-        extra_exports = ""
-        for key, value in (extra_env or {}).items():
-            if value:
-                extra_exports += f"export {key}=${{{key}:-{shlex.quote(value)}}}; "
-        return (
-            "for __f in ~/.hermes/.env ~/.openclaw/.env; do "
-            "[ -f \"$__f\" ] || continue; "
-            "while IFS= read -r __line || [ -n \"$__line\" ]; do "
-            "__line=${__line%$'\\r'}; "
-            "case \"$__line\" in ''|\\#*) continue;; esac; "
-            "__key=${__line%%=*}; "
-            "if [[ \"$__key\" =~ ^[A-Za-z_][A-Za-z0-9_]*$ && \"$__key\" != PATH ]]; then "
-            "export \"$__line\"; "
-            "fi; "
-            "done < \"$__f\"; "
-            "done; "
-            "unset __f __line __key; "
-            f"{extra_exports}"
-            f"{command}"
-        )
+        return with_runtime_env(command, extra_env)
 
     def _runtime_env(self) -> dict[str, str | None]:
         return {
@@ -601,85 +568,18 @@ class OpenClawAdapter(AgentRuntimeAdapter):
         return ""
 
     async def _find_report_artifacts(self, report_dirs: set[str]) -> list[str]:
-        if not report_dirs:
-            return []
-        quoted_dirs = " ".join(shlex.quote(path) for path in sorted(report_dirs))
-        suffix_expr = (
-            r"\( -iname '*.md' -o -iname '*.html' -o -iname '*.htm' "
-            r"-o -iname '*.pptx' -o -iname '*.png' -o -iname '*.jpg' "
-            r"-o -iname '*.jpeg' -o -iname '*.webp' -o -iname '*.csv' "
-            r"-o -iname '*.xlsx' -o -iname '*.json' \)"
+        return await find_report_artifacts(
+            report_dirs,
+            build_shell_args=self._build_shell_args,
+            is_primary_output_artifact=self._is_primary_output_artifact,
         )
-        command = (
-            f"for __dir in {quoted_dirs}; do "
-            "[ -d \"$__dir\" ] || continue; "
-            f"find \"$__dir\" -maxdepth 4 -type f {suffix_expr} -print; "
-            "done"
-        )
-        process = await asyncio.create_subprocess_exec(
-            *self._build_shell_args(command),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            stdout, _ = await asyncio.wait_for(process.communicate(), timeout=20)
-        except TimeoutError:
-            process.kill()
-            await process.wait()
-            return []
-        paths = [
-            line.strip()
-            for line in stdout.decode("utf-8", errors="replace").splitlines()
-            if line.strip()
-        ]
-        return [
-            path
-            for path in paths
-            if Path(path).suffix.lower() == ".json" or self._is_primary_output_artifact(path)
-        ]
 
     async def _find_recent_openclaw_artifacts(self, skill_key: str | None) -> list[str]:
-        suffix_expr = (
-            r"\( -iname '*.md' -o -iname '*.html' -o -iname '*.htm' "
-            r"-o -iname '*.pptx' -o -iname '*.png' -o -iname '*.jpg' "
-            r"-o -iname '*.jpeg' -o -iname '*.webp' -o -iname '*.csv' "
-            r"-o -iname '*.xlsx' -o -iname '*.json' \)"
+        return await find_recent_openclaw_artifacts(
+            skill_key,
+            build_shell_args=self._build_shell_args,
+            is_primary_output_artifact=self._is_primary_output_artifact,
         )
-        command = (
-            "for __dir in \"$HOME/.openclaw/workspace\" \"$HOME/.openclaw/artifacts\"; do "
-            "[ -d \"$__dir\" ] || continue; "
-            f"find \"$__dir\" -maxdepth 6 -type f -mmin -240 {suffix_expr} -print; "
-            "done"
-        )
-        process = await asyncio.create_subprocess_exec(
-            *self._build_shell_args(command),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            stdout, _ = await asyncio.wait_for(process.communicate(), timeout=20)
-        except TimeoutError:
-            process.kill()
-            await process.wait()
-            return []
-        paths = [
-            line.strip()
-            for line in stdout.decode("utf-8", errors="replace").splitlines()
-            if line.strip()
-        ]
-        if skill_key == "ppt_generation":
-            preferred = [
-                path
-                for path in paths
-                if Path(path).suffix.lower() in {".ppt", ".pptx", ".html", ".htm"}
-            ]
-            if preferred:
-                return preferred
-        return [
-            path
-            for path in paths
-            if Path(path).suffix.lower() == ".json" or self._is_primary_output_artifact(path)
-        ]
 
     async def _discover_report_dirs_from_input(self, input_data: AgentRunCreate) -> set[str]:
         needles = self._report_dir_search_needles(input_data.content)
@@ -1077,83 +977,15 @@ for item in sorted(matches):
         tasks: list[dict[str, object]],
         poll_state: dict[str, object],
     ) -> list[AgentRunEvent]:
-        emitted_keys = poll_state.setdefault("emitted_protocol_event_keys", set())
-        if not isinstance(emitted_keys, set):
-            emitted_keys = set()
-            poll_state["emitted_protocol_event_keys"] = emitted_keys
-
-        events: list[AgentRunEvent] = []
-        for task in tasks:
-            for event in extract_protocol_events(task):
-                raw_artifacts = event.get("artifacts")
-                artifacts = [
-                    artifact
-                    for artifact in raw_artifacts or []
-                    if isinstance(artifact, AgentArtifactRef)
-                ]
-                for artifact in artifacts:
-                    artifact.run_id = artifact.run_id or run_id
-                    self._remember_artifact_ref(artifact)
-
-                event_type = str(event.get("event_type") or "stage_update")
-                label = self._compact_label(str(event.get("label") or ""))
-                if not label and event_type == "artifact_found":
-                    label = "OpenClaw reported a generated artifact."
-                if not label:
-                    continue
-
-                source = event.get("source") if isinstance(event.get("source"), dict) else {}
-                progress = event.get("progress")
-                progress_value = (
-                    int(progress)
-                    if isinstance(progress, int)
-                    else min(88, int(poll_state.get("progress", 20)) + 6)
-                )
-                status = str(event.get("status") or "running").lower()
-                step_status = "completed" if status in {"completed", "succeeded"} else "running"
-                if status in {"failed", "timed_out", "cancelled"}:
-                    step_status = "failed"
-
-                artifact_paths = [artifact.path for artifact in artifacts]
-                event_key = "|".join(
-                    [
-                        str(source.get("taskId") or source.get("runId") or ""),
-                        event_type,
-                        label,
-                        ",".join(artifact_paths),
-                    ]
-                )
-                if event_key in emitted_keys:
-                    continue
-                emitted_keys.add(event_key)
-                poll_state["progress"] = max(int(poll_state.get("progress", 20)), progress_value)
-                poll_state["last_label"] = label
-                poll_state["last_visible_emit_at"] = monotonic()
-
-                events.append(
-                    AgentRunEvent(
-                        run_id=run_id,
-                        event_type=event_type,
-                        status="running" if step_status != "failed" else "failed",
-                        progress=progress_value,
-                        payload={
-                            "protocol": OPENCLAW_EVENT_PROTOCOL,
-                            "mode": self.mode,
-                            "source": source,
-                            "artifacts": [
-                                artifact_to_payload(artifact)
-                                for artifact in artifacts
-                            ],
-                            "rawOpenClawEvent": event.get("raw"),
-                        },
-                        step=AgentRunStep(
-                            id=f"{run_id}_openclaw_protocol_{len(emitted_keys)}",
-                            label=label,
-                            status=step_status,
-                            timestamp=now_iso(),
-                        ),
-                    )
-                )
+        events = protocol_events_from_tasks(
+            run_id,
+            tasks,
+            poll_state,
+            compact_label=self._compact_label,
+            remember_artifact_ref=self._remember_artifact_ref,
+        )
+        for event in events:
+            event.payload = {**(event.payload or {}), "mode": self.mode}
         return events
 
     async def _poll_task_family_snapshot(
@@ -1163,164 +995,13 @@ for item in sorted(matches):
         report_dirs: set[str],
         poll_state: dict[str, object],
     ) -> list[AgentRunEvent]:
-        events: list[AgentRunEvent] = []
-        tasks_payload = await self._run_openclaw_json_command(
-            ["tasks", "list", "--json"],
-            timeout_seconds=20,
-        )
-        tasks = []
-        if isinstance(tasks_payload, dict):
-            raw_tasks = tasks_payload.get("tasks")
-            tasks = raw_tasks if isinstance(raw_tasks, list) else []
-
-        matching_tasks = self._matching_task_family(
-            [task for task in tasks if isinstance(task, dict)],
+        return await poll_task_family_snapshot(
+            self,
             input_data,
+            run_id,
             report_dirs,
+            poll_state,
         )
-        self._remember_run_task_ids(run_id, matching_tasks)
-        for task in matching_tasks:
-            task_text = self._task_text(task)
-            report_dirs.update(self._extract_report_dirs(task_text))
-            report_dirs.update(self._extract_file_parent_dirs(task_text))
-            self._remember_structured_artifacts_from_value(task, run_id)
-        events.extend(
-            self._protocol_events_from_tasks(
-                run_id,
-                matching_tasks,
-                poll_state,
-            )
-        )
-        if not self._primary_output_artifact_paths(input_data.skill_key):
-            report_dirs.update(await self._discover_report_dirs_from_input(input_data))
-
-        artifact_paths = await self._find_report_artifacts(report_dirs)
-        if not artifact_paths and not self._primary_output_artifact_paths(input_data.skill_key):
-            artifact_paths = await self._find_recent_openclaw_artifacts(input_data.skill_key)
-        for path in artifact_paths:
-            self._remember_artifact_path(path)
-
-        failed_task_label = self._failed_background_task_label(matching_tasks)
-        if failed_task_label and not self._primary_output_artifact_paths(input_data.skill_key):
-            if self._is_recoverable_failed_task(input_data.skill_key, failed_task_label):
-                if not bool(poll_state.get("recoverable_failure_reported")):
-                    poll_state["recoverable_failure_reported"] = True
-                    events.append(
-                        self._stage_event(
-                            run_id,
-                            "stage_update",
-                            (
-                                "OpenClaw HTML 幻灯片生成子任务异常；继续监听 PPTX 或 HTML "
-                                "兜底产物。"
-                            ),
-                            min(88, int(poll_state.get("progress", 20)) + 4),
-                        )
-                    )
-            else:
-                raise RuntimeError(
-                    "OpenClaw task family failed before producing a final artifact: "
-                    f"{failed_task_label}"
-                )
-
-        progress = int(poll_state.get("progress", 20))
-        last_artifact_count = int(poll_state.get("last_artifact_count", 0))
-        if len(self.last_artifact_paths) > last_artifact_count:
-            poll_state["last_artifact_count"] = len(self.last_artifact_paths)
-            debug_count = sum(
-                1 for path in self.last_artifact_paths if Path(path).suffix.lower() == ".json"
-            )
-            primary_paths = self._primary_output_artifact_paths(input_data.skill_key)
-            progress = 90 if primary_paths else min(88, progress + 6)
-            poll_state["progress"] = progress
-            if primary_paths:
-                for artifact in self.last_artifacts:
-                    artifact.run_id = artifact.run_id or run_id
-                events.append(
-                    AgentRunEvent(
-                        run_id=run_id,
-                        event_type="artifact_found",
-                        status="running",
-                        progress=90,
-                        payload={
-                            "protocol": "openclaw.cli.v1",
-                            "mode": self.mode,
-                            "artifact_paths": list(self.last_artifact_paths),
-                            "artifacts": [
-                                artifact_to_payload(item) for item in self.last_artifacts
-                            ],
-                            "reportDirs": sorted(report_dirs),
-                            "taskFamily": self._task_family_summary(matching_tasks),
-                        },
-                        step=AgentRunStep(
-                            id=f"{run_id}_openclaw_artifact_found",
-                            label=f"OpenClaw final artifact found: {primary_paths[-1]}",
-                            status="completed",
-                            timestamp=now_iso(),
-                        ),
-                    )
-                )
-            elif debug_count:
-                events.append(
-                    self._stage_event(
-                        run_id,
-                        "stage_update",
-                        (
-                            f"OpenClaw has generated {debug_count} intermediate evidence "
-                            "file(s); waiting for the final deliverable."
-                        ),
-                        progress,
-                    )
-                )
-
-        running_tasks = [
-            task for task in matching_tasks if task.get("status") in {"queued", "running"}
-        ]
-        if matching_tasks:
-            display_task = next(iter(running_tasks), matching_tasks[0])
-            label = self._summarize_task_label(display_task, input_data.skill_key)
-        elif report_dirs:
-            label = "OpenClaw is still working; watching the report directory."
-        else:
-            label = "OpenClaw is still working; waiting for task progress."
-
-        now = monotonic()
-        last_label = str(poll_state.get("last_label", ""))
-        last_emit_at = float(poll_state.get("last_visible_emit_at", 0.0))
-        should_emit_heartbeat = now - last_emit_at >= 60
-        evidence_count = sum(
-            1 for path in self.last_artifact_paths if Path(path).suffix.lower() == ".json"
-        )
-        should_emit_evidence_heartbeat = should_emit_heartbeat and evidence_count > 0
-        if label != last_label or should_emit_heartbeat:
-            poll_state["last_label"] = label
-            poll_state["last_visible_emit_at"] = now
-            progress = min(85, int(poll_state.get("progress", 20)) + 8)
-            poll_state["progress"] = progress
-            if should_emit_evidence_heartbeat and label == last_label:
-                label = (
-                    f"{label} Found {evidence_count} intermediate evidence file(s); "
-                    "still waiting for the final deliverable."
-                )
-            elif should_emit_heartbeat and label == last_label:
-                running_count = len(running_tasks)
-                label = (
-                    "OpenClaw 长任务仍在执行；"
-                    f"正在跟踪 {running_count or len(matching_tasks) or 1} 个任务，"
-                    "等待下一阶段反馈或最终产物。"
-                )
-            events.append(self._stage_event(run_id, "stage_update", label, progress))
-
-        self.last_diagnostics.update(
-            {
-                "reportDirs": sorted(report_dirs),
-                "matchingTaskCount": len(matching_tasks),
-                "runningTaskCount": len(running_tasks),
-                "artifactPaths": list(self.last_artifact_paths),
-                "artifactCount": len(self.last_artifact_paths),
-                "lastStage": label,
-            }
-        )
-        return events
 
     def _remember_run_task_ids(
         self,

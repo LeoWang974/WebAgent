@@ -16,17 +16,16 @@ def test_hermes_wsl_command_sources_runtime_env():
     assert "\"$__key\" != PATH" in command
 
 
-def test_hermes_chat_command_keeps_prompt_out_of_shell():
+def test_hermes_chat_exec_args_keep_prompt_out_of_shell():
     wrapper = HermesCliWrapper(hermes_home="/home/demo/.hermes", wsl_distribution="Ubuntu")
 
-    command = wrapper._build_chat_command(
-        "\u8bf7\u4f7f\u7528 sn-deep-research \u8c03\u7814"
-        "\u300a\u5168\u7403\u4e3b\u9898\u4e50\u56ed\u7ade\u4e89\u683c\u5c40\u300b"
-        "\uff0c\u91cd\u70b9\u5206\u6790 Disney's model\u3002",
+    args = wrapper._build_chat_exec_args(
+        "Research global theme parks and analyze Disney's model.",
         skills="sn-research-report",
         toolsets="web,terminal,file",
         run_id="run_quote_test",
     )
+    command = " ".join(args)
 
     assert "Disney's model" not in command
     assert "$(cat" not in command
@@ -34,26 +33,24 @@ def test_hermes_chat_command_keeps_prompt_out_of_shell():
     assert "run_quote_test.txt" in command
 
 
-def test_hermes_chat_command_auto_approves_background_tool_calls():
+def test_hermes_chat_exec_args_auto_approve_background_tool_calls():
     wrapper = HermesCliWrapper(hermes_home="/home/demo/.hermes", wsl_distribution="Ubuntu")
 
-    command = wrapper._build_chat_command(
-        "请使用搜索工具生成报告",
+    args = wrapper._build_chat_exec_args(
+        "Generate a report with the search tool.",
         skills="sn-deep-research",
         toolsets="web,terminal,file",
         run_id="run_yolo_test",
     )
 
-    assert '"hermes", "--yolo", "chat", "-q"' in command
+    assert '"hermes", "--yolo", "chat", "-q"' in args[-1]
 
 
 def test_hermes_chat_exec_args_avoid_windows_shell_quoting():
     wrapper = HermesCliWrapper(hermes_home="/home/demo/.hermes", wsl_distribution="Ubuntu")
 
     args = wrapper._build_chat_exec_args(
-        "\u8bf7\u4f7f\u7528 sn-deep-research \u8c03\u7814"
-        "\u300a\u5168\u7403\u4e3b\u9898\u4e50\u56ed\u7ade\u4e89\u683c\u5c40\u300b"
-        "\uff0c\u91cd\u70b9\u5206\u6790 Disney's model\u3002",
+        "Research global theme parks and analyze Disney's model.",
         skills="sn-research-report",
         toolsets="web,terminal,file",
         run_id="run_exec_quote_test",

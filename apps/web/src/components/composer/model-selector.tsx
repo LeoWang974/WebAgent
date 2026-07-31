@@ -1,33 +1,17 @@
 "use client";
 
-import { useChatStore } from "@/stores";
 import { useI18n } from "@/lib/i18n";
+import { isAgentRuntimeModel, isRuntimeAdapterModel, type AgentKey } from "@/lib/runtime-models";
+import { useChatStore } from "@/stores";
 import type { ModelConfig } from "@/types";
-
-type AgentKey = "hermes" | "openclaw";
 
 const AGENTS: Array<{ key: AgentKey; label: string }> = [
   { key: "hermes", label: "Hermes" },
   { key: "openclaw", label: "OpenClaw" },
 ];
 
-function isRuntimeAdapterModel(model: ModelConfig) {
-  const marker = `${model.name} ${model.baseUrl ?? ""}`.toLowerCase();
-  return (
-    marker.includes("openclaw") ||
-    marker.includes("hermes") ||
-    marker.includes("18789") ||
-    marker.includes("8642")
-  );
-}
-
 function runtimeLabel(agentKey: AgentKey, models: ModelConfig[]) {
-  const runtimeModel = models.find((model) => {
-    const marker = `${model.name} ${model.baseUrl ?? ""}`.toLowerCase();
-    return agentKey === "openclaw"
-      ? marker.includes("openclaw") || marker.includes("18789")
-      : marker.includes("hermes") || marker.includes("8642");
-  });
+  const runtimeModel = models.find((model) => isAgentRuntimeModel(model, agentKey));
 
   if (!runtimeModel) {
     return `${agentKey} 状态未知`;
@@ -59,15 +43,9 @@ export function ModelSelector() {
   const selectModel = useChatStore((state) => state.selectModel);
   const apiModels = models.filter((model) => !isRuntimeAdapterModel(model));
   const selectedModel = apiModels.find((model) => model.id === selectedModelId);
-  const agentAvailable =
-    !models.some((model) => {
-      const marker = `${model.name} ${model.baseUrl ?? ""}`.toLowerCase();
-      const matches =
-        selectedAgentKey === "openclaw"
-          ? marker.includes("openclaw") || marker.includes("18789")
-          : marker.includes("hermes") || marker.includes("8642");
-      return matches && model.isAvailable === false;
-    });
+  const agentAvailable = !models.some(
+    (model) => isAgentRuntimeModel(model, selectedAgentKey) && model.isAvailable === false,
+  );
 
   return (
     <div className="flex items-center gap-1.5">
@@ -97,9 +75,7 @@ export function ModelSelector() {
         title={selectedModel?.baseUrl ?? selectedModel?.name ?? t("loadingModels")}
         value={selectedModelId ?? ""}
       >
-        {apiModels.length === 0 ? (
-          <option value="">{t("loadingModels")}</option>
-        ) : null}
+        {apiModels.length === 0 ? <option value="">{t("loadingModels")}</option> : null}
         {apiModels.map((model) => (
           <option key={model.id} value={model.id}>
             {optionLabel(model, t("defaultModel"))}

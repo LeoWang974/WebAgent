@@ -1,27 +1,32 @@
 import asyncio
-import json
 import logging
-import re
 import subprocess
 from datetime import datetime
 
-from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import schemas
 from app.api.dependencies import CurrentUser
-from app.api.routes.settings import is_runtime_adapter_model, user_developer_mode
+from app.api.routes.settings import user_developer_mode
 from app.core.config import settings
-from app.models import AgentRun, AgentRunEvent, Artifact, Message, ModelConfig
+from app.models import AgentRun, AgentRunEvent, Artifact, Message
 from app.services.adapter_limiter import acquire_adapter_capacity
-from app.services.agent_runtime_context import build_user_runtime_context
+from app.services.agent_run_control import (
+    AgentRunCancelled,
+    AgentRunTimeout,
+    is_agent_run_cancelled,
+)
 from app.services.artifact_discovery import (
     create_pptx_from_html_artifacts,
     discover_artifacts_with_retry,
 )
-from app.services.model_runtime_config import ADAPTER_MODEL_ALIASES, model_runtime_config_builder
+from app.services.model_config_directive import (
+    apply_model_config_directive,
+    parse_model_config_directive,
+)
+from app.services.model_runtime_config import model_runtime_config_builder
 from app.services.persistence import (
     get_conversation_or_404,
     persist_message,
@@ -29,405 +34,19 @@ from app.services.persistence import (
     to_message,
     to_session,
 )
+from app.services.queued_stream_service import stream_queued_agent_run
+from app.services.runtime_environment import build_user_runtime_context
 from app.services.session_artifacts import (
     artifact_display_priority,
     is_debug_artifact,
     persist_discovered_artifacts,
     refresh_conversation,
 )
-from app.services.session_message_service import resolve_skill_key
+from app.services.session_message_service import get_explicit_skill_key
+from app.services.stage_bubble_filter import should_suppress_stage_bubble
+from app.services.stream_protocol import SSE_HEADERS, runtime_diagnostics, sse
 
 logger = logging.getLogger(__name__)
-MODEL_CONFIG_DIRECTIVE_RE = re.compile(
-    r"(?:~?/\.hermes/config\.yaml|model:\s*)",
-    re.IGNORECASE,
-)
-PLACEHOLDER_API_KEYS = {"sk-xxx", "sk-test", "sk-smoke", "xxx", "your-api-key"}
-
-
-class AgentRunCancelled(Exception):
-    pass
-
-
-class AgentRunTimeout(Exception):
-    def __init__(self, timeout_type: str, message: str) -> None:
-        self.timeout_type = timeout_type
-        super().__init__(message)
-
-
-def parse_model_config_directive(content: str) -> dict[str, str] | None:
-    if not MODEL_CONFIG_DIRECTIVE_RE.search(content):
-        return None
-
-    values: dict[str, str] = {}
-    for raw_line in content.splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or ":" not in line:
-            continue
-        key, value = line.split(":", 1)
-        normalized_key = key.strip().lower().replace("-", "_")
-        if normalized_key not in {"default", "provider", "base_url", "api_key"}:
-            continue
-        cleaned_value = value.strip().strip("'\"")
-        if cleaned_value:
-            values[normalized_key] = cleaned_value
-
-    required = {"default", "base_url", "api_key"}
-    if not required.issubset(values):
-        return None
-    if values["api_key"].strip().lower() in PLACEHOLDER_API_KEYS:
-        raise HTTPException(
-            status_code=400,
-            detail="API key is a placeholder. Please provide a valid key before saving.",
-        )
-    values.setdefault("provider", "custom")
-    return values
-
-
-async def apply_model_config_directive(
-    db: AsyncSession,
-    current_user,
-    model_id: str | None,
-    values: dict[str, str],
-) -> ModelConfig:
-    model: ModelConfig | None = None
-    if model_id and model_id not in ADAPTER_MODEL_ALIASES:
-        result = await db.execute(
-            select(ModelConfig).where(
-                ModelConfig.id == model_id,
-                ModelConfig.user_id == current_user.id,
-            )
-        )
-        model = result.scalar_one_or_none()
-        if model is not None and is_runtime_adapter_model(model):
-            model = None
-
-    if model is None:
-        result = await db.execute(
-            select(ModelConfig)
-            .where(
-                ModelConfig.user_id == current_user.id,
-                ModelConfig.is_default.is_(True),
-            )
-            .order_by(ModelConfig.is_default.desc(), ModelConfig.updated_at.desc())
-        )
-        model = next(
-            (item for item in result.scalars().all() if not is_runtime_adapter_model(item)),
-            None,
-        )
-
-    if model is None:
-        model = ModelConfig(
-            user_id=current_user.id,
-            name=values["default"],
-            provider="custom",
-            is_default=True,
-            is_available=True,
-        )
-        db.add(model)
-
-    result = await db.execute(
-        select(ModelConfig).where(
-            ModelConfig.user_id == current_user.id,
-            ModelConfig.id != model.id,
-        )
-    )
-    for item in result.scalars().all():
-        item.is_default = False
-
-    model.name = values["default"]
-    model.provider = values.get("provider", "custom")
-    model.base_url = values["base_url"]
-    model.encrypted_api_key = values["api_key"]
-    model.is_default = True
-    model.is_available = True
-
-    await db.commit()
-    await db.refresh(model)
-    return model
-
-
-def runtime_diagnostics(adapter: object, artifact_discovery_summary: dict[str, object]) -> dict:
-    diagnostics = (
-        adapter.get_last_diagnostics()
-        if adapter is not None and hasattr(adapter, "get_last_diagnostics")
-        else {}
-    )
-    return {
-        "artifactDiscovery": artifact_discovery_summary,
-        "runtimeDiagnostics": diagnostics,
-        "hermesDiagnostics": diagnostics,
-    }
-
-
-def sse(event: str, data: dict) -> str:
-    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
-
-
-SSE_HEADERS = {
-    "Cache-Control": "no-cache",
-    "Connection": "keep-alive",
-    "X-Accel-Buffering": "no",
-}
-
-
-def normalize_runtime_update(content: str) -> str:
-    return re.sub(r"\s+", " ", content).strip().lower()
-
-
-def runtime_stage_key(content: str, event_payload: dict) -> str:
-    if event_payload.get("rawActivityHeartbeat"):
-        return "heartbeat"
-    normalized = normalize_runtime_update(content)
-    stage_patterns = [
-        ("complete", ("完成", "已生成", "completed", "succeeded", "done")),
-        ("export", ("导出", "转换", "pptx", "export")),
-        ("verify", ("验证", "校验", "检查", "validate", "verify")),
-        ("write", ("写作", "撰写", "生成报告", "markdown 报告", "write report", "writing")),
-        ("plan", ("规划", "大纲", "计划", "outline", "plan")),
-        ("fetch", ("抓取", "网页", "fetch", "crawl", "browser")),
-        ("search", ("搜索", "serper", "search")),
-        ("file_io", ("读取相关文件", "写入中间文件", "查找相关文件", "read_file", "write_file")),
-    ]
-    for key, markers in stage_patterns:
-        if any(marker in normalized for marker in markers):
-            return key
-    return f"message:{normalized[:96]}"
-
-
-def is_low_value_runtime_update(content: str, event_payload: dict) -> bool:
-    normalized = normalize_runtime_update(content)
-    if event_payload.get("rawActivityHeartbeat"):
-        return True
-    low_value_messages = {
-        "hermes is still running; raw output is being received.",
-        "openclaw cli task status: running.",
-        "openclaw cli task is running.",
-        "openclaw is still working; waiting for task progress.",
-        "openclaw is still working; watching the report directory.",
-        "openclaw is still working; waiting for report files.",
-        "正在读取相关文件...",
-        "正在写入中间文件...",
-        "正在查找相关文件和产物...",
-        "正在准备任务配置文件...",
-    }
-    return normalized in low_value_messages
-
-
-def should_suppress_stage_bubble(
-    content: str,
-    event_payload: dict,
-    stage_counts: dict[str, int],
-    last_stage_key: str | None,
-) -> tuple[bool, str]:
-    stage_key = runtime_stage_key(content, event_payload)
-    if is_low_value_runtime_update(content, event_payload):
-        return True, stage_key
-    protocol = str(event_payload.get("protocol") or "")
-    event_type = str(
-        event_payload.get("hermesEventType") or event_payload.get("openclawEventType") or ""
-    )
-    if protocol and event_type in {
-        "stage_started",
-        "tool_call",
-        "artifact_found",
-        "completed",
-    }:
-        stage_counts[stage_key] = stage_counts.get(stage_key, 0) + 1
-        return False, stage_key
-    if stage_key == last_stage_key and stage_key not in {"complete", "export"}:
-        return True, stage_key
-    count = stage_counts.get(stage_key, 0)
-    stage_counts[stage_key] = count + 1
-    repeat_limits = {
-        "search": 2,
-        "fetch": 2,
-        "plan": 2,
-        "write": 3,
-        "verify": 2,
-        "export": 3,
-        "file_io": 0,
-    }
-    limit = repeat_limits.get(stage_key)
-    return limit is not None and count >= limit, stage_key
-
-
-async def is_agent_run_cancelled(db: AsyncSession, run_id: str) -> bool:
-    result = await db.execute(select(AgentRun.status).where(AgentRun.id == run_id))
-    return result.scalar_one_or_none() == "cancelled"
-
-
-async def enqueue_agent_run_message(
-    db: AsyncSession,
-    session_id: str,
-    input_data: schemas.MessageCreate,
-    current_user,
-    resolved_skill_key: str | None,
-):
-    from app.services.agent_runs import (
-        create_db_agent_run,
-        record_db_agent_run_event,
-        resolve_adapter_for_model,
-    )
-    from app.workers.agent_run_tasks import execute_agent_run_task
-
-    user_message = await persist_message(db, session_id, "user", input_data.content)
-    model_runtime_config = await model_runtime_config_builder.build_for_user(
-        db,
-        current_user,
-        input_data.model_id,
-    )
-    adapter_key, _ = await resolve_adapter_for_model(
-        db,
-        current_user,
-        input_data.model_id,
-        adapter_key=input_data.adapter_key,
-        conversation_id=session_id,
-        model_runtime_config=model_runtime_config,
-    )
-    run = await create_db_agent_run(
-        db,
-        session_id,
-        title=resolved_skill_key or "Agent Run",
-        status="queued",
-        progress=0,
-        adapter_key=adapter_key,
-        model_runtime_config=model_runtime_config,
-    )
-    await record_db_agent_run_event(
-        db,
-        run,
-        event_type="queued",
-        label="Queued agent run",
-        status="queued",
-        progress=0,
-        step_status="pending",
-        payload={
-            "content": input_data.content,
-            "modelId": input_data.model_id,
-            "adapterKey": adapter_key,
-            "requestedAdapterKey": input_data.adapter_key,
-            "modelConfigId": run.model_config_id,
-            "modelProvider": run.model_provider,
-            "modelName": run.model_name,
-            "skillKey": resolved_skill_key,
-            "userMessageId": user_message.id,
-        },
-    )
-    execute_agent_run_task.apply_async((run.id,), queue=settings.agent_run_queue_name)
-    return user_message, run
-
-
-async def stream_queued_agent_run(
-    db: AsyncSession,
-    session_id: str,
-    input_data: schemas.MessageCreate,
-    current_user,
-    resolved_skill_key: str | None,
-):
-    from app.services.agent_runs import TERMINAL_RUN_STATUSES
-
-    user_message, run = await enqueue_agent_run_message(
-        db,
-        session_id,
-        input_data,
-        current_user,
-        resolved_skill_key,
-    )
-    yield f": {' ' * 2048}\n\n"
-    yield sse("user_message", to_message(user_message).model_dump(by_alias=True))
-    yield sse(
-        "run_started",
-        {
-            "runId": run.id,
-            "sessionId": session_id,
-            "status": run.status,
-            "progress": run.progress,
-        },
-    )
-
-    sent_event_ids: set[str] = set()
-    assistant_done_sent = False
-    run_id = run.id
-    while True:
-        db.expire_all()
-        run = await db.get(AgentRun, run_id)
-        if run is None:
-            raise RuntimeError("Queued agent run disappeared before completion.")
-        result = await db.execute(
-            select(AgentRunEvent)
-            .where(AgentRunEvent.run_id == run.id)
-            .order_by(AgentRunEvent.created_at.asc())
-        )
-        events = result.scalars().all()
-        for event in events:
-            if event.id in sent_event_ids:
-                continue
-            sent_event_ids.add(event.id)
-            payload = event.payload or {}
-            if (
-                event.event_type != "queued"
-                and payload.get("content")
-                and payload.get("messageId")
-            ):
-                yield sse(
-                    "assistant_delta",
-                    {
-                        "content": payload["content"],
-                        "messageId": payload["messageId"],
-                        "sessionId": session_id,
-                        "runId": run.id,
-                    },
-                )
-            if event.event_type == "artifact_created" and isinstance(payload.get("artifact"), dict):
-                yield sse(
-                    "artifact_created",
-                    {
-                        "artifact": payload["artifact"],
-                        "messageId": payload.get("messageId"),
-                        "sessionId": session_id,
-                        "runId": run.id,
-                    },
-                )
-            if event.event_type == "assistant_done":
-                done_payload = dict(payload)
-                if "message" not in done_payload and payload.get("messageId"):
-                    message = await db.get(Message, payload["messageId"])
-                    if message is not None:
-                        done_payload["message"] = to_message(message).model_dump(by_alias=True)
-                if "session" not in done_payload:
-                    conversation = await refresh_conversation(db, session_id)
-                    done_payload["session"] = to_session(conversation).model_dump(by_alias=True)
-                done_payload.setdefault("runId", run.id)
-                done_payload.setdefault("status", run.status)
-                yield sse("assistant_done", done_payload)
-                assistant_done_sent = True
-
-        if run.status in TERMINAL_RUN_STATUSES:
-            if not assistant_done_sent:
-                message_result = await db.execute(
-                    select(Message)
-                    .where(Message.conversation_id == session_id, Message.role == "assistant")
-                    .order_by(Message.created_at.desc())
-                    .limit(1)
-                )
-                message = message_result.scalar_one_or_none()
-                if message is not None:
-                    conversation = await refresh_conversation(db, session_id)
-                    yield sse(
-                        "assistant_done",
-                        {
-                            "message": to_message(message).model_dump(by_alias=True),
-                            "session": to_session(conversation).model_dump(by_alias=True),
-                            "runId": run.id,
-                            "status": run.status,
-                        },
-                    )
-            break
-        yield ": heartbeat\n\n"
-        await asyncio.sleep(settings.agent_run_event_poll_interval_seconds)
-
-
 
 async def stream_session_message_response(
     session_id: str,
@@ -436,7 +55,7 @@ async def stream_session_message_response(
     current_user: CurrentUser,
 ) -> StreamingResponse:
     await get_conversation_or_404(db, session_id, current_user, require_write=True)
-    resolved_skill_key = resolve_skill_key(input_data.content, input_data.skill_key)
+    resolved_skill_key = get_explicit_skill_key(input_data.skill_key)
     requested_runtime_adapter = input_data.adapter_key in {"hermes", "openclaw"}
     if settings.agent_run_queue_enabled and (
         resolved_skill_key is not None or requested_runtime_adapter
@@ -487,9 +106,9 @@ async def stream_session_message_response(
                 conversation = await refresh_conversation(db, session_id)
                 conversation.status = "active"
                 reply = (
-                    "模型配置已更新：当前默认模型为 "
-                    f"`{model.name}`，base_url 为 `{model.base_url}`。"
-                    "后续 Hermes Agent 运行会使用这组模型配置；你也可以在设置页切回 SenseNova。"
+                    "Model configuration updated: default model is "
+                    f"`{model.name}`, base_url is `{model.base_url}`. "
+                    "Future Agent Runs will use this model configuration."
                 )
                 assistant_message = await persist_message(db, session_id, "assistant", reply)
                 await db.commit()
@@ -590,9 +209,9 @@ async def stream_session_message_response(
                     },
                 )
                 assistant_content = (
-                    f"当前模型 `{model_runtime_config.model_name}` 缺少可用的 API Key "
-                    "或 base_url，无法进行普通短对话。请在设置页为该模型补齐配置，"
-                    "或切回已经配置好的模型。"
+                    f"Current model `{model_runtime_config.model_name}` is missing a usable "
+                    "API Key or base_url, so plain chat cannot run. "
+                    "Please complete the model configuration in Settings or switch models."
                 )
                 assistant_message = await persist_message(
                     db,
@@ -1135,7 +754,7 @@ async def stream_session_message_response(
                 db,
                 session_id,
                 "assistant",
-                "任务已取消。",
+                "Task cancelled.",
             )
             yield sse(
                 "assistant_done",

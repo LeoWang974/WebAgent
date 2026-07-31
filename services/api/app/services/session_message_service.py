@@ -2,12 +2,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import schemas
 from app.models import Conversation, User
+from app.services.agent_run_dispatcher import enqueue_agent_run_message
 from app.services.persistence import persist_message, to_message, to_session
 from app.services.session_artifacts import refresh_conversation
 
 
-def resolve_skill_key(content: str, explicit_skill_key: str | None) -> str | None:
-    del content
+def get_explicit_skill_key(explicit_skill_key: str | None) -> str | None:
     return explicit_skill_key
 
 
@@ -18,8 +18,7 @@ async def send_message_core(
     current_user: User,
 ) -> schemas.SendMessageResult:
     session_id = conversation.id
-    resolved_skill_key = resolve_skill_key(input_data.content, input_data.skill_key)
-    from app.services.session_stream_service import enqueue_agent_run_message
+    resolved_skill_key = get_explicit_skill_key(input_data.skill_key)
 
     user_message, run = await enqueue_agent_run_message(
         db,

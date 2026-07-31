@@ -3,12 +3,12 @@ from types import SimpleNamespace
 
 from app.core.config import settings
 from app.services.adapter_limiter import adapter_lock_scope
-from app.services.agent_runtime_context import (
+from app.services.model_runtime_config import ModelRuntimeConfig
+from app.services.runtime_environment import (
     build_user_runtime_context,
     path_from_runtime_setting,
     safe_runtime_segment,
 )
-from app.services.model_runtime_config import ModelRuntimeConfig
 
 
 def test_safe_runtime_segment_strips_path_unsafe_characters():
@@ -17,7 +17,7 @@ def test_safe_runtime_segment_strips_path_unsafe_characters():
 
 
 def test_path_from_runtime_setting_accepts_wsl_drive_path_on_windows(monkeypatch):
-    monkeypatch.setattr("app.services.agent_runtime_context.os_name", "nt")
+    monkeypatch.setattr("app.services.runtime_environment.os_name", "nt")
 
     path = path_from_runtime_setting("/mnt/d/gitWorkSpace/WebAgent/runtime/users")
 

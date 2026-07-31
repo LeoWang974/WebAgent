@@ -21,4 +21,9 @@
 - Add openclaw/hermes adapter
 - Add basic skill execution
 - Add file and artifact persistence
+# Archived
+
+This early development plan is kept for historical context. Current implementation
+and deployment notes live in `README.md`, `docs/CCI_BARE_METAL.md`,
+`docs/PRODUCTION.md`, and `docs/TESTING.md`.
 

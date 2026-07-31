@@ -1,14 +1,13 @@
 ﻿"use client";
 
 import { create } from "zustand";
-import {
-  selectPreferredArtifact,
-  shouldSelectCreatedArtifact,
-} from "@/lib/artifact-selection";
+import { selectPreferredArtifact } from "@/lib/artifact-selection";
+import { isRuntimeAdapterModel, type AgentKey } from "@/lib/runtime-models";
 import { settingsApi, webAgentApi } from "@/services";
 import { ApiError } from "@/services/api-client";
 import type { AgentRunUnsubscribe } from "@/services/adapters/types";
-import { applyAgentRunEventState } from "./event-handlers";
+import { applyBackendRunIdBinding, bindBackendRunId } from "./agent-run-binding";
+import { applyAgentRunEventState, applySendMessageStreamEventState } from "./event-handlers";
 import {
   createId,
   createPendingAssistantMessage,
@@ -42,7 +41,7 @@ interface ChatState {
   messages: Message[];
   models: ModelConfig[];
   selectedArtifactId?: string;
-  selectedAgentKey: "hermes" | "openclaw";
+  selectedAgentKey: AgentKey;
   selectedModelId?: string;
   sharingSessionId?: string;
   sessions: Session[];
@@ -70,7 +69,7 @@ interface ChatState {
   moveSessionToFolder: (sessionId: string, folderId?: string) => Promise<void>;
   renameSession: (sessionId: string, title: string) => Promise<void>;
   selectArtifact: (artifactId: string) => void;
-  selectAgent: (agentKey: "hermes" | "openclaw") => void;
+  selectAgent: (agentKey: AgentKey) => void;
   selectModel: (modelId: string) => void;
   selectSession: (sessionId: string) => void;
   setSessionVisibility: (sessionId: string, visibility: Session["visibility"]) => Promise<void>;
@@ -90,15 +89,6 @@ interface ChatState {
 let activeRequestAbortController: AbortController | undefined;
 const agentRunUnsubscribers = new Map<string, AgentRunUnsubscribe>();
 
-function isRuntimeAdapterModel(model: ModelConfig) {
-  const marker = `${model.name} ${model.baseUrl ?? ""}`.toLowerCase();
-  return (
-    marker.includes("openclaw") ||
-    marker.includes("hermes") ||
-    marker.includes("18789") ||
-    marker.includes("8642")
-  );
-}
 const agentRunPollers = new Map<string, number>();
 
 function unsubscribeAgentRun(runId: string) {
@@ -203,25 +193,6 @@ function setSwitchingState(
       set({ switchingSessionId: undefined });
     }
   }, 260);
-}
-
-function bindBackendRunId(
-  set: (partial: Partial<ChatState> | ((state: ChatState) => Partial<ChatState>)) => void,
-  localRunId: string,
-  backendRunId?: string,
-) {
-  if (!backendRunId || backendRunId === localRunId) {
-    return localRunId;
-  }
-
-  set((state) => ({
-    activeAgentRunId:
-      state.activeAgentRunId === localRunId ? backendRunId : state.activeAgentRunId,
-    agentRuns: state.agentRuns.map((run) =>
-      run.id === localRunId ? { ...run, id: backendRunId } : run,
-    ),
-  }));
-  return backendRunId;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -794,25 +765,34 @@ export const useChatStore = create<ChatState>((set, get) => ({
             return;
           }
 
-          currentRunId = bindBackendRunId(set, currentRunId, backendRun.id);
-          set((state) => ({
-            activeAgentRunId:
-              state.activeAgentRunId === runId ? backendRun.id : state.activeAgentRunId,
-            agentRuns: state.agentRuns.map((runItem) =>
-              runItem.id === backendRun.id
-                ? {
-                    ...runItem,
-                    adapterKey: backendRun.adapterKey,
-                    completedAt: backendRun.completedAt,
-                    error: backendRun.error,
-                    progress: backendRun.progress,
-                    startedAt: backendRun.startedAt,
-                    status: backendRun.status,
-                    steps: backendRun.steps,
-                  }
-                : runItem,
-            ),
-          }));
+          const previousRunId = currentRunId;
+          currentRunId = bindBackendRunId(currentRunId, backendRun.id);
+          set((state) => {
+            const boundState = {
+              ...state,
+              ...applyBackendRunIdBinding(state, previousRunId, currentRunId),
+            };
+            return {
+              activeAgentRunId:
+                boundState.activeAgentRunId === runId
+                  ? currentRunId
+                  : boundState.activeAgentRunId,
+              agentRuns: boundState.agentRuns.map((runItem) =>
+                runItem.id === currentRunId
+                  ? {
+                      ...runItem,
+                      adapterKey: backendRun.adapterKey,
+                      completedAt: backendRun.completedAt,
+                      error: backendRun.error,
+                      progress: backendRun.progress,
+                      startedAt: backendRun.startedAt,
+                      status: backendRun.status,
+                      steps: backendRun.steps,
+                    }
+                  : runItem,
+              ),
+            };
+          });
           subscribeAgentRunEvents(get, backendRun.id);
           stopBackendRunDiscovery();
         }).catch(() => {
@@ -828,249 +808,32 @@ export const useChatStore = create<ChatState>((set, get) => ({
           adapterKey,
           modelId,
           signal: activeRequestAbortController.signal,
-          sessionId,
-          skillKey: requestedSkill,
-        },
-        (event) => {
+        sessionId,
+        skillKey: requestedSkill,
+      },
+      (event) => {
+          const previousRunId = currentRunId;
           currentRunId = bindBackendRunId(
-            set,
             currentRunId,
             "runId" in event ? event.runId : undefined,
           );
 
           if (event.type === "run_started") {
             subscribeAgentRunEvents(get, event.runId);
-            set((state) => ({
-              activeAgentRunId:
-                state.activeAgentRunId === currentRunId ? event.runId : state.activeAgentRunId,
-              agentRuns: state.agentRuns.map((runItem) =>
-                runItem.id === event.runId
-                  ? {
-                      ...runItem,
-                      progress: event.progress,
-                      status: event.status,
-                    }
-                  : runItem,
-              ),
-            }));
-            return;
           }
-
-          if (event.type === "assistant_delta") {
-            const chunk = event.content.trim();
-            if (!chunk) {
-              return;
-            }
-
-            set((state) => {
-              const now = new Date().toISOString();
-              const currentRun = state.agentRuns.find((runItem) => runItem.id === currentRunId);
-              const nextProgress = Math.min(90, (currentRun?.progress ?? 5) + 8);
-              const pendingIndex = state.messages.findIndex(
-                (message) =>
-                  message.sessionId === sessionId &&
-                  message.role === "assistant" &&
-                  message.isPending,
-              );
-              const completedMessage: Message = {
-                id: event.messageId,
-                sessionId,
-                role: "assistant",
-                content: chunk,
-                createdAt: now,
-                waitStartedAt:
-                  pendingIndex >= 0
-                    ? state.messages[pendingIndex].waitStartedAt
-                    : undefined,
-              };
-              const nextPendingMessage = createPendingAssistantMessage(
-                sessionId,
+          set((state) => {
+            const boundState = {
+              ...state,
+              ...applyBackendRunIdBinding(state, previousRunId, currentRunId),
+            };
+            return applySendMessageStreamEventState(boundState, event, {
+                currentRunId,
+                isRuntimeAdapterRun,
                 modelName,
                 requestedSkill,
-                now,
-              );
-              const shouldCreateNextPending = Boolean(
-                isRuntimeAdapterRun || requestedSkill,
-              );
-
-              if (pendingIndex >= 0) {
-                return {
-                  agentRuns: state.agentRuns.map((runItem) =>
-                    runItem.id === currentRunId
-                      ? {
-                          ...runItem,
-                          hasAssistantResponse: true,
-                          progress: nextProgress,
-                          status: "running",
-                          steps: [
-                            ...runItem.steps.map((step) =>
-                              step.status === "running"
-                                ? { ...step, status: "completed" as const }
-                                : step,
-                            ),
-                            {
-                              id: event.messageId,
-                              label: chunk,
-                              status: "completed",
-                              timestamp: now,
-                            },
-                          ],
-                        }
-                      : runItem,
-                  ),
-                  messages: [
-                    ...state.messages.slice(0, pendingIndex),
-                    completedMessage,
-                    ...(shouldCreateNextPending ? [nextPendingMessage] : []),
-                    ...state.messages.slice(pendingIndex + 1),
-                  ],
-                };
-              }
-
-              return {
-                agentRuns: state.agentRuns.map((runItem) =>
-                  runItem.id === currentRunId
-                    ? {
-                        ...runItem,
-                        hasAssistantResponse: true,
-                        progress: nextProgress,
-                        status: "running",
-                        steps: [
-                          ...runItem.steps.map((step) =>
-                            step.status === "running"
-                              ? { ...step, status: "completed" as const }
-                              : step,
-                          ),
-                          {
-                            id: event.messageId,
-                            label: chunk,
-                            status: "completed",
-                            timestamp: now,
-                          },
-                        ],
-                      }
-                    : runItem,
-                ),
-                messages: [
-                  ...state.messages,
-                  completedMessage,
-                  ...(shouldCreateNextPending ? [nextPendingMessage] : []),
-                ],
-              };
+                sessionId,
             });
-          }
-
-          if (event.type === "artifact_created") {
-            set((state) => {
-              const currentSelectedArtifact = state.artifacts.find(
-                (artifact) => artifact.id === state.selectedArtifactId,
-              );
-              const targetMessage = state.messages.find(
-                (message) => message.id === event.messageId,
-              );
-              const selectedBelongsToTargetMessage =
-                !!state.selectedArtifactId &&
-                !!targetMessage?.artifactIds?.includes(state.selectedArtifactId);
-              const artifacts = state.artifacts.some(
-                (artifact) => artifact.id === event.artifact.id,
-              )
-                ? state.artifacts.map((artifact) =>
-                    artifact.id === event.artifact.id ? event.artifact : artifact,
-                  )
-                : [event.artifact, ...state.artifacts];
-
-              const shouldSelectArtifact = shouldSelectCreatedArtifact({
-                currentSelectedArtifact,
-                eventArtifact: event.artifact,
-                selectedBelongsToTargetMessage,
-              });
-
-              return {
-                artifacts,
-                messages: state.messages.map((message) =>
-                  message.id === event.messageId
-                    ? {
-                        ...message,
-                        artifactIds: Array.from(
-                          new Set([...(message.artifactIds ?? []), event.artifact.id]),
-                        ),
-                      }
-                    : message,
-                ),
-                selectedArtifactId: shouldSelectArtifact
-                  ? event.artifact.id
-                  : state.selectedArtifactId,
-              };
-            });
-          }
-
-          if (event.type === "assistant_done") {
-            set((state) => {
-              const completedAt = new Date().toISOString();
-              const finalStatus = event.status ?? "completed";
-              const existingMessage = state.messages.find(
-                (message) => message.id === event.message.id,
-              );
-              const pendingIndex = state.messages.findIndex(
-                (message) =>
-                  message.sessionId === sessionId &&
-                  message.role === "assistant" &&
-                  message.isPending,
-              );
-              let messages = state.messages.filter(
-                (message) =>
-                  !(
-                    message.sessionId === sessionId &&
-                    message.role === "assistant" &&
-                    message.isPending
-                  ),
-              );
-
-              if (existingMessage) {
-                messages = messages.map((message) =>
-                  message.id === event.message.id
-                    ? {
-                        ...event.message,
-                        createdAt: existingMessage.createdAt,
-                        waitStartedAt: existingMessage.waitStartedAt,
-                      }
-                    : message,
-                );
-              } else if (pendingIndex >= 0) {
-                messages = [
-                  ...state.messages.slice(0, pendingIndex),
-                  {
-                    ...event.message,
-                    createdAt: completedAt,
-                    waitStartedAt: state.messages[pendingIndex].waitStartedAt,
-                  },
-                  ...state.messages.slice(pendingIndex + 1).filter((message) => !message.isPending),
-                ];
-              } else {
-                messages = [...messages, event.message];
-              }
-
-              return {
-                activeAgentRunId:
-                  state.activeAgentRunId === currentRunId ? undefined : state.activeAgentRunId,
-                agentRuns: state.agentRuns.map((runItem) =>
-                  runItem.id === currentRunId
-                    ? {
-                        ...runItem,
-                        completedAt,
-                        hasAssistantResponse: true,
-                        progress: finalStatus === "completed" ? 100 : runItem.progress,
-                        status: finalStatus,
-                      }
-                    : runItem,
-                ),
-                messages,
-                sessions: state.sessions.map((session) =>
-                  session.id === event.session.id ? event.session : session,
-                ),
-              };
-            });
-          }
+          });
         },
       );
       if (
@@ -1150,11 +913,35 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return;
     }
 
+    activeRequestAbortController?.abort();
+    activeRequestAbortController = undefined;
+
     void webAgentApi
       .cancelAgentRun(runId)
       .then((run) => {
         set((state) => ({
-          agentRuns: state.agentRuns.map((item) => (item.id === run.id ? run : item)),
+          activeAgentRunId:
+            state.activeAgentRunId === run.id && isTerminalRunStatus(run.status)
+              ? undefined
+              : state.activeAgentRunId,
+          agentRuns: state.agentRuns.some((item) => item.id === run.id)
+            ? state.agentRuns.map((item) => (item.id === run.id ? run : item))
+            : [run, ...state.agentRuns],
+          messages: isTerminalRunStatus(run.status)
+            ? state.messages.filter(
+                (message) =>
+                  !(
+                    message.sessionId === run.sessionId &&
+                    message.role === "assistant" &&
+                    message.isPending
+                  ),
+              )
+            : state.messages,
+          sessions: isTerminalRunStatus(run.status)
+            ? state.sessions.map((session) =>
+                session.id === run.sessionId ? { ...session, status: "active" } : session,
+              )
+            : state.sessions,
         }));
       })
       .catch((error) => {
@@ -1162,29 +949,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       })
       .finally(() => {
         unsubscribeAgentRun(runId);
-        activeRequestAbortController?.abort();
-        activeRequestAbortController = undefined;
       });
-
-    set((state) => ({
-      activeAgentRunId: undefined,
-      agentRuns: state.agentRuns.map((run) =>
-        run.id === runId
-          ? { ...run, completedAt: new Date().toISOString(), status: "cancelled" }
-          : run,
-      ),
-      messages: state.messages.filter(
-        (message) =>
-          !(
-            message.sessionId === state.currentSessionId &&
-            message.role === "assistant" &&
-            message.isPending
-          ),
-      ),
-      sessions: state.sessions.map((session) =>
-        session.id === state.currentSessionId ? { ...session, status: "active" } : session,
-      ),
-    }));
   },
   refreshRuntimeModelStatus: async () => {
     set({ runtimeStatusRefreshing: true });

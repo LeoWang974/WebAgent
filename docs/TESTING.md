@@ -46,7 +46,7 @@ Current backend coverage:
   - Windows and WSL path normalization.
   - Artifact creation from file paths.
   - Content-hash based dedupe.
-- `tests/test_runtime_context_builder.py`
+- `tests/test_artifact_context_builder.py`
   - Runtime path normalization.
   - `deep_research` receives only a small set of relevant artifacts.
   - `ppt_generation` prioritizes final reports and limits injected paths.

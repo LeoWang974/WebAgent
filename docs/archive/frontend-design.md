@@ -9,4 +9,8 @@ Core areas:
 - Artifact panel with placeholders for Markdown, PPT, images, and data tables
 - Settings pages for profile and model configuration
 - Admin placeholder for skill version management
+# Archived
+
+This early frontend milestone note is kept for historical context. Current
+frontend behavior is covered by the application source and `docs/TESTING.md`.
 

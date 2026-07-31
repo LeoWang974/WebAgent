@@ -172,37 +172,6 @@ class HermesCliWrapper:
             wsl_path = prompt_path.as_posix()
         return prompt_path, wsl_path
 
-    def _build_chat_command(
-        self,
-        question: str,
-        *,
-        session_id: str | None = None,
-        toolsets: str | None = None,
-        skills: str | None = None,
-        model: str | None = None,
-        quiet: bool = True,
-        quiet_query: bool = False,
-        use_pty: bool = False,
-        run_id: str | None = None,
-    ) -> str:
-        command = self._build_chat_bash_command(
-            question,
-            session_id=session_id,
-            toolsets=toolsets,
-            skills=skills,
-            model=model,
-            quiet=quiet,
-            quiet_query=quiet_query,
-            use_pty=use_pty,
-            run_id=run_id,
-        )
-        if os.name != "nt":
-            return " ".join(shlex.quote(part) for part in self._bash_exec_args(command))
-        return (
-            f"wsl -d {shlex.quote(self.wsl_distribution)} -- "
-            f"bash --noprofile --norc -c {shlex.quote(command)}"
-        )
-
     def _build_chat_exec_args(
         self,
         question: str,
@@ -570,6 +539,49 @@ class HermesCliWrapper:
         return any(marker in normalized for marker in completion_markers)
 
     @staticmethod
+    def _has_user_visible_signal(text: str) -> bool:
+        normalized = text.strip()
+        if not normalized:
+            return False
+
+        lower = normalized.lower()
+        content_markers = [
+            "\u3002",
+            "\uff1f",
+            "\uff01",
+            "\uff1a",
+            "\u641c\u7d22",
+            "\u6293\u53d6",
+            "\u89c4\u5212",
+            "\u5199\u4f5c",
+            "\u9a8c\u8bc1",
+            "\u5bfc\u51fa",
+            "\u751f\u6210",
+            "\u5b8c\u6210",
+            "\u62a5\u544a",
+            "\u4ea7\u7269",
+            "stage",
+            "search",
+            "fetch",
+            "crawl",
+            "plan",
+            "write",
+            "verify",
+            "export",
+            "report",
+            "artifact",
+            "markdown",
+            "html",
+            "ppt",
+            "pptx",
+            "|",
+            "{",
+            "}",
+            "```",
+        ]
+        return any(marker in lower for marker in content_markers)
+
+    @staticmethod
     def _should_emit_box(text: str) -> bool:
         lines = [line.strip() for line in text.splitlines() if line.strip()]
         if not lines:
@@ -589,7 +601,7 @@ class HermesCliWrapper:
         if any(marker in lower for marker in noisy_markers):
             return False
 
-        return True
+        return HermesCliWrapper._has_user_visible_signal(text)
 
     @staticmethod
     def _summarize_box_text(text: str, max_lines: int = 4) -> str | None:
@@ -638,7 +650,9 @@ class HermesCliWrapper:
             text = self._strip_box_edges(cleaned)
             if not text or "Hermes" in text:
                 return False, None
-            return False, text
+            if self._should_emit_box(text):
+                return False, text
+            return False, None
 
         return False, None
 
@@ -1029,74 +1043,6 @@ class HermesCliWrapper:
                 or f"Hermes exited with code {process.returncode}"
             )
             raise RuntimeError(f"Hermes CLI error: {error_msg}")
-
-    def _parse_output(self, output: str) -> tuple[str, str]:
-        lines = output.split("\n")
-        session_id = ""
-        response_lines = []
-        in_hermes_box = False
-        box_lines: list[str] = []
-
-        for line in lines:
-            cleaned = self._clean_line(line)
-            if cleaned.startswith("session_id:"):
-                session_id = cleaned.split(":", 1)[1].strip()
-                continue
-
-            if not cleaned:
-                continue
-
-            if self._is_box_line(cleaned) and "Hermes" in cleaned:
-                if in_hermes_box and box_lines:
-                    text = "\n".join(box_lines).strip()
-                    if text and self._should_emit_box(text):
-                        response_lines.append(text)
-                    box_lines.clear()
-                in_hermes_box = True
-                continue
-
-            if in_hermes_box:
-                if self._is_box_line(cleaned):
-                    text = self._strip_box_edges(cleaned)
-                    if text and "Hermes" not in text:
-                        box_lines.append(text)
-                    elif box_lines:
-                        text = "\n".join(box_lines).strip()
-                        if text and self._should_emit_box(text):
-                            response_lines.append(text)
-                        box_lines.clear()
-                        in_hermes_box = False
-                elif cleaned:
-                    box_lines.append(cleaned)
-
-        if in_hermes_box and box_lines:
-            text = "\n".join(box_lines).strip()
-            if text and self._should_emit_box(text):
-                response_lines.append(text)
-
-        response = "\n\n".join(line for line in response_lines if line).strip()
-        return session_id, response
-
-    async def list_toolsets(self) -> list[str]:
-        process = await asyncio.create_subprocess_shell(
-            self._build_wsl_command([self.hermes_path, "tools", "--summary", "list"]),
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-
-        stdout, _ = await process.communicate()
-        if process.returncode != 0:
-            return []
-
-        output = stdout.decode("utf-8", errors="replace")
-        toolsets = []
-        for line in output.split("\n"):
-            cleaned = self._clean_line(line)
-            match = re.match(r"^[^\w\s]?\s*(?:enabled|disabled)\s+([a-zA-Z0-9_\-:]+)\s+", cleaned)
-            if match:
-                toolsets.append(match.group(1))
-        return toolsets
 
     async def list_skills(self) -> list[str]:
         process = await asyncio.create_subprocess_shell(
