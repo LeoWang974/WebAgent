@@ -12,6 +12,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from .process_registry import (
     register_run_process,
     terminate_registered_run_process,
+    terminate_processes_by_marker,
     unregister_run_process,
 )
 
@@ -1008,6 +1009,7 @@ class HermesCliWrapper:
             if run_id and self.active_processes.get(run_id) is process:
                 self.active_processes.pop(run_id, None)
             if run_id:
+                await terminate_processes_by_marker(run_id)
                 unregister_run_process(run_id, process.pid)
 
         if process.returncode == 0 and not emitted_output:

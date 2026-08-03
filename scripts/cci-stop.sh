@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="${WEBAGENT_ROOT:-/mnt/afs/tj_share/webagent-cci}"
+REPO_DIR="$ROOT_DIR/repo/WebAgent"
 RUN_DIR="$ROOT_DIR/run"
 
 stop_process() {
@@ -37,5 +38,25 @@ stop_process() {
 }
 
 stop_process "webagent-web"
-stop_process "webagent-worker"
+worker_pid_files=("$RUN_DIR"/webagent-worker*.pid)
+if [ -e "${worker_pid_files[0]}" ]; then
+  for worker_pid_file in "${worker_pid_files[@]}"; do
+    stop_process "$(basename "$worker_pid_file" .pid)"
+  done
+else
+  stop_process "webagent-worker"
+fi
 stop_process "webagent-api"
+
+for pattern in \
+  "$ROOT_DIR/runtime/users/" \
+  "$REPO_DIR/runtime/hermes-prompts/" \
+  "$REPO_DIR/ppt_decks/" \
+  "$ROOT_DIR/runtime/sensenova-skills/sn-ppt-workbench/"
+do
+  pids="$(pgrep -u "$(id -un)" -f "$pattern" || true)"
+  if [ -n "$pids" ]; then
+    echo "$pids" | xargs -r kill
+    echo "orphan cleanup: stopped pattern=$pattern"
+  fi
+done

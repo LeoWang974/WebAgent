@@ -97,7 +97,7 @@ async def discover_artifacts_with_retry(
                 session_artifact_paths,
                 run_id,
             )
-        if not discovered_artifacts:
+        if not discovered_artifacts and run_id is None:
             discovered_artifacts = discover_artifacts_since(session_id, since, run_id)
         if discovered_artifacts or attempt == 4:
             return dedupe_discovered_artifacts(discovered_artifacts)
@@ -117,8 +117,8 @@ ARTIFACT_PATH_RE = re.compile(
 )
 ARTIFACT_FILENAME_RE = re.compile(
     r"(?<![\w./\\-])"
-    r"(?P<path>[\w\u4e00-\u9fff][\w\u4e00-\u9fff ._-]{0,180}"
-    r"\.(?:md|html?|pptx|png|jpe?g|csv|xlsx|json))(?=$|[\s`'\"),.;:])",
+    r"(?P<path>(?:\./)?[\w\u4e00-\u9fff][\w\u4e00-\u9fff ._-]{0,180}"
+    r"\.(?:md|html?|pptx|png|jpe?g|csv|xlsx|json))(?=$|[\s`'\"*),.;:])",
     re.IGNORECASE,
 )
 
@@ -214,6 +214,28 @@ def _is_repo_runtime_temp_path(path: Path) -> bool:
     if len(parts) >= 3 and parts[0] in {"hermes-runs", "openclaw-runs"}:
         return "artifacts" not in parts
     return True
+
+
+def _is_safe_related_artifact_dir(directory: Path) -> bool:
+    normalized = str(directory).replace("\\", "/").lower().rstrip("/")
+    broad_dirs = {
+        str(_repo_root()).replace("\\", "/").lower().rstrip("/"),
+        str(Path.home()).replace("\\", "/").lower().rstrip("/"),
+    }
+    if normalized in broad_dirs:
+        return False
+    return any(
+        marker in normalized
+        for marker in (
+            "artifacts",
+            "deep-research-reports",
+            "images",
+            "output",
+            "outputs",
+            "ppt_decks",
+            "reports",
+        )
+    )
 
 
 def _is_likely_output_path(path: str) -> bool:
@@ -727,6 +749,8 @@ def discover_related_artifact_paths(
         if _is_non_artifact_path(raw_path) or _is_non_artifact_path(path):
             continue
         parent = path.parent
+        if not _is_safe_related_artifact_dir(parent):
+            continue
         key = _normalized_path_key(parent)
         if key not in seen_dirs:
             seen_dirs.add(key)
@@ -735,6 +759,8 @@ def discover_related_artifact_paths(
     for raw_dir in source_dirs or []:
         directory = _normalize_path(raw_dir)
         if _is_non_artifact_path(raw_dir) or _is_non_artifact_path(directory):
+            continue
+        if not _is_safe_related_artifact_dir(directory):
             continue
         key = _normalized_path_key(directory)
         if key not in seen_dirs:

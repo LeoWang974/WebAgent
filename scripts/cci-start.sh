@@ -14,6 +14,7 @@ WEB_PORT="${WEB_PORT:-3000}"
 API_PORT="${API_PORT:-8010}"
 WORKER_POOL="${WORKER_POOL:-solo}"
 WORKER_CONCURRENCY="${WORKER_CONCURRENCY:-1}"
+WORKER_INSTANCES="${WORKER_INSTANCES:-4}"
 WEB_PUBLIC_API_BASE_URL="${NEXT_PUBLIC_API_BASE_URL:-}"
 WEB_PUBLIC_API_ADAPTER="${NEXT_PUBLIC_API_ADAPTER:-fastapi}"
 DEFAULT_CORS_ORIGINS="http://localhost:$WEB_PORT,http://127.0.0.1:$WEB_PORT,http://localhost:3300,http://127.0.0.1:3300,http://localhost:3002,http://127.0.0.1:3002"
@@ -112,17 +113,34 @@ do
   fi
 done
 
+for pattern in \
+  "$ROOT_DIR/runtime/users/" \
+  "$REPO_DIR/runtime/hermes-prompts/" \
+  "$REPO_DIR/ppt_decks/" \
+  "$ROOT_DIR/runtime/sensenova-skills/sn-ppt-workbench/"
+do
+  pids="$(pgrep -u "$(id -un)" -f "$pattern" || true)"
+  if [ -n "$pids" ]; then
+    echo "$pids" | xargs -r kill
+  fi
+done
+
 : > "$LOG_DIR/webagent-api.log"
 : > "$LOG_DIR/webagent-worker.log"
 : > "$LOG_DIR/webagent-web.log"
+rm -f "$RUN_DIR"/webagent-worker*.pid
 
 nohup "$PYTHON_BIN" -m uvicorn app.main:app --host 0.0.0.0 --port "$API_PORT" \
   >> "$LOG_DIR/webagent-api.log" 2>&1 &
 echo "$!" > "$RUN_DIR/webagent-api.pid"
-nohup "$PYTHON_BIN" -m celery -A app.workers.celery_app.celery_app worker \
-  --loglevel=INFO -Q agent-runs --pool="$WORKER_POOL" --concurrency="$WORKER_CONCURRENCY" \
-  >> "$LOG_DIR/webagent-worker.log" 2>&1 &
-echo "$!" > "$RUN_DIR/webagent-worker.pid"
+for worker_index in $(seq 1 "$WORKER_INSTANCES"); do
+  worker_name="webagent-worker-${worker_index}@%h"
+  nohup "$PYTHON_BIN" -m celery -A app.workers.celery_app.celery_app worker \
+    --hostname="$worker_name" --loglevel=INFO -Q agent-runs \
+    --pool="$WORKER_POOL" --concurrency="$WORKER_CONCURRENCY" \
+    >> "$LOG_DIR/webagent-worker.log" 2>&1 &
+  echo "$!" > "$RUN_DIR/webagent-worker-${worker_index}.pid"
+done
 
 if ! command -v pnpm >/dev/null 2>&1; then
   echo "Missing pnpm on PATH; API and worker started, web was not started." >&2

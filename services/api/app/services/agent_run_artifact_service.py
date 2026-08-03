@@ -30,6 +30,81 @@ PRIMARY_ARTIFACT_TYPES_BY_SKILL = {
     "u1_image": {"image_result"},
 }
 
+FATAL_RUNTIME_MARKERS = (
+    "ratelimiterror",
+    "rate limit",
+    "http 429",
+    "rpm exhausted",
+    "api call failed",
+    "invalid token",
+    "missing authentication header",
+    "finish_reason='length'",
+    "response truncated",
+    "truncated tool call",
+    "output length limit",
+    "401",
+)
+
+PLACEHOLDER_OUTPUTS = {
+    "hermes completed. discovering generated artifacts.",
+    "openclaw completed. discovering generated artifacts.",
+    "agent runtime completed without emitting a visible status update.",
+}
+
+
+def _has_positive_token(text: str, tokens: tuple[str, ...]) -> bool:
+    negative_markers = ("不", "不要", "不得", "无需", "不是", "非", "no ", "not ", "without ")
+    for token in tokens:
+        start = 0
+        while True:
+            index = text.find(token, start)
+            if index < 0:
+                break
+            prefix = text[max(0, index - 16) : index]
+            if not any(marker in prefix for marker in negative_markers):
+                return True
+            start = index + len(token)
+    return False
+
+
+def requested_primary_artifact_types(content: str) -> set[str]:
+    lowered = content.lower()
+    if _has_positive_token(lowered, ("ppt", "pptx", "幻灯片", "演示文稿")):
+        return {"ppt_deck"}
+    if _has_positive_token(lowered, ("html", "网页", "页面")):
+        return {"html_page"}
+    if _has_positive_token(lowered, ("图片", "图像", "生图", "image", "png", "jpg", "jpeg")):
+        return {"image_result"}
+    if _has_positive_token(lowered, ("csv", "excel", "xlsx", "数据表文件", "表格文件")):
+        return {"data_table"}
+    if _has_positive_token(lowered, ("markdown", ".md", " md", "md文件", "md 文件")):
+        return {"markdown_report"}
+    return set()
+
+
+def _diagnostic_text(adapter: object, assistant_output: str) -> str:
+    diagnostics = getattr(adapter, "last_diagnostics", {}) or {}
+    parts = [assistant_output]
+    for key in ("stderr_tail", "stdout_tail", "last_stage"):
+        value = diagnostics.get(key)
+        if value:
+            parts.append(str(value))
+    return "\n".join(parts)
+
+
+def raise_for_fatal_runtime_diagnostics(adapter: object, assistant_output: str) -> None:
+    diagnostic_text = _diagnostic_text(adapter, assistant_output)
+    lowered = diagnostic_text.lower()
+    if not any(marker in lowered for marker in FATAL_RUNTIME_MARKERS):
+        return
+    tail = diagnostic_text.strip()[-800:] or "Agent runtime reported a model/API failure."
+    raise RuntimeError(f"Agent runtime reported a model/API failure: {tail}")
+
+
+def _is_placeholder_output(assistant_output: str) -> bool:
+    normalized = " ".join((assistant_output or "").strip().lower().split())
+    return not normalized or normalized in PLACEHOLDER_OUTPUTS
+
 
 async def discover_and_persist_run_artifacts(
     db: AsyncSession,
@@ -129,7 +204,17 @@ async def discover_and_persist_run_artifacts(
     current_run_artifacts = [
         artifact for artifact in stored_artifacts if artifact.run_id == run_id_value
     ]
-    if not current_run_artifacts and assistant_output:
+    requested_artifact_types = requested_primary_artifact_types(content)
+    should_create_markdown_fallback = (
+        "markdown_report" in requested_artifact_types
+        or skill_key in {"data_analysis", "deep_research"}
+    )
+    if (
+        not current_run_artifacts
+        and assistant_output
+        and not _is_placeholder_output(assistant_output)
+        and should_create_markdown_fallback
+    ):
         fallback_artifact = create_markdown_artifact_from_content(
             conversation_id,
             assistant_output,
@@ -147,7 +232,9 @@ async def discover_and_persist_run_artifacts(
             current_run_artifacts = [
                 artifact for artifact in stored_artifacts if artifact.run_id == run_id_value
             ]
-    validate_primary_artifacts(skill_key, current_run_artifacts)
+    if not current_run_artifacts:
+        raise_for_fatal_runtime_diagnostics(adapter, assistant_output or "")
+    validate_primary_artifacts(skill_key, current_run_artifacts, content, requested_artifact_types)
     developer_mode = await user_developer_mode_by_id(db, user_id)
     visible_current_run_artifacts = [
         artifact
@@ -170,21 +257,34 @@ async def discover_and_persist_run_artifacts(
     return response_artifacts
 
 
-def validate_primary_artifacts(skill_key: str | None, current_run_artifacts) -> None:
-    required_primary_types = PRIMARY_ARTIFACT_TYPES_BY_SKILL.get(skill_key or "")
+def validate_primary_artifacts(
+    skill_key: str | None,
+    current_run_artifacts,
+    content: str = "",
+    requested_artifact_types: set[str] | None = None,
+) -> None:
+    primary_candidates = [
+        artifact for artifact in current_run_artifacts if not is_debug_artifact(artifact)
+    ]
+    required_primary_types = set(PRIMARY_ARTIFACT_TYPES_BY_SKILL.get(skill_key or "", set()))
+    required_primary_types.update(
+        requested_primary_artifact_types(content)
+        if requested_artifact_types is None
+        else requested_artifact_types
+    )
     if required_primary_types and not any(
-        artifact.type in required_primary_types for artifact in current_run_artifacts
+        artifact.type in required_primary_types for artifact in primary_candidates
     ):
         expected = ", ".join(sorted(required_primary_types))
         raise RuntimeError(
             f"{skill_key} completed without producing a primary artifact ({expected})."
         )
-    if skill_key == "ppt_generation" and not current_run_artifacts:
+    if skill_key == "ppt_generation" and not primary_candidates:
         raise RuntimeError("PPT generation completed without producing any artifact.")
     if (
         skill_key == "ppt_generation"
-        and any(artifact.type == "html_page" for artifact in current_run_artifacts)
-        and not any(artifact.type == "ppt_deck" for artifact in current_run_artifacts)
+        and any(artifact.type == "html_page" for artifact in primary_candidates)
+        and not any(artifact.type == "ppt_deck" for artifact in primary_candidates)
     ):
         raise RuntimeError(
             "PPTX export did not produce a .pptx file. "

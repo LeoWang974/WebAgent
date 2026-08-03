@@ -27,7 +27,15 @@ echo "WebAgent CCI status"
 echo "root: $ROOT_DIR"
 echo "logs: $LOG_DIR"
 print_process "webagent-api"
-print_process "webagent-worker"
+worker_pid_files=("$RUN_DIR"/webagent-worker*.pid)
+if [ -e "${worker_pid_files[0]}" ]; then
+  for worker_pid_file in "${worker_pid_files[@]}"; do
+    worker_name="$(basename "$worker_pid_file" .pid)"
+    print_process "$worker_name"
+  done
+else
+  print_process "webagent-worker"
+fi
 print_process "webagent-web"
 
 if command -v curl >/dev/null 2>&1; then

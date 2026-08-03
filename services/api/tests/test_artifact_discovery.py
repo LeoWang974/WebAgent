@@ -9,6 +9,7 @@ from app.services.artifact_discovery import (
     create_artifacts_from_paths,
     create_artifacts_from_refs,
     discover_related_artifact_paths,
+    extract_artifact_path_strings,
 )
 
 
@@ -141,8 +142,10 @@ def test_create_artifacts_from_refs_marks_source_cache_as_intermediate(tmp_path:
 
 
 def test_discover_related_artifact_paths_finds_html_slides_for_pptx(tmp_path: Path):
-    deck = tmp_path / "deck.pptx"
-    slide = tmp_path / "page_001.html"
+    deck_dir = tmp_path / "ppt_decks"
+    deck_dir.mkdir()
+    deck = deck_dir / "deck.pptx"
+    slide = deck_dir / "page_001.html"
     deck.write_bytes(b"pptx")
     slide.write_text("<html><body>slide</body></html>", encoding="utf-8")
 
@@ -152,3 +155,32 @@ def test_discover_related_artifact_paths_finds_html_slides_for_pptx(tmp_path: Pa
     normalized = {Path(path).name for path in paths}
     assert "deck.pptx" in normalized
     assert "page_001.html" in normalized
+
+
+def test_discover_related_artifact_paths_does_not_scan_repo_root(monkeypatch, tmp_path: Path):
+    first = tmp_path / "first-report.md"
+    second = tmp_path / "second-report.md"
+    first.write_text("# First", encoding="utf-8")
+    second.write_text("# Second", encoding="utf-8")
+    monkeypatch.setattr("app.services.artifact_discovery._repo_root", lambda: tmp_path)
+
+    since = datetime.fromtimestamp(first.stat().st_mtime) - timedelta(seconds=1)
+    paths = discover_related_artifact_paths([str(first)], since)
+
+    assert paths == []
+
+
+def test_extract_artifact_path_strings_supports_relative_chinese_filename():
+    paths = extract_artifact_path_strings(
+        "HTML 已生成完成，结构验证通过。 ./城市夜间轻社交消费机会.html  可直接打开"
+    )
+
+    assert "./城市夜间轻社交消费机会.html" in paths
+
+
+def test_extract_artifact_path_strings_supports_markdown_bold_filename():
+    paths = extract_artifact_path_strings(
+        "Created **ai-workflow-tools-small-teams.md** (1,443 words)."
+    )
+
+    assert "ai-workflow-tools-small-teams.md" in paths
