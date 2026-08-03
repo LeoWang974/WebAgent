@@ -48,15 +48,35 @@ else
 fi
 stop_process "webagent-api"
 
+stop_orphans_by_pattern() {
+  local pattern="$1"
+  local pids
+  pids="$(pgrep -u "$(id -un)" -f "$pattern" || true)"
+  if [ -z "$pids" ]; then
+    echo "orphan cleanup: no process matched pattern=$pattern"
+    return
+  fi
+  echo "orphan cleanup: TERM pids=$(echo "$pids" | tr '\n' ' ') pattern=$pattern"
+  echo "$pids" | xargs -r kill || true
+  sleep 2
+  local survivors=""
+  for pid in $pids; do
+    if kill -0 "$pid" >/dev/null 2>&1; then
+      survivors="$survivors $pid"
+    fi
+  done
+  if [ -n "$survivors" ]; then
+    echo "orphan cleanup: KILL pids=$survivors pattern=$pattern"
+    # shellcheck disable=SC2086
+    kill -9 $survivors || true
+  fi
+}
+
 for pattern in \
   "$ROOT_DIR/runtime/users/" \
   "$REPO_DIR/runtime/hermes-prompts/" \
   "$REPO_DIR/ppt_decks/" \
   "$ROOT_DIR/runtime/sensenova-skills/sn-ppt-workbench/"
 do
-  pids="$(pgrep -u "$(id -un)" -f "$pattern" || true)"
-  if [ -n "$pids" ]; then
-    echo "$pids" | xargs -r kill
-    echo "orphan cleanup: stopped pattern=$pattern"
-  fi
+  stop_orphans_by_pattern "$pattern"
 done

@@ -1,4 +1,4 @@
-import type { Artifact } from "@/types";
+﻿import type { Artifact } from "@/types";
 
 export function artifactDisplayPriority(artifact?: Artifact) {
   if (!artifact) {
@@ -21,6 +21,9 @@ export function artifactDisplayPriority(artifact?: Artifact) {
   };
 
   const basePriority = priorities[artifact.type] ?? 0;
+  if (artifact.isPrimary === false || metadata.artifactRole === "preview_fallback") {
+    return Math.min(basePriority, 20);
+  }
   const path = String(metadata.path ?? metadata.originalPath ?? "").toLowerCase();
   const isPrimaryReport =
     artifact.type === "markdown_report" &&

@@ -39,6 +39,9 @@ class AgentRun(ApiModel):
     model_provider: str | None = None
     model_name: str | None = None
     model_base_url: str | None = None
+    queue_name: str | None = None
+    queue_position: int | None = None
+    queue_reason: str | None = None
 
 
 class AgentRunCreate(ApiModel):

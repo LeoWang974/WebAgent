@@ -157,6 +157,21 @@ def test_discover_related_artifact_paths_finds_html_slides_for_pptx(tmp_path: Pa
     assert "page_001.html" in normalized
 
 
+def test_create_artifacts_from_paths_marks_ppt_page_html_as_preview_fallback(tmp_path: Path):
+    pages_dir = tmp_path / "ppt_decks" / "demo" / "pages"
+    pages_dir.mkdir(parents=True)
+    slide = pages_dir / "page_001.html"
+    slide.write_text("<html><body>slide</body></html>", encoding="utf-8")
+
+    artifacts = create_artifacts_from_paths("session_1", [str(slide)])
+
+    assert len(artifacts) == 1
+    assert artifacts[0].type == "html_page"
+    assert artifacts[0].metadata
+    assert artifacts[0].metadata["artifactRole"] == "preview_fallback"
+    assert artifacts[0].metadata["developerOnly"] is False
+
+
 def test_discover_related_artifact_paths_does_not_scan_repo_root(monkeypatch, tmp_path: Path):
     first = tmp_path / "first-report.md"
     second = tmp_path / "second-report.md"

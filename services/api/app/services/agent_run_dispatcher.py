@@ -1,7 +1,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import schemas
-from app.core.config import settings
+from app.services.agent_run_queue import estimated_queue_position, queue_for_message
 from app.services.agent_runs import (
     create_db_agent_run,
     record_db_agent_run_event,
@@ -41,11 +41,17 @@ async def enqueue_agent_run_message(
         adapter_key=adapter_key,
         model_runtime_config=model_runtime_config,
     )
+    queue_name, queue_reason = queue_for_message(input_data.content, resolved_skill_key)
+    queue_position = await estimated_queue_position(queue_name)
     await record_db_agent_run_event(
         db,
         run,
         event_type="queued",
-        label="Queued agent run",
+        label=(
+            f"{queue_reason}，当前位置约 {queue_position}"
+            if queue_position
+            else queue_reason
+        ),
         status="queued",
         progress=0,
         step_status="pending",
@@ -57,11 +63,14 @@ async def enqueue_agent_run_message(
             "modelConfigId": run.model_config_id,
             "modelProvider": run.model_provider,
             "modelName": run.model_name,
+            "queueName": queue_name,
+            "queuePosition": queue_position,
+            "queueReason": queue_reason,
             "skillKey": resolved_skill_key,
             "userMessageId": user_message.id,
         },
     )
     from app.workers.agent_run_tasks import execute_agent_run_task
 
-    execute_agent_run_task.apply_async((run.id,), queue=settings.agent_run_queue_name)
+    execute_agent_run_task.apply_async((run.id,), queue=queue_name)
     return user_message, run

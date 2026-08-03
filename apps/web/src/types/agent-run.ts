@@ -29,6 +29,9 @@ export interface AgentRun {
   isPlainChat?: boolean;
   output?: string;
   adapterKey?: string;
+  queueName?: string;
+  queuePosition?: number;
+  queueReason?: string;
 }
 
 export interface AgentRunEvent {

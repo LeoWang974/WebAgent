@@ -2,8 +2,11 @@
 set -euo pipefail
 
 ROOT_DIR="${WEBAGENT_ROOT:-/mnt/afs/tj_share/webagent-cci}"
+REPO_DIR="$ROOT_DIR/repo/WebAgent"
 LOG_DIR="$ROOT_DIR/logs"
 RUN_DIR="$ROOT_DIR/run"
+PYTHON_BIN="$ROOT_DIR/runtime/conda-webagent/bin/python"
+AGENT_BIN_DIR="$ROOT_DIR/runtime/agent-home/.local/bin"
 WEB_PORT="${WEB_PORT:-3000}"
 API_PORT="${API_PORT:-8010}"
 
@@ -52,6 +55,48 @@ if command -v curl >/dev/null 2>&1; then
     echo "web: unavailable on 127.0.0.1:$WEB_PORT"
   fi
 fi
+
+if [ -x "$PYTHON_BIN" ]; then
+  PYTHONPATH="$REPO_DIR/services/api:$REPO_DIR/services/agent-runtime" "$PYTHON_BIN" - <<'PY'
+from app.core.config import settings
+
+print("runtime checks:")
+try:
+    import redis
+
+    client = redis.Redis.from_url(settings.redis_url, socket_connect_timeout=2)
+    client.ping()
+    print("redis: ok")
+except Exception as error:
+    print(f"redis: unavailable ({error})")
+
+try:
+    import asyncio
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    async def check_postgresql() -> None:
+        engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+        async with engine.connect() as connection:
+            await connection.exec_driver_sql("select 1")
+        await engine.dispose()
+
+    asyncio.run(check_postgresql())
+    print("postgresql: ok")
+except Exception as error:
+    print(f"postgresql: unavailable ({error})")
+PY
+else
+  echo "runtime checks: missing Python runtime $PYTHON_BIN"
+fi
+
+PATH="$AGENT_BIN_DIR:$PATH"
+for command_name in hermes openclaw; do
+  if command -v "$command_name" >/dev/null 2>&1; then
+    echo "$command_name: available ($(command -v "$command_name"))"
+  else
+    echo "$command_name: unavailable on PATH"
+  fi
+done
 
 echo "recent logs:"
 for log_name in webagent-api.log webagent-worker.log webagent-web.log; do

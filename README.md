@@ -97,7 +97,7 @@ primary deployment path:
 1. Install and validate agent_pack, Hermes, OpenClaw, SenseNova credentials, and
    Serper credentials in an isolated host directory.
 2. Clone or pull this repository inside the isolated CCI workspace.
-3. Run FastAPI, Celery worker, and Next.js through `scripts/cci-start.sh`.
+3. Run FastAPI, Celery workers, and Next.js through `scripts/cci-start.sh`.
 4. Keep PostgreSQL and Redis as host services or platform-managed services.
 5. Verify login, conversations, Agent Run SSE, artifacts, sharing permissions,
    and long Hermes/OpenClaw tasks.
@@ -107,8 +107,30 @@ CCI web port convention:
 - Web app: `http://<cci-host>:3000/app`
 - API health: `http://<cci-host>:8010/api/health`
 - `scripts/cci-start.sh` defaults to `WEB_PORT=3000` for bare Linux runs.
-- `scripts/cci-status.sh` checks API/web readiness and tails recent logs.
-- `scripts/cci-stop.sh` stops pid-file managed API, worker, and web processes.
+- `scripts/cci-start.sh` starts one `short-chat` worker plus four `agent-runs`
+  workers by default. Short chat requests are routed to the priority queue, while
+  Markdown/HTML/PPT/image/report-style tasks remain on the long-task queue.
+- `scripts/cci-status.sh` checks API/web readiness, Redis, PostgreSQL, and
+  Hermes/OpenClaw command availability, then tails recent logs.
+- `scripts/cci-stop.sh` stops pid-file managed API, worker, and web processes,
+  then logs conservative orphan cleanup for run-scoped Hermes/OpenClaw/PPT
+  helper processes.
+
+Useful CCI queue settings:
+
+- `SHORT_CHAT_QUEUE_NAME=short-chat`
+- `AGENT_RUN_QUEUE_NAME=agent-runs`
+- `WORKER_INSTANCES=4`
+- `WORKER_POOL=solo`
+- `WORKER_CONCURRENCY=1`
+
+For routine CCI operations:
+
+```bash
+WEB_PORT=3000 API_PORT=8010 bash scripts/cci-start.sh
+bash scripts/cci-status.sh
+bash scripts/cci-stop.sh
+```
 
 Detailed CCI bare-metal runtime, environment, log, and troubleshooting notes live in
 [`docs/CCI_BARE_METAL.md`](docs/CCI_BARE_METAL.md).

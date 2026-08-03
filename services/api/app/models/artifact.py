@@ -1,4 +1,4 @@
-from sqlalchemy import JSON, BigInteger, ForeignKey, Index, String, Text
+from sqlalchemy import JSON, BigInteger, Boolean, ForeignKey, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -18,6 +18,7 @@ class Artifact(IdMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(50), default="pending")
     content: Mapped[str | None] = mapped_column(Text, nullable=True)
     artifact_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
 
     conversation = relationship("Conversation")
 

@@ -67,6 +67,9 @@ export type SendMessageStreamEvent =
     }
   | {
       progress: number;
+      queueName?: string;
+      queuePosition?: number;
+      queueReason?: string;
       runId: string;
       sessionId: string;
       status: AgentRun["status"];

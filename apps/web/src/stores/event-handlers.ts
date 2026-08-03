@@ -178,6 +178,7 @@ function applyStreamRunStarted(
   state: SendMessageStreamEventState,
   event: Extract<SendMessageStreamEvent, { type: "run_started" }>,
 ) {
+  const queueLabel = queueStatusLabel(event.queueReason, event.queuePosition);
   return {
     activeAgentRunId:
       state.activeAgentRunId && state.agentRuns.some((run) => run.id === event.runId)
@@ -188,11 +189,28 @@ function applyStreamRunStarted(
         ? {
             ...run,
             progress: event.progress,
+            queueName: event.queueName,
+            queuePosition: event.queuePosition,
+            queueReason: event.queueReason,
             status: event.status,
           }
         : run,
     ),
+    messages: queueLabel
+      ? state.messages.map((message) =>
+          message.sessionId === event.sessionId && message.role === "assistant" && message.isPending
+            ? { ...message, pendingLabel: queueLabel }
+            : message,
+        )
+      : state.messages,
   };
+}
+
+function queueStatusLabel(reason?: string, position?: number) {
+  if (!reason && !position) {
+    return "";
+  }
+  return position ? `${reason ?? "排队中"}，当前位置约 ${position}` : (reason ?? "排队中");
 }
 
 function applyStreamAssistantDelta(

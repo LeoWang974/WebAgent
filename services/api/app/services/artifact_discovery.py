@@ -392,6 +392,13 @@ def _metadata(
 ) -> dict:
     role_path = Path(original_path) if original_path else path
     artifact_role = _artifact_role(role_path, artifact_type)
+    normalized_path = str(role_path).replace("\\", "/").lower()
+    if (
+        artifact_type == "html_page"
+        and "/pages/" in normalized_path
+        and path.name.lower().startswith("page_")
+    ):
+        artifact_role = "preview_fallback"
     base = {
         "artifactRole": artifact_role,
         "contentHash": _file_sha256(path),

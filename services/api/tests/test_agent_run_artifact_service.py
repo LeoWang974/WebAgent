@@ -12,9 +12,11 @@ class _Artifact:
         self,
         artifact_type: str,
         metadata: dict | None = None,
+        is_primary: bool = True,
     ):
         self.type = artifact_type
         self.artifact_metadata = metadata or {}
+        self.is_primary = is_primary
 
 
 class _Adapter:

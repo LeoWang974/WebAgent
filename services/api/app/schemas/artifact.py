@@ -18,6 +18,7 @@ class Artifact(ApiModel):
     content: str | None = None
     created_at: str | None = None
     id: str
+    is_primary: bool = True
     metadata: dict[str, Any] | None = None
     run_id: str | None = None
     session_id: str

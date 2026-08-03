@@ -15,6 +15,8 @@ API_PORT="${API_PORT:-8010}"
 WORKER_POOL="${WORKER_POOL:-solo}"
 WORKER_CONCURRENCY="${WORKER_CONCURRENCY:-1}"
 WORKER_INSTANCES="${WORKER_INSTANCES:-4}"
+SHORT_CHAT_QUEUE_NAME="${SHORT_CHAT_QUEUE_NAME:-short-chat}"
+AGENT_RUN_QUEUE_NAME="${AGENT_RUN_QUEUE_NAME:-agent-runs}"
 WEB_PUBLIC_API_BASE_URL="${NEXT_PUBLIC_API_BASE_URL:-}"
 WEB_PUBLIC_API_ADAPTER="${NEXT_PUBLIC_API_ADAPTER:-fastapi}"
 DEFAULT_CORS_ORIGINS="http://localhost:$WEB_PORT,http://127.0.0.1:$WEB_PORT,http://localhost:3300,http://127.0.0.1:3300,http://localhost:3002,http://127.0.0.1:3002"
@@ -39,6 +41,8 @@ export PATH="$AGENT_BIN_DIR:$HERMES_NODE_DIR:$PATH"
 export LD_LIBRARY_PATH="$ROOT_DIR/runtime/conda-webagent/lib:${LD_LIBRARY_PATH:-}"
 export PYTHONPATH="$REPO_DIR/services/api:$REPO_DIR/services/agent-runtime"
 export BACKEND_CORS_ORIGINS="${BACKEND_CORS_ORIGINS:-$DEFAULT_CORS_ORIGINS}"
+export AGENT_RUN_QUEUE_NAME="$AGENT_RUN_QUEUE_NAME"
+export SHORT_CHAT_QUEUE_NAME="$SHORT_CHAT_QUEUE_NAME"
 export SN_API_KEY="${SN_API_KEY:-${SENSENOVA_API_KEY:-${OPENAI_API_KEY:-${LLM_API_KEY:-}}}}"
 export SN_BASE_URL="${SN_BASE_URL:-${SENSENOVA_BASE_URL:-${OPENAI_BASE_URL:-${LLM_BASE_URL:-}}}}"
 export SN_TEXT_API_KEY="${SN_TEXT_API_KEY:-$SN_API_KEY}"
@@ -133,10 +137,17 @@ rm -f "$RUN_DIR"/webagent-worker*.pid
 nohup "$PYTHON_BIN" -m uvicorn app.main:app --host 0.0.0.0 --port "$API_PORT" \
   >> "$LOG_DIR/webagent-api.log" 2>&1 &
 echo "$!" > "$RUN_DIR/webagent-api.pid"
+
+nohup "$PYTHON_BIN" -m celery -A app.workers.celery_app.celery_app worker \
+  --hostname="webagent-worker-short@%h" --loglevel=INFO -Q "$SHORT_CHAT_QUEUE_NAME" \
+  --pool="$WORKER_POOL" --concurrency=1 \
+  >> "$LOG_DIR/webagent-worker.log" 2>&1 &
+echo "$!" > "$RUN_DIR/webagent-worker-short.pid"
+
 for worker_index in $(seq 1 "$WORKER_INSTANCES"); do
   worker_name="webagent-worker-${worker_index}@%h"
   nohup "$PYTHON_BIN" -m celery -A app.workers.celery_app.celery_app worker \
-    --hostname="$worker_name" --loglevel=INFO -Q agent-runs \
+    --hostname="$worker_name" --loglevel=INFO -Q "$AGENT_RUN_QUEUE_NAME" \
     --pool="$WORKER_POOL" --concurrency="$WORKER_CONCURRENCY" \
     >> "$LOG_DIR/webagent-worker.log" 2>&1 &
   echo "$!" > "$RUN_DIR/webagent-worker-${worker_index}.pid"
@@ -173,12 +184,12 @@ NEXT_PUBLIC_API_ADAPTER=$WEB_PUBLIC_API_ADAPTER"
   echo "$!" > "$RUN_DIR/webagent-web.pid"
 fi
 
-for attempt in {1..30}; do
-  if curl -fsS "http://127.0.0.1:$API_PORT/api/health" >/tmp/webagent-api-health.txt; then
+for attempt in {1..60}; do
+  if curl -fsS --max-time 2 "http://127.0.0.1:$API_PORT/api/health" >/tmp/webagent-api-health.txt 2>/dev/null; then
     cat /tmp/webagent-api-health.txt
     break
   fi
-  if [ "$attempt" -eq 30 ]; then
+  if [ "$attempt" -eq 60 ]; then
     echo "FastAPI did not become healthy on port $API_PORT." >&2
     tail -n 80 "$LOG_DIR/webagent-api.log" >&2 || true
     exit 1
@@ -187,11 +198,11 @@ for attempt in {1..30}; do
 done
 echo
 if command -v pnpm >/dev/null 2>&1; then
-  for attempt in {1..30}; do
-    if curl -fsS "http://127.0.0.1:$WEB_PORT/app" >/dev/null; then
+  for attempt in {1..60}; do
+    if curl -fsS --max-time 2 "http://127.0.0.1:$WEB_PORT/app" >/dev/null 2>&1; then
       break
     fi
-    if [ "$attempt" -eq 30 ]; then
+    if [ "$attempt" -eq 60 ]; then
       echo "Next.js did not become ready on port $WEB_PORT." >&2
       tail -n 120 "$LOG_DIR/webagent-web.log" >&2 || true
       exit 1

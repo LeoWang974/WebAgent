@@ -244,10 +244,15 @@ def to_agent_run_schema(
     events = events or []
     completed_at = run.updated_at.isoformat() if run.status in TERMINAL_RUN_STATUSES else None
     output = None
+    queue_payload = {}
     for event in reversed(events):
         payload = event.payload or {}
         if payload.get("output"):
             output = str(payload["output"])
+            break
+    for event in events:
+        if event.event_type == "queued" and isinstance(event.payload, dict):
+            queue_payload = event.payload
             break
     return schemas.AgentRun(
         id=run.id,
@@ -265,6 +270,9 @@ def to_agent_run_schema(
         model_provider=run.model_provider,
         model_name=run.model_name,
         model_base_url=run.model_base_url,
+        queue_name=queue_payload.get("queueName"),
+        queue_position=queue_payload.get("queuePosition"),
+        queue_reason=queue_payload.get("queueReason"),
     )
 
 

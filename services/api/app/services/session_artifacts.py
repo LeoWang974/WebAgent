@@ -1,4 +1,4 @@
-import hashlib
+﻿import hashlib
 import re
 import shutil
 from datetime import datetime
@@ -41,6 +41,8 @@ def artifact_display_priority(artifact: Artifact) -> tuple[int, datetime]:
         "ppt_deck": 100,
     }
     priority = type_priority.get(artifact.type, 0)
+    if not artifact.is_primary:
+        priority = min(priority, 20)
     if is_primary_report_artifact(artifact):
         priority = max(priority, 80)
     return (priority, artifact.created_at)
@@ -52,7 +54,23 @@ def is_debug_artifact(artifact: Artifact) -> bool:
         artifact.type == "debug_json"
         or metadata.get("developerOnly") is True
         or metadata.get("artifactRole") == "intermediate"
+        or (artifact.is_primary is False and metadata.get("artifactRole") == "preview_fallback")
     )
+
+
+def is_primary_artifact_schema(artifact_schema: schemas.Artifact) -> bool:
+    metadata = artifact_schema.metadata or {}
+    if metadata.get("developerOnly") is True or metadata.get("artifactRole") == "intermediate":
+        return False
+    path = str(metadata.get("path") or metadata.get("originalPath") or "").replace("\\", "/")
+    filename = str(metadata.get("filename") or "").lower()
+    if artifact_schema.type == "debug_json":
+        return False
+    if artifact_schema.type == "html_page" and "/pages/" in path.lower() and filename.startswith(
+        "page_"
+    ):
+        return False
+    return True
 
 
 def artifact_metadata_paths(metadata: dict) -> list[Path]:
@@ -258,6 +276,7 @@ async def persist_discovered_artifacts(
             run_id,
         )
         if existing_artifact is not None:
+            existing_artifact.is_primary = is_primary_artifact_schema(artifact_schema)
             stored_artifacts.append(existing_artifact)
             continue
 
@@ -269,6 +288,7 @@ async def persist_discovered_artifacts(
             status=artifact_schema.status,
             content=artifact_schema.content,
             artifact_metadata=artifact_schema.metadata,
+            is_primary=is_primary_artifact_schema(artifact_schema),
         )
         db.add(artifact)
         stored_artifacts.append(artifact)

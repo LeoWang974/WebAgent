@@ -102,3 +102,16 @@ test("selectPreferredArtifact uses preview priority before recency", () => {
 
   assert.equal(selected?.id, "deck");
 });
+
+test("ppt deck wins over newer HTML slide fallback", () => {
+  const selected = selectPreferredArtifact([
+    artifact("page_001", "html_page", {
+      createdAt: "2026-07-23T12:00:00Z",
+      isPrimary: false,
+      metadata: { artifactRole: "preview_fallback" },
+    }),
+    artifact("deck", "ppt_deck", { createdAt: "2026-07-23T11:00:00Z", isPrimary: true }),
+  ]);
+
+  assert.equal(selected?.id, "deck");
+});

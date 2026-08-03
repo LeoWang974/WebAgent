@@ -212,6 +212,7 @@ def to_artifact(artifact: Artifact, *, include_payload: bool = True) -> schemas.
     return schemas.Artifact(
         created_at=artifact.created_at.isoformat(),
         id=artifact.id,
+        is_primary=artifact.is_primary,
         session_id=artifact.conversation_id,
         run_id=artifact.run_id,
         type=artifact.type,

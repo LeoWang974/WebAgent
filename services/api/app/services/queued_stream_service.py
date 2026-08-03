@@ -30,6 +30,7 @@ async def stream_queued_agent_run(
     )
     yield f": {' ' * 2048}\n\n"
     yield sse("user_message", to_message(user_message).model_dump(by_alias=True))
+    queued_payload = await _queued_event_payload(db, run.id)
     yield sse(
         "run_started",
         {
@@ -37,6 +38,9 @@ async def stream_queued_agent_run(
             "sessionId": session_id,
             "status": run.status,
             "progress": run.progress,
+            "queueName": queued_payload.get("queueName"),
+            "queuePosition": queued_payload.get("queuePosition"),
+            "queueReason": queued_payload.get("queueReason"),
         },
     )
 
@@ -135,3 +139,14 @@ async def build_assistant_done_payload(
     done_payload.setdefault("runId", run.id)
     done_payload.setdefault("status", run.status)
     return done_payload
+
+
+async def _queued_event_payload(db: AsyncSession, run_id: str) -> dict:
+    result = await db.execute(
+        select(AgentRunEvent).where(
+            AgentRunEvent.run_id == run_id,
+            AgentRunEvent.event_type == "queued",
+        )
+    )
+    event = result.scalars().first()
+    return event.payload if event is not None and isinstance(event.payload, dict) else {}

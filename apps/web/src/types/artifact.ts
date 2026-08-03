@@ -13,6 +13,7 @@ export interface Artifact {
   content?: string;
   createdAt?: string;
   id: string;
+  isPrimary?: boolean;
   metadata?: Record<string, unknown>;
   runId?: string;
   sessionId: string;

@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     agent_run_event_poll_interval_seconds: float = 1.0
     agent_run_queue_enabled: bool = False
     agent_run_queue_name: str = "agent-runs"
+    short_chat_queue_name: str = "short-chat"
     agent_run_workspace_root: str = "runtime/agent-runs"
     agent_runtime_user_root: str = "runtime/users"
     agent_adapter_limit_scope: str = "per_user"
