@@ -1,5 +1,7 @@
+import binascii
 from functools import cached_property
 
+from cryptography.fernet import Fernet
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -26,6 +28,8 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_secret_key: str = "change-me"
     redis_url: str = "redis://localhost:6379/0"
+    model_config_encryption_key: str | None = None
+    model_config_encryption_previous_keys: str = ""
     sensenova_api_key: str | None = None
     sensenova_base_url: str | None = None
     sensenova_default_model: str = "sensenova-6.7-flash-lite"
@@ -86,6 +90,14 @@ class Settings(BaseSettings):
         return self.environment.lower() in PRODUCTION_ENVIRONMENTS
 
     def validate_runtime_safety(self) -> None:
+        if not self.model_config_encryption_key:
+            raise RuntimeError("MODEL_CONFIG_ENCRYPTION_KEY is required.")
+        try:
+            Fernet(self.model_config_encryption_key.strip().encode("ascii"))
+        except (binascii.Error, TypeError, ValueError) as error:
+            raise RuntimeError(
+                "MODEL_CONFIG_ENCRYPTION_KEY must be a valid Fernet key."
+            ) from error
         if not self.is_production:
             return
         if self.allow_dev_auth_fallback:

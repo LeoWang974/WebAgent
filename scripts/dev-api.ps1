@@ -34,10 +34,30 @@ if (-not (Test-Path -LiteralPath $python)) {
   throw "Backend venv not found: $python"
 }
 
+if (-not $env:MODEL_CONFIG_ENCRYPTION_KEY) {
+  $secretDirectory = Join-Path $repoRoot "runtime\secrets"
+  $secretFile = Join-Path $secretDirectory "model-config.key"
+  New-Item -ItemType Directory -Force -Path $secretDirectory | Out-Null
+  if (-not (Test-Path -LiteralPath $secretFile)) {
+    $generatedKey = & $python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode('ascii'))"
+    if ($LASTEXITCODE -ne 0 -or -not $generatedKey) {
+      throw "Unable to generate the model credential encryption key."
+    }
+    Set-Content -LiteralPath $secretFile -Value $generatedKey.Trim() -Encoding ascii -NoNewline
+  }
+  $env:MODEL_CONFIG_ENCRYPTION_KEY = (Get-Content -LiteralPath $secretFile -Raw).Trim()
+}
+
 Write-Host "Applying database migrations..."
 & $python -m alembic upgrade head
 if ($LASTEXITCODE -ne 0) {
   throw "Database migration failed with exit code $LASTEXITCODE"
+}
+
+Write-Host "Migrating stored model credentials..."
+& $python scripts/migrate_model_secrets.py --apply
+if ($LASTEXITCODE -ne 0) {
+  throw "Model credential migration failed with exit code $LASTEXITCODE"
 }
 
 & $python -m uvicorn app.main:app --host 127.0.0.1 --port $apiPort --log-level info

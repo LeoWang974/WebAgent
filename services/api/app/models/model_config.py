@@ -1,4 +1,4 @@
-from sqlalchemy import ForeignKey, String
+from sqlalchemy import ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -12,6 +12,6 @@ class ModelConfig(IdMixin, TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(120))
     provider: Mapped[str] = mapped_column(String(80))
     base_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
-    encrypted_api_key: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    encrypted_api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_default: Mapped[bool] = mapped_column(default=False)
     is_available: Mapped[bool] = mapped_column(default=True)

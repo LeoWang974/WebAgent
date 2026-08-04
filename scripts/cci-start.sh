@@ -7,6 +7,7 @@ LOG_DIR="$ROOT_DIR/logs"
 RUN_DIR="$ROOT_DIR/run"
 PYTHON_BIN="$ROOT_DIR/runtime/conda-webagent/bin/python"
 AGENT_ENV="$ROOT_DIR/secrets/agent-pack.env"
+MODEL_SECRET_KEY_FILE="$ROOT_DIR/secrets/model-config.key"
 AGENT_BIN_DIR="$ROOT_DIR/runtime/agent-home/.local/bin"
 AGENT_HOME_DIR="$ROOT_DIR/runtime/agent-home"
 HERMES_NODE_DIR="$ROOT_DIR/runtime/agent-home/.hermes/node/bin"
@@ -37,6 +38,19 @@ if [ -f "$AGENT_ENV" ]; then
   # shellcheck disable=SC1090
   . "$AGENT_ENV"
   set +a
+fi
+
+if [ -z "${MODEL_CONFIG_ENCRYPTION_KEY:-}" ]; then
+  mkdir -p "$(dirname "$MODEL_SECRET_KEY_FILE")"
+  if [ ! -f "$MODEL_SECRET_KEY_FILE" ]; then
+    umask 077
+    "$PYTHON_BIN" -c \
+      'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode("ascii"))' \
+      > "$MODEL_SECRET_KEY_FILE"
+    chmod 600 "$MODEL_SECRET_KEY_FILE"
+  fi
+  MODEL_CONFIG_ENCRYPTION_KEY="$(tr -d '\r\n' < "$MODEL_SECRET_KEY_FILE")"
+  export MODEL_CONFIG_ENCRYPTION_KEY
 fi
 
 export PATH="$AGENT_BIN_DIR:$HERMES_NODE_DIR:$PATH"
@@ -142,6 +156,16 @@ echo "Applying database migrations..."
   "$PYTHON_BIN" -m alembic upgrade head
 ) >> "$LOG_DIR/webagent-api.log" 2>&1 || {
   echo "Database migration failed. See $LOG_DIR/webagent-api.log." >&2
+  tail -n 80 "$LOG_DIR/webagent-api.log" >&2 || true
+  exit 1
+}
+
+echo "Migrating stored model credentials..." >> "$LOG_DIR/webagent-api.log"
+(
+  cd "$REPO_DIR/services/api"
+  "$PYTHON_BIN" scripts/migrate_model_secrets.py --apply
+) >> "$LOG_DIR/webagent-api.log" 2>&1 || {
+  echo "Model credential migration failed. See $LOG_DIR/webagent-api.log." >&2
   tail -n 80 "$LOG_DIR/webagent-api.log" >&2 || true
   exit 1
 }

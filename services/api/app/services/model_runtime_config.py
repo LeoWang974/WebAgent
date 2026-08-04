@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models import AgentRun, ModelConfig, User
+from app.services.model_secret_encryption import decrypt_model_secret, encrypt_model_secret
 
 ADAPTER_MODEL_ALIASES = {"hermes", "openclaw", "sensenova", "model_hermes", "model_openclaw"}
 
@@ -33,12 +34,24 @@ class ModelRuntimeConfig:
             "model_provider": self.provider,
             "model_name": self.model_name,
             "model_base_url": self.base_url,
-            "model_api_key_snapshot": self.api_key,
+            "model_api_key_snapshot": encrypt_model_secret(self.api_key),
         }
 
     def env_values(self) -> dict[str, str | None]:
         values: dict[str, str | None] = {
             "SERPER_API_KEY": environ.get("SERPER_API_KEY"),
+            "DEEPSEEK_API_KEY": None,
+            "GEMINI_API_KEY": None,
+            "GEMINI_BASE_URL": None,
+            "GOOGLE_API_KEY": None,
+            "OPENAI_API_KEY": None,
+            "OPENAI_BASE_URL": None,
+            "SENSENOVA_API_KEY": None,
+            "SENSENOVA_BASE_URL": None,
+            "SN_API_KEY": None,
+            "SN_BASE_URL": None,
+            "SN_CHAT_API_KEY": None,
+            "SN_TEXT_API_KEY": None,
         }
         provider = self.provider.lower()
         if provider == "sensenova":
@@ -65,6 +78,8 @@ class ModelRuntimeConfig:
                     "OPENAI_BASE_URL": self.base_url,
                 }
             )
+            if provider == "deepseek":
+                values["DEEPSEEK_API_KEY"] = self.api_key
         elif provider == "gemini":
             values.update(
                 {
@@ -166,7 +181,7 @@ def model_runtime_config_from_model(model: ModelConfig) -> ModelRuntimeConfig:
         provider=provider,
         model_name=model_name,
         base_url=model.base_url or _default_base_url(provider),
-        api_key=model.encrypted_api_key or _default_api_key(provider),
+        api_key=decrypt_model_secret(model.encrypted_api_key) or _default_api_key(provider),
     )
 
 
@@ -179,7 +194,7 @@ def model_runtime_config_from_run(run: AgentRun) -> ModelRuntimeConfig:
         provider=provider,
         model_name=run.model_name or settings.sensenova_default_model,
         base_url=run.model_base_url or _default_base_url(provider),
-        api_key=run.model_api_key_snapshot or _default_api_key(provider),
+        api_key=decrypt_model_secret(run.model_api_key_snapshot) or _default_api_key(provider),
     )
 
 

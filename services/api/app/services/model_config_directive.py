@@ -7,12 +7,29 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.routes.settings import is_runtime_adapter_model
 from app.models import ModelConfig
 from app.services.model_runtime_config import ADAPTER_MODEL_ALIASES
+from app.services.model_secret_encryption import encrypt_model_secret
 
 MODEL_CONFIG_DIRECTIVE_RE = re.compile(
     r"(?:~?/\.hermes/config\.yaml|model:\s*)",
     re.IGNORECASE,
 )
 PLACEHOLDER_API_KEYS = {"sk-xxx", "sk-test", "sk-smoke", "xxx", "your-api-key"}
+
+
+def redact_model_config_directive(content: str) -> str:
+    redacted_lines: list[str] = []
+    for raw_line in content.splitlines():
+        if ":" not in raw_line:
+            redacted_lines.append(raw_line)
+            continue
+        key, _value = raw_line.split(":", 1)
+        normalized_key = key.strip().lower().replace("-", "_")
+        if normalized_key == "api_key":
+            indentation = raw_line[: len(raw_line) - len(raw_line.lstrip())]
+            redacted_lines.append(f"{indentation}api_key: [redacted]")
+        else:
+            redacted_lines.append(raw_line)
+    return "\n".join(redacted_lines)
 
 
 def parse_model_config_directive(content: str) -> dict[str, str] | None:
@@ -98,7 +115,7 @@ async def apply_model_config_directive(
     model.name = values["default"]
     model.provider = values.get("provider", "custom")
     model.base_url = values["base_url"]
-    model.encrypted_api_key = values["api_key"]
+    model.encrypted_api_key = encrypt_model_secret(values["api_key"])
     model.is_default = True
     model.is_available = True
 

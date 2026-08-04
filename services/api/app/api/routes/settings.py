@@ -9,6 +9,7 @@ from app import schemas
 from app.api.dependencies import CurrentUser, DbSession
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models import AgentRun, ModelConfig, SkillConfig, SkillVersion, User, UserSettings
+from app.services.model_secret_encryption import encrypt_model_secret, mask_model_secret
 from app.services.persistence import (
     get_user_by_username,
     normalize_email,
@@ -93,11 +94,7 @@ DEFAULT_SKILLS = [
 
 
 def mask_api_key(value: str | None) -> str | None:
-    if not value:
-        return None
-    if len(value) <= 8:
-        return "****"
-    return f"{value[:4]}****{value[-4:]}"
+    return mask_model_secret(value)
 
 
 def get_input_value(input_data: dict[str, Any], camel_key: str, snake_key: str, default=None):
@@ -427,7 +424,7 @@ async def add_model(
     model = ModelConfig(
         user_id=current_user.id,
         base_url=get_input_value(input_data, "baseUrl", "base_url"),
-        encrypted_api_key=api_key,
+        encrypted_api_key=encrypt_model_secret(api_key),
         is_available=True,
         name=get_model_name_input(input_data, "Custom model"),
         provider=input_data.get("provider", "custom"),
@@ -452,7 +449,7 @@ async def update_model(
     model.base_url = get_input_value(input_data, "baseUrl", "base_url", model.base_url)
     api_key = get_input_value(input_data, "apiKey", "api_key")
     if api_key:
-        model.encrypted_api_key = api_key
+        model.encrypted_api_key = encrypt_model_secret(api_key)
     await db.commit()
     await db.refresh(model)
     return to_model_schema(model)

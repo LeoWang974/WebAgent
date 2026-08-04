@@ -31,7 +31,10 @@ from app.services.agent_runs import (
 )
 from app.services.model_runtime_config import model_runtime_config_builder
 from app.services.persistence import persist_message, to_artifact, to_message, to_session
-from app.services.runtime_environment import build_user_runtime_context
+from app.services.runtime_environment import (
+    build_user_runtime_context,
+    scrub_runtime_credentials,
+)
 from app.services.session_artifacts import artifact_display_priority, refresh_conversation
 from app.services.stage_bubble_filter import should_suppress_stage_bubble
 from app.services.stream_protocol import runtime_diagnostics
@@ -184,6 +187,7 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
     artifact_discovery_summary: dict[str, object] = {}
     adapter = None
     adapter_capacity_lease = None
+    user_runtime_context = None
     run_started_monotonic = asyncio.get_running_loop().time()
     model_runtime_config = model_runtime_config_builder.build_for_run(run)
     requested_runtime_adapter = current_adapter_key in {"hermes", "openclaw"}
@@ -623,6 +627,8 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
     finally:
         if adapter_capacity_lease is not None:
             await adapter_capacity_lease.__aexit__(None, None, None)
+        if user_runtime_context is not None:
+            scrub_runtime_credentials(user_runtime_context)
 
 
 async def _complete_run(

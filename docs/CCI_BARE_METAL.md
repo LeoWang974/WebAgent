@@ -21,6 +21,7 @@ Expected layout:
   logs/
   run/
   secrets/agent-pack.env
+  secrets/model-config.key       # generated once by cci-start.sh, mode 0600
 ```
 
 Override the root with:
@@ -75,6 +76,11 @@ BACKEND_CORS_ORIGINS=http://127.0.0.1:3000,http://localhost:3000
 ```
 
 Do not commit real keys.
+
+`cci-start.sh` creates and reuses `secrets/model-config.key` when
+`MODEL_CONFIG_ENCRYPTION_KEY` is not already exported. Back up this file outside
+the repository; it is required to decrypt user model credentials and historical
+Agent Run snapshots. See `docs/MODEL_SECRET_MANAGEMENT.md` before rotation.
 
 ## Start, Status, Stop
 

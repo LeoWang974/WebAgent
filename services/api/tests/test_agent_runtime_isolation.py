@@ -8,6 +8,7 @@ from app.services.runtime_environment import (
     build_user_runtime_context,
     path_from_runtime_setting,
     safe_runtime_segment,
+    scrub_runtime_credentials,
 )
 
 
@@ -76,7 +77,11 @@ def test_build_user_runtime_context_uses_run_model_snapshot(monkeypatch, tmp_pat
     hermes_home = tmp_path / "base-hermes"
     hermes_home.mkdir(parents=True)
     (hermes_home / ".env").write_text(
-        "OPENAI_API_KEY=global-key\nOPENAI_BASE_URL=https://global.example/v1\n",
+        (
+            "OPENAI_API_KEY=global-key\n"
+            "OPENAI_BASE_URL=https://global.example/v1\n"
+            "GEMINI_API_KEY=stale-gemini-key\n"
+        ),
         encoding="utf-8",
     )
     openclaw_home = tmp_path / "home"
@@ -116,11 +121,18 @@ def test_build_user_runtime_context_uses_run_model_snapshot(monkeypatch, tmp_pat
     assert "OPENAI_API_KEY=user-deepseek-key" in hermes_env
     assert "OPENAI_BASE_URL=https://api.deepseek.com/v1" in hermes_env
     assert "OPENAI_API_KEY=global-key" not in hermes_env
+    assert "GEMINI_API_KEY=stale-gemini-key" not in hermes_env
     hermes_config = (context.hermes_home / "config.yaml").read_text(encoding="utf-8")
     assert 'default: "deepseek-chat"' in hermes_config
     assert 'base_url: "https://api.deepseek.com/v1"' in hermes_config
     openclaw_env = (context.openclaw_home / ".openclaw" / ".env").read_text(encoding="utf-8")
     assert "OPENAI_API_KEY=user-deepseek-key" in openclaw_env
+
+    scrub_runtime_credentials(context)
+
+    assert not (context.hermes_home / ".env").exists()
+    assert not (context.openclaw_home / ".openclaw" / ".env").exists()
+    assert not (context.openclaw_home / ".openclaw" / "openclaw.json").exists()
 
 
 def test_adapter_lock_scope_respects_configured_scope(monkeypatch):

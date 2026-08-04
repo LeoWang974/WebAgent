@@ -56,6 +56,9 @@ Default URLs:
 - Web app: `http://localhost:3002/app`
 
 The dev scripts stop stale listeners on their fixed ports before starting. Close the spawned PowerShell window or press `Ctrl+C` to stop a service.
+`scripts/dev-api.ps1` also creates a persistent ignored key at
+`runtime/secrets/model-config.key`; direct `uvicorn` startup must provide
+`MODEL_CONFIG_ENCRYPTION_KEY` explicitly.
 
 ## Tests And Build
 
@@ -134,6 +137,10 @@ bash scripts/cci-stop.sh
 
 Detailed CCI bare-metal runtime, environment, log, and troubleshooting notes live in
 [`docs/CCI_BARE_METAL.md`](docs/CCI_BARE_METAL.md).
+
+User model API keys and Agent Run model snapshots are encrypted at rest. Read
+[`docs/MODEL_SECRET_MANAGEMENT.md`](docs/MODEL_SECRET_MANAGEMENT.md) before
+migrating legacy credentials or rotating encryption keys.
 
 The Windows PowerShell scripts remain local development helpers, not Linux
 service runners:

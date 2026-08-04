@@ -27,10 +27,12 @@ NEXT_PUBLIC_API_ADAPTER=fastapi
 ENVIRONMENT=production
 ALLOW_DEV_AUTH_FALLBACK=false
 JWT_SECRET_KEY=<at least 32 random characters>
+MODEL_CONFIG_ENCRYPTION_KEY=<fernet key>
 ```
 
-The API refuses to start in production if `ALLOW_DEV_AUTH_FALLBACK=true` or the
-JWT secret is still a development placeholder.
+The API refuses to start in production if development authentication is enabled,
+the JWT secret is unsafe, or the model credential encryption key is missing or
+invalid. Follow `docs/MODEL_SECRET_MANAGEMENT.md` for migration and rotation.
 
 Do not run `services/api/scripts/seed_local_users.py` in production. The
 `test/test` and `admin/admin` accounts created by that script are local
@@ -44,6 +46,7 @@ python -m venv .venv
 source .venv/bin/activate
 python -m pip install -e ".[dev]"
 alembic upgrade head
+python scripts/migrate_model_secrets.py --apply
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8010
 ```
 

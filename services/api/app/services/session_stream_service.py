@@ -26,6 +26,7 @@ from app.services.artifact_discovery import (
 from app.services.model_config_directive import (
     apply_model_config_directive,
     parse_model_config_directive,
+    redact_model_config_directive,
 )
 from app.services.model_runtime_config import model_runtime_config_builder
 from app.services.persistence import (
@@ -36,7 +37,10 @@ from app.services.persistence import (
     to_session,
 )
 from app.services.queued_stream_service import stream_queued_agent_run
-from app.services.runtime_environment import build_user_runtime_context
+from app.services.runtime_environment import (
+    build_user_runtime_context,
+    scrub_runtime_credentials,
+)
 from app.services.session_artifacts import (
     artifact_display_priority,
     is_debug_artifact,
@@ -58,7 +62,8 @@ async def stream_session_message_response(
     await get_conversation_or_404(db, session_id, current_user, require_write=True)
     resolved_skill_key = get_explicit_skill_key(input_data.skill_key)
     requested_runtime_adapter = input_data.adapter_key in {"hermes", "openclaw"}
-    if settings.agent_run_queue_enabled and (
+    model_config_values = parse_model_config_directive(input_data.content)
+    if model_config_values is None and settings.agent_run_queue_enabled and (
         resolved_skill_key is not None or requested_runtime_adapter
     ):
         return StreamingResponse(
@@ -69,7 +74,12 @@ async def stream_session_message_response(
 
     async def event_stream():
         run_started_at = datetime.now()
-        user_message = await persist_message(db, session_id, "user", input_data.content)
+        persisted_user_content = (
+            redact_model_config_directive(input_data.content)
+            if model_config_values is not None
+            else input_data.content
+        )
+        user_message = await persist_message(db, session_id, "user", persisted_user_content)
         yield sse("user_message", to_message(user_message).model_dump(by_alias=True))
 
         assistant_messages: list[Message] = []
@@ -81,6 +91,7 @@ async def stream_session_message_response(
         last_stage_bubble_key: str | None = None
         artifact_discovery_summary: dict[str, object] = {}
         short_chat_fast_closed = False
+        user_runtime_context = None
         run_started_monotonic = asyncio.get_running_loop().time()
 
         try:
@@ -96,7 +107,6 @@ async def stream_session_message_response(
                 "hermes",
                 "openclaw",
             }
-            model_config_values = parse_model_config_directive(input_data.content)
             if model_config_values is not None:
                 model = await apply_model_config_directive(
                     db,
@@ -247,23 +257,25 @@ async def stream_session_message_response(
                 current_user,
                 input_data.model_id,
             )
-            adapter_key, adapter = await resolve_adapter_for_model(
-                db,
-                current_user,
-                input_data.model_id,
-                adapter_key=input_data.adapter_key,
-                conversation_id=session_id,
-                model_runtime_config=model_runtime_config,
-            )
             run = await create_db_agent_run(
                 db,
                 session_id,
                 title=resolved_skill_key or "Agent Run",
                 status="running",
                 progress=5,
-                adapter_key=adapter_key,
+                adapter_key=input_data.adapter_key,
                 model_runtime_config=model_runtime_config,
             )
+            adapter_key, adapter = await resolve_adapter_for_model(
+                db,
+                current_user,
+                input_data.model_id,
+                adapter_key=input_data.adapter_key,
+                conversation_id=session_id,
+                run_id=run.id,
+                model_runtime_config=model_runtime_config,
+            )
+            run.adapter_key = adapter_key
             yield sse(
                 "run_started",
                 {
@@ -880,6 +892,8 @@ async def stream_session_message_response(
         finally:
             if adapter_capacity_lease is not None:
                 await adapter_capacity_lease.__aexit__(None, None, None)
+            if user_runtime_context is not None:
+                scrub_runtime_credentials(user_runtime_context)
 
     return StreamingResponse(
         event_stream(),

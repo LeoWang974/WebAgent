@@ -1,9 +1,16 @@
+import os
 from collections.abc import AsyncGenerator
 
 import pytest
 import pytest_asyncio
+from cryptography.fernet import Fernet
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+os.environ.setdefault(
+    "MODEL_CONFIG_ENCRYPTION_KEY",
+    Fernet.generate_key().decode("ascii"),
+)
 
 from app.core.config import settings
 from app.db.base import Base
@@ -11,6 +18,16 @@ from app.db.session import get_db
 from app.main import create_app
 from app.models import User
 from app.services.persistence import ensure_user
+
+
+@pytest.fixture(autouse=True)
+def model_secret_encryption_key(monkeypatch):
+    monkeypatch.setattr(
+        settings,
+        "model_config_encryption_key",
+        Fernet.generate_key().decode("ascii"),
+    )
+    monkeypatch.setattr(settings, "model_config_encryption_previous_keys", "")
 
 
 @pytest.fixture

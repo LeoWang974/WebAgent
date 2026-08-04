@@ -267,6 +267,8 @@ async def test_model_config_accepts_separate_runtime_model_name(
     async with db_sessionmaker() as db:
         model = await db.get(ModelConfig, payload["id"])
         assert model is not None
+        assert model.encrypted_api_key.startswith("enc:v1:")
+        assert "user-key" not in model.encrypted_api_key
         runtime_config = model_runtime_config_from_model(model)
 
     assert runtime_config.model_name == "sensenova-6.7-flash-lite"

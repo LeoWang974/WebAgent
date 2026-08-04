@@ -1,7 +1,10 @@
 import pytest
 from fastapi import HTTPException
 
-from app.services.model_config_directive import parse_model_config_directive
+from app.services.model_config_directive import (
+    parse_model_config_directive,
+    redact_model_config_directive,
+)
 from app.services.session_message_service import get_explicit_skill_key
 
 
@@ -22,7 +25,7 @@ def test_parse_model_config_directive_supports_hermes_yaml_block():
           default: bailian/deepseek-v4-pro
           provider: custom
           base_url: https://tokenhub.sensetime.com/v1
-          api_key: sk-valid-local-test-key
+          api_key: local-model-secret
         """
     )
 
@@ -30,7 +33,7 @@ def test_parse_model_config_directive_supports_hermes_yaml_block():
         "default": "bailian/deepseek-v4-pro",
         "provider": "custom",
         "base_url": "https://tokenhub.sensetime.com/v1",
-        "api_key": "sk-valid-local-test-key",
+        "api_key": "local-model-secret",
     }
 
 
@@ -49,3 +52,16 @@ def test_parse_model_config_directive_rejects_placeholder_api_key():
               api_key: sk-xxx
             """
         )
+
+
+def test_redact_model_config_directive_removes_api_key_value():
+    content = """model:
+  default: deepseek-chat
+  base_url: https://example.com/v1
+  api_key: sensitive-test-value
+"""
+
+    redacted = redact_model_config_directive(content)
+
+    assert "sensitive-test-value" not in redacted
+    assert "  api_key: [redacted]" in redacted

@@ -8,6 +8,7 @@ from app.services.model_runtime_config import (
     model_runtime_config_builder,
     model_runtime_config_from_model,
 )
+from app.services.model_secret_encryption import decrypt_model_secret
 
 
 def test_runtime_selector_model_uses_default_sensenova_snapshot(monkeypatch):
@@ -49,13 +50,13 @@ def test_custom_openai_compatible_model_uses_user_snapshot():
         )
     )
 
-    assert config.snapshot() == {
-        "model_config_id": "model-custom",
-        "model_provider": "deepseek",
-        "model_name": "deepseek-chat",
-        "model_base_url": "https://api.deepseek.com/v1",
-        "model_api_key_snapshot": "user-key",
-    }
+    snapshot = config.snapshot()
+    assert snapshot["model_config_id"] == "model-custom"
+    assert snapshot["model_provider"] == "deepseek"
+    assert snapshot["model_name"] == "deepseek-chat"
+    assert snapshot["model_base_url"] == "https://api.deepseek.com/v1"
+    assert snapshot["model_api_key_snapshot"].startswith("enc:v1:")
+    assert decrypt_model_secret(snapshot["model_api_key_snapshot"]) == "user-key"
     assert config.env_values()["OPENAI_API_KEY"] == "user-key"
     assert config.env_values()["OPENAI_BASE_URL"] == "https://api.deepseek.com/v1"
 

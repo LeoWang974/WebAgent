@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 import shutil
 from dataclasses import dataclass
@@ -10,6 +11,9 @@ from app.core.config import settings
 from app.models import User
 from app.services.model_runtime_config import ModelRuntimeConfig
 from app.services.skills_updater import default_openclaw_skills_dir
+
+logger = logging.getLogger(__name__)
+MANAGED_ENV_COMMENT = "# Managed by WebAgent runtime context."
 
 
 def safe_runtime_segment(value: str, fallback: str = "user") -> str:
@@ -64,6 +68,16 @@ def runtime_run_dir(
     return path
 
 
+def _restrict_private_file(path: Path) -> None:
+    if not path.exists() or not path.is_file():
+        return
+    try:
+        path.chmod(0o600)
+    except OSError:
+        # Windows ACLs are inherited from the runtime directory; chmod is best-effort there.
+        pass
+
+
 def _copy_skills_once(source: Path, destination: Path) -> Path:
     if destination.exists():
         return destination
@@ -102,6 +116,7 @@ def _sync_openclaw_config(source_home: Path, destination_home: Path) -> None:
         destination_home / ".openclaw" / ".env",
         _openclaw_gateway_env_values(destination_home / ".openclaw" / "openclaw.json"),
     )
+    _restrict_private_file(destination_home / ".openclaw" / "openclaw.json")
 
 
 def _openclaw_gateway_env_values(config_path: Path) -> dict[str, str | None]:
@@ -150,9 +165,10 @@ def _read_env_file(path: Path) -> dict[str, str]:
 
 
 def _write_runtime_env_values(path: Path, values: dict[str, str | None]) -> None:
-    managed_keys = {key for key, value in values.items() if value}
+    managed_keys = set(values)
     if not managed_keys:
         return
+    populated_values = {key: value for key, value in values.items() if value}
 
     existing_lines = (
         path.read_text(encoding="utf-8", errors="ignore").splitlines()
@@ -162,6 +178,8 @@ def _write_runtime_env_values(path: Path, values: dict[str, str | None]) -> None
     preserved_lines: list[str] = []
     for raw_line in existing_lines:
         line = raw_line.strip()
+        if line == MANAGED_ENV_COMMENT:
+            continue
         if not line or line.startswith("#") or "=" not in line:
             preserved_lines.append(raw_line)
             continue
@@ -171,13 +189,17 @@ def _write_runtime_env_values(path: Path, values: dict[str, str | None]) -> None
 
     path.parent.mkdir(parents=True, exist_ok=True)
     output_lines = preserved_lines
-    if output_lines and output_lines[-1].strip():
-        output_lines.append("")
-    output_lines.append("# Managed by WebAgent runtime context.")
-    for key in sorted(managed_keys):
-        value = str(values[key]).replace("\n", "").replace("\r", "")
-        output_lines.append(f"{key}={value}")
+    while output_lines and not output_lines[-1].strip():
+        output_lines.pop()
+    if populated_values:
+        if output_lines and output_lines[-1].strip():
+            output_lines.append("")
+        output_lines.append(MANAGED_ENV_COMMENT)
+        for key in sorted(populated_values):
+            value = str(populated_values[key]).replace("\n", "").replace("\r", "")
+            output_lines.append(f"{key}={value}")
     path.write_text("\n".join(output_lines) + "\n", encoding="utf-8")
+    _restrict_private_file(path)
 
 
 def _sync_runtime_env(
@@ -187,6 +209,13 @@ def _sync_runtime_env(
 ) -> None:
     if model_runtime_config is not None:
         common_values = model_runtime_config.env_values()
+        existing_hermes_env = _read_env_file(hermes_env_path)
+        existing_openclaw_env = _read_env_file(openclaw_env_path)
+        common_values["SERPER_API_KEY"] = (
+            common_values.get("SERPER_API_KEY")
+            or existing_hermes_env.get("SERPER_API_KEY")
+            or existing_openclaw_env.get("SERPER_API_KEY")
+        )
         _write_runtime_env_values(hermes_env_path, common_values)
         _write_runtime_env_values(openclaw_env_path, common_values)
         return
@@ -208,7 +237,15 @@ def _sync_runtime_env(
         "SENSENOVA_BASE_URL": sensenova_base_url,
         "OPENAI_API_KEY": openai_api_key,
         "OPENAI_BASE_URL": openai_base_url,
+        "DEEPSEEK_API_KEY": None,
+        "GEMINI_API_KEY": None,
+        "GEMINI_BASE_URL": None,
+        "GOOGLE_API_KEY": None,
         "SERPER_API_KEY": serper_api_key,
+        "SN_API_KEY": sensenova_api_key,
+        "SN_BASE_URL": sensenova_base_url,
+        "SN_CHAT_API_KEY": sensenova_api_key,
+        "SN_TEXT_API_KEY": sensenova_api_key,
     }
     _write_runtime_env_values(hermes_env_path, common_values)
     _write_runtime_env_values(openclaw_env_path, common_values)
@@ -224,6 +261,7 @@ def _ensure_hermes_config(
     if model_runtime_config is not None:
         destination_config.parent.mkdir(parents=True, exist_ok=True)
         destination_config.write_text(model_runtime_config.hermes_config_yaml(), encoding="utf-8")
+        _restrict_private_file(destination_config)
         return
 
     if source_config.exists() and source_config.is_file():
@@ -249,6 +287,7 @@ def _ensure_hermes_config(
         ),
         encoding="utf-8",
     )
+    _restrict_private_file(destination_config)
 
 
 def shell_path(path: Path) -> str:
@@ -289,6 +328,18 @@ class UserRuntimeContext:
         return shell_path(self.openclaw_skills_dir)
 
 
+def scrub_runtime_credentials(context: UserRuntimeContext) -> None:
+    for path in (
+        context.hermes_home / ".env",
+        context.openclaw_home / ".openclaw" / ".env",
+        context.openclaw_home / ".openclaw" / "openclaw.json",
+    ):
+        try:
+            path.unlink(missing_ok=True)
+        except OSError as error:
+            logger.warning("Unable to remove runtime credential file %s: %s", path, error)
+
+
 def build_user_runtime_context(
     user: User,
     conversation_id: str | None = None,
@@ -309,6 +360,8 @@ def build_user_runtime_context(
         openclaw_home / ".openclaw" / ".env",
         model_runtime_config,
     )
+    _restrict_private_file(hermes_home / ".env")
+    _restrict_private_file(openclaw_home / ".openclaw" / ".env")
 
     hermes_source = (
         Path(settings.hermes_skills_dir)
