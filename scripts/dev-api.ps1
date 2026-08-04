@@ -34,4 +34,10 @@ if (-not (Test-Path -LiteralPath $python)) {
   throw "Backend venv not found: $python"
 }
 
+Write-Host "Applying database migrations..."
+& $python -m alembic upgrade head
+if ($LASTEXITCODE -ne 0) {
+  throw "Database migration failed with exit code $LASTEXITCODE"
+}
+
 & $python -m uvicorn app.main:app --host 127.0.0.1 --port $apiPort --log-level info

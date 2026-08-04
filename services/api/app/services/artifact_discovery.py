@@ -69,37 +69,54 @@ async def discover_artifacts_with_retry(
     explicit_artifacts: list[object] | None = None,
 ) -> list[schemas.Artifact]:
     for attempt in range(5):
-        discovered_artifacts = create_artifacts_from_refs(
+        discovered_artifacts = await asyncio.to_thread(
+            create_artifacts_from_refs,
             session_id,
             explicit_artifacts or [],
             run_id,
         )
         if not discovered_artifacts:
-            discovered_artifacts = create_artifacts_from_paths(
+            discovered_artifacts = await asyncio.to_thread(
+                create_artifacts_from_paths,
                 session_id,
                 explicit_artifact_paths,
                 run_id,
             )
         if discovered_artifacts:
-            related_paths = discover_related_artifact_paths(
+            related_paths = await asyncio.to_thread(
+                discover_related_artifact_paths,
                 explicit_artifact_paths,
                 since,
                 source_dirs=explicit_artifact_source_dirs(explicit_artifacts),
             )
             if related_paths:
                 discovered_artifacts.extend(
-                    create_artifacts_from_paths(session_id, related_paths, run_id)
+                    await asyncio.to_thread(
+                        create_artifacts_from_paths,
+                        session_id,
+                        related_paths,
+                        run_id,
+                    )
                 )
                 discovered_artifacts = dedupe_discovered_artifacts(discovered_artifacts)
         if not discovered_artifacts:
-            session_artifact_paths = discover_artifact_paths_from_hermes_sessions(since)
-            discovered_artifacts = create_artifacts_from_paths(
+            session_artifact_paths = await asyncio.to_thread(
+                discover_artifact_paths_from_hermes_sessions,
+                since,
+            )
+            discovered_artifacts = await asyncio.to_thread(
+                create_artifacts_from_paths,
                 session_id,
                 session_artifact_paths,
                 run_id,
             )
         if not discovered_artifacts and run_id is None:
-            discovered_artifacts = discover_artifacts_since(session_id, since, run_id)
+            discovered_artifacts = await asyncio.to_thread(
+                discover_artifacts_since,
+                session_id,
+                since,
+                run_id,
+            )
         if discovered_artifacts or attempt == 4:
             return dedupe_discovered_artifacts(discovered_artifacts)
         await asyncio.sleep(2)
@@ -656,7 +673,8 @@ def create_markdown_artifact_from_content(
     has_markdown_signal = "#" in normalized or "\n\n" in normalized
     has_saved_report_signal = bool(
         re.search(
-            r"(?i)(saved as|report saved|generated|created|\.md|markdown|报告已生成|报告已经完成|报告已完成)",
+            r"(?i)(saved as|report saved|generated|created|\.md|markdown|"
+            r"报告已生成|报告已经完成|报告已完成)",
             normalized,
         )
     )
@@ -715,7 +733,8 @@ def create_html_artifact_from_content(
             "  <style>\n"
             "    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; "
             "line-height: 1.7; margin: 0; padding: 32px; color: #172033; background: #f7f8fb; }\n"
-            "    main { max-width: 920px; margin: 0 auto; background: #fff; border: 1px solid #dfe5ef; "
+            "    main { max-width: 920px; margin: 0 auto; background: #fff; "
+            "border: 1px solid #dfe5ef; "
             "border-radius: 8px; padding: 28px; }\n"
             "    pre { white-space: pre-wrap; word-break: break-word; font: inherit; margin: 0; }\n"
             "  </style>\n"

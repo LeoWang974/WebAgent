@@ -33,6 +33,58 @@ def parse_sse_events(payload: str) -> list[tuple[str, dict]]:
     return events
 
 
+@pytest.mark.asyncio
+async def test_authentication_does_not_accept_access_token_in_query_string(
+    api_client: AsyncClient,
+    seeded_users: dict[str, User],
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(settings, "allow_dev_auth_fallback", False)
+    token = create_access_token(seeded_users["owner"].id)
+
+    response = await api_client.get(f"/api/sessions?access_token={token}")
+
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_terminal_agent_run_event_stream_returns_and_closes(
+    api_client: AsyncClient,
+    auth_headers: dict[str, dict[str, str]],
+    db_sessionmaker: async_sessionmaker[AsyncSession],
+):
+    session_response = await api_client.post(
+        "/api/sessions",
+        json={"title": "Terminal event stream"},
+        headers=auth_headers["owner"],
+    )
+    session_id = session_response.json()["id"]
+    run_response = await api_client.post(
+        "/api/agent-runs",
+        json={"content": "hello", "session_id": session_id},
+        headers=auth_headers["owner"],
+    )
+    assert run_response.status_code == 200
+    run_id = run_response.json()["id"]
+
+    async with db_sessionmaker() as db:
+        run = await db.get(AgentRun, run_id)
+        assert run is not None
+        run.status = "completed"
+        run.progress = 100
+        await db.commit()
+
+    response = await api_client.get(
+        f"/api/agent-runs/{run_id}/events",
+        headers=auth_headers["owner"],
+    )
+
+    assert response.status_code == 200
+    events = parse_sse_events(response.text)
+    assert events
+    assert all(payload["runId"] == run_id for _, payload in events)
+
+
 class FakeStreamingAdapter:
     def __init__(self, artifact_path: str):
         self.artifact_path = artifact_path
@@ -312,6 +364,13 @@ async def test_session_permissions_and_share_access(
         headers=auth_headers["shared"],
     )
     assert shared_response.status_code == 200
+
+    shared_write_response = await api_client.post(
+        f"/api/sessions/{session_id}/messages",
+        json={"content": "Shared viewers must not change the conversation"},
+        headers=auth_headers["shared"],
+    )
+    assert shared_write_response.status_code == 403
 
     non_owner_delete = await api_client.delete(
         f"/api/sessions/{session_id}",

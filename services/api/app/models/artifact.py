@@ -26,6 +26,7 @@ class Artifact(IdMixin, TimestampMixin, Base):
 class FileAsset(IdMixin, TimestampMixin, Base):
     __tablename__ = "files"
 
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     conversation_id: Mapped[str | None] = mapped_column(
         ForeignKey("conversations.id"), nullable=True
     )

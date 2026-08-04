@@ -55,10 +55,10 @@ interface ChatState {
   applyAgentRunEvent: (event: AgentRunEvent) => void;
   createConversationFolder: (name: string) => Promise<void>;
   createSession: (skillKey?: SkillKey) => Promise<Session | undefined>;
-  deleteArtifact: (artifactId: string) => void;
+  deleteArtifact: (artifactId: string) => Promise<void>;
   deleteConversationFolder: (folderId: string) => Promise<void>;
   deleteModel: (modelId: string) => Promise<void>;
-  deleteSession: (sessionId: string) => void;
+  deleteSession: (sessionId: string) => Promise<boolean>;
   ensureArtifactLoaded: (artifactId: string) => Promise<void>;
   hydrate: () => Promise<void>;
   refreshArtifacts: () => Promise<void>;
@@ -79,7 +79,7 @@ interface ChatState {
   setDefaultSkill: (skillKey: SkillKey) => Promise<void>;
   stopActiveRun: (runId?: string) => void;
   testModelConnection: (modelId: string) => Promise<void>;
-  toggleSessionPinned: (sessionId: string) => void;
+  toggleSessionPinned: (sessionId: string) => Promise<void>;
   toggleSkillEnabled: (skillKey: SkillKey) => Promise<void>;
   unshareSession: (sessionId: string, userId: string) => Promise<void>;
   updateModel: (modelId: string, input: Partial<ModelConfig>) => Promise<void>;
@@ -90,6 +90,7 @@ let activeRequestAbortController: AbortController | undefined;
 const agentRunUnsubscribers = new Map<string, AgentRunUnsubscribe>();
 
 const agentRunPollers = new Map<string, number>();
+const agentRunPollsInFlight = new Set<string>();
 
 function unsubscribeAgentRun(runId: string) {
   agentRunUnsubscribers.get(runId)?.();
@@ -153,7 +154,17 @@ function startAgentRunPolling(
   };
 
   const poller = window.setInterval(() => {
-    void refresh();
+    if (agentRunPollsInFlight.has(runId)) {
+      return;
+    }
+    agentRunPollsInFlight.add(runId);
+    void refresh()
+      .catch((error) => {
+        useChatStore.setState({
+          error: error instanceof Error ? error.message : "Failed to refresh agent run.",
+        });
+      })
+      .finally(() => agentRunPollsInFlight.delete(runId));
   }, 5000);
   agentRunPollers.set(runId, poller);
 }
@@ -264,10 +275,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set({ error: error instanceof Error ? error.message : "Failed to create folder." });
     }
   },
-  deleteArtifact: (artifactId) => {
-    void webAgentApi.deleteArtifact(artifactId).catch((error) => {
+  deleteArtifact: async (artifactId) => {
+    try {
+      await webAgentApi.deleteArtifact(artifactId);
+    } catch (error) {
       set({ error: error instanceof Error ? error.message : "Failed to delete artifact." });
-    });
+      return;
+    }
 
     set((state) => {
       const artifacts = state.artifacts.filter((artifact) => artifact.id !== artifactId);
@@ -302,10 +316,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set({ error: error instanceof Error ? error.message : "Failed to delete model." });
     }
   },
-  deleteSession: (sessionId) => {
-    void webAgentApi.deleteSession(sessionId).catch((error) => {
+  deleteSession: async (sessionId) => {
+    try {
+      await webAgentApi.deleteSession(sessionId);
+    } catch (error) {
       set({ error: error instanceof Error ? error.message : "Failed to delete session." });
-    });
+      return false;
+    }
 
     set((state) => {
       const sessions = state.sessions.filter((session) => session.id !== sessionId);
@@ -331,6 +348,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         switchingSessionId: state.switchingSessionId === sessionId ? undefined : state.switchingSessionId,
       };
     });
+    return true;
   },
   deleteConversationFolder: async (folderId) => {
     try {
@@ -352,15 +370,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     set({ error: undefined, loading: true });
     try {
-      const [sessions, messages, skills, artifacts, models, folders] = await Promise.all([
-        webAgentApi.listSessions(),
-        webAgentApi.listMessages(),
-        webAgentApi.listSkills(),
-        webAgentApi.listArtifacts(),
-        webAgentApi.listModels(),
-        webAgentApi.listConversationFolders(),
-      ]);
-      const agentRuns = await webAgentApi.listAgentRuns();
+      const [sessions, messages, skills, artifacts, models, folders, agentRuns] =
+        await Promise.all([
+          webAgentApi.listSessions(),
+          webAgentApi.listMessages(),
+          webAgentApi.listSkills(),
+          webAgentApi.listArtifacts(),
+          webAgentApi.listModels(),
+          webAgentApi.listConversationFolders(),
+          webAgentApi.listAgentRuns(),
+        ]);
       const preferredSessionId = get().currentSessionId;
       const currentSessionId = sessions.some((session) => session.id === preferredSessionId)
         ? preferredSessionId
@@ -427,6 +446,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     activeRequestAbortController = undefined;
     agentRunUnsubscribers.forEach((unsubscribe) => unsubscribe());
     agentRunUnsubscribers.clear();
+    agentRunPollers.forEach((poller) => window.clearInterval(poller));
+    agentRunPollers.clear();
+    agentRunPollsInFlight.clear();
 
     set({
       activeAgentRunId: undefined,
@@ -1015,19 +1037,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
     }
   },
-  toggleSessionPinned: (sessionId) => {
+  toggleSessionPinned: async (sessionId) => {
     const session = get().sessions.find((item) => item.id === sessionId);
-    if (session) {
-      void webAgentApi.updateSession(sessionId, { pinned: !session.pinned }).catch((error) => {
-        set({ error: error instanceof Error ? error.message : "Failed to update session." });
-      });
+    if (!session) {
+      return;
     }
 
-    set((state) => ({
-      sessions: state.sessions.map((session) =>
-        session.id === sessionId ? { ...session, pinned: !session.pinned } : session,
-      ),
-    }));
+    try {
+      const updatedSession = await webAgentApi.updateSession(sessionId, {
+        pinned: !session.pinned,
+      });
+      set((state) => ({
+        sessions: state.sessions.map((item) =>
+          item.id === sessionId ? updatedSession : item,
+        ),
+      }));
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : "Failed to update session." });
+    }
   },
   toggleSkillEnabled: async (skillKey) => {
     try {

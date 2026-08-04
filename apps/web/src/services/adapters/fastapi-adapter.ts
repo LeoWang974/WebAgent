@@ -1,5 +1,5 @@
 import { API_BASE_URL, apiClient, getAccessToken } from "../api-client";
-import { parseSseEvents, parseSseJson, splitSseBuffer } from "../sse-parser";
+import { parseSseEvents, splitSseBuffer } from "../sse-parser";
 import type {
   AgentRun,
   AgentRunEvent,
@@ -260,51 +260,87 @@ export const fastApiAdapter: WebAgentApiAdapter = {
   },
   subscribeAgentRun(runId, onEvent) {
     let reconnectTimer: number | undefined;
-    let source: EventSource | undefined;
+    let controller: AbortController | undefined;
     let stopped = false;
 
-    const connect = () => {
-      const token = getAccessToken();
-      const searchParams = new URLSearchParams();
-      if (token) {
-        searchParams.set("access_token", token);
+    const scheduleReconnect = () => {
+      if (!stopped && reconnectTimer === undefined) {
+        reconnectTimer = window.setTimeout(() => {
+          reconnectTimer = undefined;
+          void connect();
+        }, 1500);
       }
-      const query = searchParams.toString();
-      source = new EventSource(
-        `${API_BASE_URL}/api/agent-runs/${runId}/events${query ? `?${query}` : ""}`,
-      );
-
-      source.onmessage = (message) => {
-        const event = parseSseJson<AgentRunEvent>(message.data, "message");
-        if (event) {
-          onEvent(event);
-        }
-      };
-
-      source.addEventListener("agent_run_event", (message) => {
-        const event = parseSseJson<AgentRunEvent>(message.data, "agent_run_event");
-        if (event) {
-          onEvent(event);
-        }
-      });
-
-      source.onerror = () => {
-        source?.close();
-        source = undefined;
-        if (!stopped) {
-          reconnectTimer = window.setTimeout(connect, 1500);
-        }
-      };
     };
 
-    connect();
+    const connect = async () => {
+      const token = getAccessToken();
+      controller = new AbortController();
+      let terminalEventReceived = false;
+
+      const dispatchEvents = (events: ReturnType<typeof parseSseEvents>) => {
+        for (const event of events) {
+          if (event.type !== "agent_run_event") {
+            continue;
+          }
+          const agentRunEvent = event.data as unknown as AgentRunEvent;
+          if (agentRunEvent.runId !== runId || typeof agentRunEvent.status !== "string") {
+            continue;
+          }
+          onEvent(agentRunEvent);
+          terminalEventReceived =
+            terminalEventReceived ||
+            ["cancelled", "completed", "disconnected", "failed"].includes(
+              agentRunEvent.status,
+            );
+        }
+      };
+
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/agent-runs/${runId}/events`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+          signal: controller.signal,
+        });
+        if (!response.ok || !response.body) {
+          throw new Error(`Agent run event stream failed: ${response.status}`);
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (!stopped) {
+          const { done, value } = await reader.read();
+          if (done) {
+            break;
+          }
+          buffer += decoder.decode(value, { stream: true });
+          const { events, remainingBuffer } = splitSseBuffer(buffer);
+          buffer = remainingBuffer;
+          dispatchEvents(events);
+        }
+        if (buffer.trim()) {
+          dispatchEvents(parseSseEvents(buffer));
+        }
+      } catch (error) {
+        if (stopped || (error instanceof DOMException && error.name === "AbortError")) {
+          return;
+        }
+      } finally {
+        controller = undefined;
+      }
+
+      if (!terminalEventReceived) {
+        scheduleReconnect();
+      }
+    };
+
+    void connect();
 
     return () => {
       stopped = true;
       if (reconnectTimer !== undefined) {
         window.clearTimeout(reconnectTimer);
       }
-      source?.close();
+      controller?.abort();
     };
   },
   updateSession(sessionId: string, input: UpdateSessionInput) {

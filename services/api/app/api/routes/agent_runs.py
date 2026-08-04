@@ -171,26 +171,38 @@ async def stream_agent_run_events(
     current_user: CurrentUser,
 ) -> StreamingResponse:
     await get_db_agent_run(db, run_id, current_user)
+    await db.close()
 
     async def event_stream():
         sent_event_ids: set[str] = set()
-        while True:
-            run = await get_db_agent_run(db, run_id, current_user)
-            events = await list_run_events(db, run_id)
-            for event in events:
-                if event.id in sent_event_ids:
-                    continue
-                sent_event_ids.add(event.id)
-                api_event = to_agent_run_event_schema(event, run)
-                event_data = json.dumps(
-                    api_event.model_dump(by_alias=True),
-                    ensure_ascii=False,
-                )
-                yield (f"event: agent_run_event\ndata: {event_data}\n\n")
-            if run.status in TERMINAL_RUN_STATUSES:
-                break
-            yield ": heartbeat\n\n"
-            await asyncio.sleep(settings.agent_run_event_poll_interval_seconds)
+        try:
+            while True:
+                run = await get_db_agent_run(db, run_id, current_user)
+                events = await list_run_events(db, run_id)
+                encoded_events: list[str] = []
+                for event in events:
+                    if event.id in sent_event_ids:
+                        continue
+                    sent_event_ids.add(event.id)
+                    api_event = to_agent_run_event_schema(event, run)
+                    event_data = json.dumps(
+                        api_event.model_dump(by_alias=True),
+                        ensure_ascii=False,
+                    )
+                    encoded_events.append(
+                        f"event: agent_run_event\ndata: {event_data}\n\n"
+                    )
+                is_terminal = run.status in TERMINAL_RUN_STATUSES
+                # Do not retain a database connection while waiting on the client or poll timer.
+                await db.close()
+                for encoded_event in encoded_events:
+                    yield encoded_event
+                if is_terminal:
+                    break
+                yield ": heartbeat\n\n"
+                await asyncio.sleep(settings.agent_run_event_poll_interval_seconds)
+        finally:
+            await db.close()
 
     return StreamingResponse(
         event_stream(),

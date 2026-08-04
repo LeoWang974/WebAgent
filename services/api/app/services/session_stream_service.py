@@ -16,6 +16,7 @@ from app.services.adapter_limiter import acquire_adapter_capacity
 from app.services.agent_run_control import (
     AgentRunCancelled,
     AgentRunTimeout,
+    cancel_adapter_run_safely,
     is_agent_run_cancelled,
 )
 from app.services.artifact_discovery import (
@@ -343,8 +344,7 @@ async def stream_session_message_response(
                     elapsed_seconds = asyncio.get_running_loop().time() - run_started_monotonic
                     overall_remaining = settings.agent_run_overall_timeout_seconds - elapsed_seconds
                     if overall_remaining <= 0:
-                        if hasattr(adapter, "cancel_run"):
-                            await adapter.cancel_run(run.id)
+                        await cancel_adapter_run_safely(adapter, run.id)
                         raise AgentRunTimeout(
                             "overall_timeout",
                             "Agent run exceeded the overall task timeout.",
@@ -367,8 +367,7 @@ async def stream_session_message_response(
                     except StopAsyncIteration:
                         break
                     except TimeoutError as error:
-                        if hasattr(adapter, "cancel_run"):
-                            await adapter.cancel_run(run.id)
+                        await cancel_adapter_run_safely(adapter, run.id)
                         if timeout_type == "overall_timeout":
                             raise AgentRunTimeout(
                                 "overall_timeout",
@@ -543,14 +542,7 @@ async def stream_session_message_response(
                 if hasattr(adapter, "cancel_run"):
 
                     async def cleanup_short_chat_run() -> None:
-                        try:
-                            await adapter.cancel_run(run.id)
-                        except Exception as error:
-                            logger.warning(
-                                "Failed to cleanup short chat adapter run %s: %s",
-                                run.id,
-                                error,
-                            )
+                        await cancel_adapter_run_safely(adapter, run.id)
 
                     asyncio.create_task(cleanup_short_chat_run())
                 return
@@ -605,7 +597,8 @@ async def stream_session_message_response(
                 and not any(artifact.type == "ppt_deck" for artifact in discovered_artifacts)
             ):
                 try:
-                    pptx_artifact = create_pptx_from_html_artifacts(
+                    pptx_artifact = await asyncio.to_thread(
+                        create_pptx_from_html_artifacts,
                         session_id,
                         discovered_artifacts,
                         run.id,
@@ -614,8 +607,7 @@ async def stream_session_message_response(
                     if pptx_artifact is not None:
                         discovered_artifacts.append(pptx_artifact)
                 except subprocess.TimeoutExpired as error:
-                    if hasattr(adapter, "cancel_run"):
-                        await adapter.cancel_run(run.id)
+                    await cancel_adapter_run_safely(adapter, run.id)
                     raise AgentRunTimeout(
                         "ppt_export_timeout",
                         (
@@ -830,8 +822,7 @@ async def stream_session_message_response(
                         ),
                     )
                 else:
-                    if adapter is not None and hasattr(adapter, "cancel_run"):
-                        await adapter.cancel_run(run.id)
+                    await cancel_adapter_run_safely(adapter, run.id)
                     await finish_db_agent_run(
                         db,
                         run,
@@ -845,8 +836,8 @@ async def stream_session_message_response(
             raise
         except Exception as error:
             logger.exception("Agent stream failed")
-            if run is not None and adapter is not None and hasattr(adapter, "cancel_run"):
-                await adapter.cancel_run(run.id)
+            if run is not None:
+                await cancel_adapter_run_safely(adapter, run.id)
             if run is not None:
                 from app.services.agent_runs import finish_db_agent_run, record_db_agent_run_event
 

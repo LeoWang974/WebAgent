@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     agent_run_overall_timeout_seconds: int = 2 * 60 * 60
     agent_run_ppt_export_timeout_seconds: int = 180
     agent_run_event_poll_interval_seconds: float = 1.0
+    upload_max_size_bytes: int = 25 * 1024 * 1024
     agent_run_queue_enabled: bool = False
     agent_run_queue_name: str = "agent-runs"
     short_chat_queue_name: str = "short-chat"

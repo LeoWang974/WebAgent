@@ -1,7 +1,7 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import Depends, Header, HTTPException, Query, status
+from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,7 +17,7 @@ DEFAULT_DEV_EMAIL = "demo@webagent.local"
 
 
 def now_iso() -> str:
-    return datetime.utcnow().isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def normalize_email(email: str) -> str:
@@ -102,9 +102,8 @@ async def get_user_by_id(db: AsyncSession, user_id: str) -> User | None:
 async def get_current_user(
     db: Annotated[AsyncSession, Depends(get_db)],
     authorization: Annotated[str | None, Header()] = None,
-    access_token: Annotated[str | None, Query()] = None,
 ) -> User:
-    token = access_token
+    token = None
     if authorization:
         token = authorization.removeprefix("Bearer").strip()
 
@@ -251,7 +250,9 @@ async def get_conversation_or_404(
         or (conversation.visibility == "shared" and share is not None)
     )
     can_write = conversation.user_id == current_user.id or (
-        conversation.visibility == "shared" and share is not None
+        conversation.visibility == "shared"
+        and share is not None
+        and share.role in {"editor", "writer"}
     )
 
     if require_write and not can_write:

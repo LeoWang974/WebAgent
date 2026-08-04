@@ -179,13 +179,16 @@ export function SessionList() {
           closeSidebarDrawer();
           selectSession(session.id);
         }}
-        onDelete={() => {
+        onDelete={async () => {
           const remainingSessions = filteredSessions.filter((item) => item.id !== session.id);
           const nextSessionId = remainingSessions[0]?.id;
 
+          const deleted = await deleteSession(session.id);
+          if (!deleted) {
+            return;
+          }
           closeArtifactDrawer();
           closeSidebarDrawer();
-          deleteSession(session.id);
 
           if (session.id === currentSessionId) {
             router.push(nextSessionId ? `/app/chat/${nextSessionId}` : "/app");

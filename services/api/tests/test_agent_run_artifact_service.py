@@ -1,5 +1,6 @@
-import pytest
 from pathlib import Path
+
+import pytest
 
 from app import schemas
 from app.core.config import settings
@@ -11,8 +12,7 @@ from app.services.agent_run_artifact_service import (
     source_artifact_types_for_request,
     validate_primary_artifacts,
 )
-from app.services.session_artifacts import organize_artifact_schema
-from app.services.session_artifacts import metadata_path_key
+from app.services.session_artifacts import metadata_path_key, organize_artifact_schema
 
 
 class _Artifact:

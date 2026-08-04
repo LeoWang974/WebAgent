@@ -7,6 +7,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.models import FileAsset
 
 
+@pytest.fixture(autouse=True)
+def isolated_upload_storage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr("app.api.routes.files.upload_storage_root", lambda: tmp_path)
+
+
 @pytest.mark.asyncio
 async def test_file_upload_persists_and_links_to_session(
     api_client: AsyncClient,
@@ -61,3 +66,58 @@ async def test_file_upload_rejects_mismatched_content_type(
 
     assert upload_response.status_code == 400
     assert "does not match file extension" in upload_response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_global_files_are_private_to_the_uploader(
+    api_client: AsyncClient,
+    auth_headers: dict[str, dict[str, str]],
+):
+    upload_response = await api_client.post(
+        "/api/files",
+        files={"file": ("private-note.txt", b"private", "text/plain")},
+        headers=auth_headers["owner"],
+    )
+    assert upload_response.status_code == 200
+
+    owner_response = await api_client.get("/api/files", headers=auth_headers["owner"])
+    stranger_response = await api_client.get("/api/files", headers=auth_headers["stranger"])
+
+    assert [item["id"] for item in owner_response.json()] == [upload_response.json()["id"]]
+    assert stranger_response.json() == []
+
+
+@pytest.mark.asyncio
+async def test_file_upload_sanitizes_client_path(
+    api_client: AsyncClient,
+    auth_headers: dict[str, dict[str, str]],
+    db_sessionmaker: async_sessionmaker[AsyncSession],
+):
+    upload_response = await api_client.post(
+        "/api/files",
+        files={"file": ("../unsafe/note.txt", b"safe", "text/plain")},
+        headers=auth_headers["owner"],
+    )
+    assert upload_response.status_code == 200
+    uploaded = upload_response.json()
+    assert uploaded["filename"] == "note.txt"
+
+    async with db_sessionmaker() as db:
+        file_asset = await db.get(FileAsset, uploaded["id"])
+        assert file_asset is not None
+        assert Path(file_asset.storage_key).name.endswith("-note.txt")
+
+
+@pytest.mark.asyncio
+async def test_file_upload_rejects_oversized_content(
+    api_client: AsyncClient,
+    auth_headers: dict[str, dict[str, str]],
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr("app.api.routes.files.settings.upload_max_size_bytes", 4)
+    upload_response = await api_client.post(
+        "/api/files",
+        files={"file": ("large.txt", b"12345", "text/plain")},
+        headers=auth_headers["owner"],
+    )
+    assert upload_response.status_code == 413

@@ -122,7 +122,7 @@ def test_openclaw_adapter_treats_ppt_html_generator_failure_as_recoverable():
 def test_openclaw_adapter_does_not_match_old_failed_task_by_skill_only():
     adapter = OpenClawAdapter()
     input_data = AgentRunCreate(
-        content="璇蜂娇鐢ㄤ笂杩扮敓鎴愮殑銆婂煄甯傚缁忔祹鏂版満浼氥€媘arkdown鎶ュ憡銆備娇鐢╮eport-html-v2涓烘垜杈撳嚭HTML鏂囦欢",
+        content="请使用上述生成的《城市夜经济新机会》Markdown报告，使用report-html-v2输出HTML文件",
         session_id="session_123",
         run_id="run_123",
         skill_key="html_generation",
@@ -134,7 +134,7 @@ def test_openclaw_adapter_does_not_match_old_failed_task_by_skill_only():
         "runId": "current-run",
         "task": (
             "webagent_skill=html_generation\n"
-            "璇蜂娇鐢ㄤ笂杩扮敓鎴愮殑銆婂煄甯傚缁忔祹鏂版満浼氥€媘arkdown鎶ュ憡銆備娇鐢╮eport-html-v2"
+            "请使用上述生成的《城市夜经济新机会》Markdown报告，使用report-html-v2"
         ),
         "status": "running",
     }
@@ -145,7 +145,7 @@ def test_openclaw_adapter_does_not_match_old_failed_task_by_skill_only():
         "runId": "old-run",
         "task": (
             "webagent_skill=html_generation\n"
-            "璇蜂娇鐢ㄤ箣鍓嶇敓鎴愮殑銆婁簩娆″厓姝ｅ湪鏀瑰彉娑堣垂甯傚満銆媘arkdown鎶ュ憡銆備娇鐢╮eport-html-v2"
+            "请使用之前生成的《二次元正在改变消费市场》Markdown报告，使用report-html-v2"
         ),
         "status": "timed_out",
     }
@@ -162,7 +162,7 @@ def test_openclaw_adapter_does_not_match_old_failed_task_by_skill_only():
 def test_openclaw_adapter_prefers_current_webagent_run_id_when_present():
     adapter = OpenClawAdapter()
     input_data = AgentRunCreate(
-        content="璇蜂娇鐢ㄤ笂杩扮敓鎴愮殑銆婂煄甯傚缁忔祹鏂版満浼氥€媘arkdown鎶ュ憡銆備娇鐢╮eport-html-v2涓烘垜杈撳嚭HTML鏂囦欢",
+        content="请使用上述生成的《城市夜经济新机会》Markdown报告，使用report-html-v2输出HTML文件",
         session_id="session_123",
         run_id="new_run",
         skill_key="html_generation",
@@ -174,7 +174,7 @@ def test_openclaw_adapter_prefers_current_webagent_run_id_when_present():
         "runId": "old-run",
         "task": (
             "webagent_skill=html_generation\nwebagent_run_id=old_run\n"
-            "璇蜂娇鐢ㄤ笂杩扮敓鎴愮殑銆婂煄甯傚缁忔祹鏂版満浼氥€媘arkdown鎶ュ憡銆備娇鐢╮eport-html-v2"
+            "请使用上述生成的《城市夜经济新机会》Markdown报告，使用report-html-v2"
         ),
         "status": "running",
     }
@@ -185,7 +185,7 @@ def test_openclaw_adapter_prefers_current_webagent_run_id_when_present():
         "runId": "current-run",
         "task": (
             "webagent_skill=html_generation\nwebagent_run_id=new_run\n"
-            "璇蜂娇鐢ㄤ笂杩扮敓鎴愮殑銆婂煄甯傚缁忔祹鏂版満浼氥€媘arkdown鎶ュ憡銆備娇鐢╮eport-html-v2"
+            "请使用上述生成的《城市夜经济新机会》Markdown报告，使用report-html-v2"
         ),
         "status": "running",
     }
@@ -397,7 +397,7 @@ async def test_openclaw_adapter_emits_protocol_events_and_artifacts(monkeypatch)
 async def test_openclaw_adapter_emits_visible_heartbeat_for_unchanged_running_task(monkeypatch):
     adapter = OpenClawAdapter()
     input_data = AgentRunCreate(
-        content="璇疯緭鍑轰腑鏂?Markdown 鎶ュ憡",
+        content="请输出中文 Markdown 报告",
         session_id="session_123",
         run_id="run_123",
         skill_key="deep_research",

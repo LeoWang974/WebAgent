@@ -205,7 +205,10 @@ def has_required_primary_artifact(
 
 def delayed_discovery_attempts(required_types: set[str]) -> int:
     return max(
-        (DELAYED_DISCOVERY_ATTEMPTS_BY_TYPE.get(artifact_type, 0) for artifact_type in required_types),
+        (
+            DELAYED_DISCOVERY_ATTEMPTS_BY_TYPE.get(artifact_type, 0)
+            for artifact_type in required_types
+        ),
         default=0,
     )
 
@@ -223,7 +226,8 @@ async def delayed_discover_primary_artifacts(
     discovered_artifacts: list[schemas.Artifact] = []
     for attempt in range(attempts):
         await asyncio.sleep(DELAYED_DISCOVERY_INTERVAL_SECONDS)
-        related_source_artifact_paths = discover_related_artifact_paths(
+        related_source_artifact_paths = await asyncio.to_thread(
+            discover_related_artifact_paths,
             source_path_candidates,
             since,
         )
@@ -239,7 +243,8 @@ async def delayed_discover_primary_artifacts(
         )
         if not has_required_primary_artifact(discovered_artifacts, required_types):
             discovered_artifacts.extend(
-                discover_artifacts_since(
+                await asyncio.to_thread(
+                    discover_artifacts_since,
                     session_id,
                     since,
                     run_id,
@@ -363,7 +368,8 @@ async def discover_and_persist_run_artifacts(
         and not any(artifact.type == "ppt_deck" for artifact in discovered_artifacts)
     ):
         try:
-            pptx_artifact = create_pptx_from_html_artifacts(
+            pptx_artifact = await asyncio.to_thread(
+                create_pptx_from_html_artifacts,
                 conversation_id,
                 discovered_artifacts,
                 run_id_value,
@@ -437,7 +443,9 @@ async def discover_and_persist_run_artifacts(
             current_run_artifacts = [
                 artifact for artifact in stored_artifacts if artifact.run_id == run_id_value
             ]
-    should_create_ppt_fallback = "ppt_deck" in requested_artifact_types or skill_key == "ppt_generation"
+    should_create_ppt_fallback = (
+        "ppt_deck" in requested_artifact_types or skill_key == "ppt_generation"
+    )
     if should_create_ppt_fallback and not any(
         artifact.type == "ppt_deck" for artifact in current_run_artifacts
     ):
@@ -448,7 +456,8 @@ async def discover_and_persist_run_artifacts(
             html_candidates = await latest_session_html_artifacts(db, conversation_id)
         if html_candidates:
             try:
-                pptx_artifact = create_pptx_from_html_artifacts(
+                pptx_artifact = await asyncio.to_thread(
+                    create_pptx_from_html_artifacts,
                     conversation_id,
                     html_candidates,
                     run_id_value,

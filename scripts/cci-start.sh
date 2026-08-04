@@ -136,6 +136,16 @@ do
 done
 
 : > "$LOG_DIR/webagent-api.log"
+echo "Applying database migrations..."
+(
+  cd "$REPO_DIR/services/api"
+  "$PYTHON_BIN" -m alembic upgrade head
+) >> "$LOG_DIR/webagent-api.log" 2>&1 || {
+  echo "Database migration failed. See $LOG_DIR/webagent-api.log." >&2
+  tail -n 80 "$LOG_DIR/webagent-api.log" >&2 || true
+  exit 1
+}
+
 : > "$LOG_DIR/webagent-worker.log"
 : > "$LOG_DIR/webagent-web.log"
 touch "$LOG_DIR/openclaw-gateway.log"
