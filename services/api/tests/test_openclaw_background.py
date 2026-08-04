@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from agent_runtime.adapters.openclaw_adapter import OpenClawAdapter
@@ -29,6 +31,46 @@ def test_openclaw_adapter_waits_for_background_long_skill():
         input_data,
         "Report generated: /home/demo/report.md",
     )
+
+
+def test_openclaw_adapter_tracks_artifact_task_without_skill_binding():
+    input_data = AgentRunCreate(
+        content="Research AI operations and output a Markdown report.",
+        session_id="session_123",
+        run_id="run_123",
+        skill_key=None,
+    )
+
+    assert OpenClawAdapter._artifact_filter_key(input_data) == "deep_research"
+    assert OpenClawAdapter._should_track_task_family(input_data)
+    assert OpenClawAdapter._should_wait_for_background_completion(
+        input_data,
+        "Starting research workflow and creating report directory.",
+    )
+
+
+def test_openclaw_adapter_does_not_track_short_report_summary_question():
+    input_data = AgentRunCreate(
+        content="Summarize the report topic in one sentence.",
+        session_id="session_123",
+        run_id="run_123",
+        skill_key=None,
+    )
+
+    assert OpenClawAdapter._artifact_filter_key(input_data) is None
+    assert not OpenClawAdapter._should_track_task_family(input_data)
+
+
+def test_openclaw_adapter_does_not_track_chinese_short_report_summary_question():
+    input_data = AgentRunCreate(
+        content="用一句话总结刚才的报告主题。",
+        session_id="session_123",
+        run_id="run_123",
+        skill_key=None,
+    )
+
+    assert OpenClawAdapter._artifact_filter_key(input_data) is None
+    assert not OpenClawAdapter._should_track_task_family(input_data)
 
 
 def test_openclaw_adapter_uses_longer_background_timeout_for_deep_research():
@@ -193,7 +235,22 @@ def test_openclaw_adapter_matches_task_family_by_report_dir():
     matched = adapter._matching_task_family([main_task, child_task], input_data, set())
 
     assert matched == [main_task, child_task]
-    assert adapter._summarize_task_label(child_task) == "OpenClaw is researching d4."
+    assert (
+        adapter._summarize_task_label(child_task)
+        == "OpenClaw is researching d4: supply chain and instant retail"
+    )
+
+
+def test_openclaw_adapter_detects_chinese_markdown_research_prompt():
+    adapter = OpenClawAdapter()
+    input_data = AgentRunCreate(
+        content="请调研《社区商业新机会》，输出中文纯 Markdown 报告。",
+        session_id="session_123",
+        run_id="run_123",
+        skill_key=None,
+    )
+
+    assert adapter._artifact_filter_key(input_data) == "deep_research"
 
 
 @pytest.mark.asyncio
@@ -222,8 +279,12 @@ async def test_openclaw_adapter_polls_background_after_cli_timeout(monkeypatch):
         seen.append((run_id, initial_output))
         yield adapter._stage_event(run_id, "stage_update", "background polled", 50)
 
+    async def fake_poll_snapshot(input_data, run_id, report_dirs, poll_state):
+        return []
+
     monkeypatch.setattr(adapter, "_start_agent_process", fake_start)
     monkeypatch.setattr(adapter, "_poll_background_completion", fake_poll)
+    monkeypatch.setattr(adapter, "_poll_task_family_snapshot", fake_poll_snapshot)
 
     events = [
         event
@@ -295,11 +356,15 @@ async def test_openclaw_adapter_emits_protocol_events_and_artifacts(monkeypatch)
     async def fake_find_report_artifacts(report_dirs):
         return []
 
+    async def fake_find_recent_artifacts(skill_key, input_data=None):
+        return []
+
     async def fake_discover_report_dirs(input_data):
         return set()
 
     monkeypatch.setattr(adapter, "_run_openclaw_json_command", fake_json_command)
     monkeypatch.setattr(adapter, "_find_report_artifacts", fake_find_report_artifacts)
+    monkeypatch.setattr(adapter, "_find_recent_openclaw_artifacts", fake_find_recent_artifacts)
     monkeypatch.setattr(adapter, "_discover_report_dirs_from_input", fake_discover_report_dirs)
 
     events = await adapter._poll_task_family_snapshot(
@@ -357,16 +422,20 @@ async def test_openclaw_adapter_emits_visible_heartbeat_for_unchanged_running_ta
     async def fake_find_report_artifacts(report_dirs):
         return []
 
+    async def fake_find_recent_artifacts(skill_key, input_data=None):
+        return []
+
     async def fake_discover_report_dirs(input_data):
         return set()
 
     monkeypatch.setattr(adapter, "_run_openclaw_json_command", fake_json_command)
     monkeypatch.setattr(adapter, "_find_report_artifacts", fake_find_report_artifacts)
+    monkeypatch.setattr(adapter, "_find_recent_openclaw_artifacts", fake_find_recent_artifacts)
     monkeypatch.setattr(adapter, "_discover_report_dirs_from_input", fake_discover_report_dirs)
     monkeypatch.setattr(
         adapter,
         "_summarize_task_label",
-        lambda task, skill_key=None: (
+        lambda task, skill_key=None, user_content="": (
             "OpenClaw is researching report and collecting report artifacts."
         ),
     )
@@ -378,6 +447,93 @@ async def test_openclaw_adapter_emits_visible_heartbeat_for_unchanged_running_ta
         poll_state,
     )
 
-    assert len(events) == 1
-    assert events[0].step
-    assert events[0].step.label.startswith("OpenClaw 长任务仍在执行")
+    heartbeat_events = [
+        event
+        for event in events
+        if event.step and "已跟踪" in event.step.label
+    ]
+    assert len(heartbeat_events) == 1
+
+
+def test_openclaw_adapter_summarizes_chinese_user_research_prompt():
+    label = OpenClawAdapter._summarize_task_label(
+        {
+            "taskId": "task-main",
+            "runtime": "cli",
+            "status": "running",
+            "task": "webagent_run_id=run_123\n",
+        },
+        "deep_research",
+        user_content="请调研《社区商业新机会》，输出中文 Markdown 报告。",
+    )
+
+    assert label == "OpenClaw 正在调研 《社区商业新机会》，等待阶段输出或 Markdown 产物。"
+
+
+def test_openclaw_adapter_prefers_task_progress_summary():
+    label = OpenClawAdapter._summarize_task_label(
+        {
+            "taskId": "task-main",
+            "runtime": "cli",
+            "status": "running",
+            "progressSummary": "正在搜索社区咖啡店增长案例",
+            "task": "webagent_run_id=run_123\n",
+        },
+        "deep_research",
+        user_content="请调研《社区商业新机会》，输出中文 Markdown 报告。",
+    )
+
+    assert label == "正在搜索社区咖啡店增长案例"
+
+
+@pytest.mark.asyncio
+async def test_openclaw_adapter_forces_fallback_when_artifact_task_never_outputs(monkeypatch):
+    class HangingProcess:
+        returncode = None
+
+        async def communicate(self):
+            await asyncio.sleep(60)
+            return b"", b""
+
+        def kill(self):
+            self.returncode = -9
+
+    adapter = OpenClawAdapter(command_timeout_seconds=60)
+    process = HangingProcess()
+
+    async def fake_start(input_data, run_id):
+        return process
+
+    async def fake_poll_snapshot(input_data, run_id, report_dirs, poll_state):
+        adapter.last_diagnostics["matchingTaskCount"] = 1
+        return []
+
+    async def fake_kill_and_collect_output(process, communicate_task):
+        process.kill()
+        communicate_task.cancel()
+        return b"", b""
+
+    monkeypatch.setattr(adapter, "_start_agent_process", fake_start)
+    monkeypatch.setattr(adapter, "_foreground_poll_interval_seconds", lambda skill_key: 0.01)
+    monkeypatch.setattr(adapter, "_no_artifact_timeout_seconds", lambda skill_key: 0.02)
+    monkeypatch.setattr(adapter, "_poll_task_family_snapshot", fake_poll_snapshot)
+    monkeypatch.setattr(adapter, "_kill_and_collect_output", fake_kill_and_collect_output)
+
+    events = [
+        event
+        async for event in adapter.stream_response_events(
+            AgentRunCreate(
+                content="Generate HTML from the previous Markdown report.",
+                session_id="session_123",
+                run_id="run_123",
+                skill_key=None,
+            )
+        )
+    ]
+
+    assert any(
+        event.output
+        and "OpenClaw did not produce a final artifact in time" in event.output
+        for event in events
+    )
+    assert adapter.get_last_diagnostics()["trackedBackground"] is True

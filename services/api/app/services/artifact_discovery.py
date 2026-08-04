@@ -2,6 +2,7 @@ import asyncio
 import base64
 import csv
 import hashlib
+import html
 import json
 import re
 import shutil
@@ -144,8 +145,10 @@ def _candidate_roots() -> list[Path]:
         user_home / "Downloads" / "WebAgent",
         user_home / "deep-research-reports",
         user_home / "ppt_decks",
+        user_home / ".openclaw" / "workspace",
         user_home / ".hermes" / "images",
         user_home / ".hermes" / "deep-research-reports",
+        repo_root.parent.parent / "runtime" / "agent-home" / ".openclaw" / "workspace",
         Path(r"\\wsl.localhost\Ubuntu\home\zhuchangbiaozhu_xyl\.hermes\reports"),
         Path(r"\\wsl.localhost\Ubuntu\home\zhuchangbiaozhu_xyl\.hermes\deep-research-reports"),
         Path(r"\\wsl.localhost\Ubuntu\home\zhuchangbiaozhu_xyl\.hermes\images"),
@@ -167,6 +170,30 @@ def _candidate_roots() -> list[Path]:
             seen_suffixes.add(suffix)
         deduped.append(root)
     return deduped
+
+
+def _resolve_bare_artifact_filename(filename: str) -> Path | None:
+    name = Path(filename).name
+    if not name or Path(name).suffix.lower() not in SUPPORTED_SUFFIXES:
+        return None
+
+    candidates: list[Path] = []
+    for root in _candidate_roots():
+        if not root.exists() or not root.is_dir():
+            continue
+        direct_candidate = root / name
+        if _is_regular_artifact_candidate(direct_candidate):
+            candidates.append(direct_candidate)
+        try:
+            for candidate in root.rglob(name):
+                if _is_regular_artifact_candidate(candidate):
+                    candidates.append(candidate)
+        except OSError:
+            continue
+
+    if not candidates:
+        return None
+    return max(candidates, key=lambda path: path.stat().st_mtime)
 
 
 def _hermes_session_roots() -> list[Path]:
@@ -472,7 +499,7 @@ def _normalize_path(raw_path: str) -> Path:
     ):
         return _repo_root() / relative_match
     if "/" not in relative_match and Path(relative_match).suffix.lower() in SUPPORTED_SUFFIXES:
-        return _repo_root() / relative_match
+        return _resolve_bare_artifact_filename(relative_match) or _repo_root() / relative_match
     if match.startswith("/mnt/") and len(match) > 6 and match[6] == "/":
         drive = match[5].upper()
         rest = match[7:].replace("/", "\\")
@@ -626,9 +653,18 @@ def create_markdown_artifact_from_content(
     title: str = "agent-generated-report",
 ) -> schemas.Artifact | None:
     normalized = content.strip()
-    if len(normalized) < 500:
+    has_markdown_signal = "#" in normalized or "\n\n" in normalized
+    has_saved_report_signal = bool(
+        re.search(
+            r"(?i)(saved as|report saved|generated|created|\.md|markdown|报告已生成|报告已经完成|报告已完成)",
+            normalized,
+        )
+    )
+    if len(normalized) < 40:
         return None
-    if "#" not in normalized and "\n\n" not in normalized:
+    if len(normalized) < 500 and not has_saved_report_signal:
+        return None
+    if not has_markdown_signal and not has_saved_report_signal:
         return None
 
     artifact_dir = _runtime_artifacts_dir(run_id)
@@ -642,6 +678,65 @@ def create_markdown_artifact_from_content(
         session_id,
         path,
         artifact_type_override="markdown_report",
+        metadata_extra={"source": "assistant_output_fallback"},
+        original_path="assistant_output",
+        title_override=safe_title,
+    )
+
+
+def create_html_artifact_from_content(
+    session_id: str,
+    content: str,
+    run_id: str | None = None,
+    *,
+    title: str = "agent-generated-page",
+) -> schemas.Artifact | None:
+    normalized = content.strip()
+    has_html_signal = bool(
+        re.search(
+            r"(?i)(\.html|html file|html 文件|网页|浏览器|browser-ready|<html|<!doctype)",
+            normalized,
+        )
+    )
+    if len(normalized) < 40 or not has_html_signal:
+        return None
+
+    if re.search(r"(?is)<html[\s>].*</html>", normalized):
+        html_content = normalized
+    else:
+        escaped = html.escape(normalized)
+        html_content = (
+            "<!doctype html>\n"
+            '<html lang="zh-CN">\n'
+            "<head>\n"
+            '  <meta charset="utf-8" />\n'
+            '  <meta name="viewport" content="width=device-width, initial-scale=1" />\n'
+            f"  <title>{html.escape(title)}</title>\n"
+            "  <style>\n"
+            "    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; "
+            "line-height: 1.7; margin: 0; padding: 32px; color: #172033; background: #f7f8fb; }\n"
+            "    main { max-width: 920px; margin: 0 auto; background: #fff; border: 1px solid #dfe5ef; "
+            "border-radius: 8px; padding: 28px; }\n"
+            "    pre { white-space: pre-wrap; word-break: break-word; font: inherit; margin: 0; }\n"
+            "  </style>\n"
+            "</head>\n"
+            "<body><main><pre>"
+            f"{escaped}"
+            "</pre></main></body>\n"
+            "</html>\n"
+        )
+
+    artifact_dir = _runtime_artifacts_dir(run_id)
+    safe_title = re.sub(r"[^\w\u4e00-\u9fff.-]+", "-", title, flags=re.UNICODE).strip("-")
+    if not safe_title:
+        safe_title = "agent-generated-page"
+    digest = hashlib.sha1(html_content.encode("utf-8", errors="ignore")).hexdigest()[:10]
+    path = artifact_dir / f"{safe_title}-{digest}.html"
+    path.write_text(html_content, encoding="utf-8")
+    return _artifact_from_path(
+        session_id,
+        path,
+        artifact_type_override="html_page",
         metadata_extra={"source": "assistant_output_fallback"},
         original_path="assistant_output",
         title_override=safe_title,

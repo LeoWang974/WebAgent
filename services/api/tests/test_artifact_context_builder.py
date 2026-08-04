@@ -209,3 +209,54 @@ def test_user_runtime_context_copies_openclaw_gateway_config(tmp_path, monkeypat
     assert "OPENCLAW_GATEWAY_TOKEN=test-token" in copied_env_text
     assert "OPENCLAW_GATEWAY_AUTH_TOKEN=test-token" in copied_env_text
     assert "OPENCLAW_TOKEN=test-token" in copied_env_text
+
+
+def test_user_runtime_context_does_not_write_openclaw_gateway_url_without_token(
+    tmp_path,
+    monkeypatch,
+):
+    fake_home = tmp_path / "home"
+    fake_home.joinpath(".openclaw").mkdir(parents=True)
+    fake_home.joinpath(".openclaw", "openclaw.json").write_text(
+        '{"gateway":{"auth":{"mode":"none"}}}',
+        encoding="utf-8",
+    )
+    fake_home.joinpath(".openclaw", ".env").write_text("OPENCLAW_TEST=1\n", encoding="utf-8")
+
+    hermes_home = tmp_path / "hermes-home"
+    hermes_home.mkdir()
+    hermes_home.joinpath(".env").write_text("SERPER_API_KEY=test\n", encoding="utf-8")
+    hermes_home.joinpath("skills").mkdir()
+    openclaw_skills = tmp_path / "openclaw-skills"
+    openclaw_skills.mkdir()
+
+    monkeypatch.setenv("OPENCLAW_GATEWAY_URL", "ws://127.0.0.1:18789")
+    monkeypatch.setattr(runtime_environment.Path, "home", lambda: fake_home)
+    monkeypatch.setattr(
+        runtime_environment.settings,
+        "agent_runtime_user_root",
+        str(tmp_path / "runtime"),
+    )
+    monkeypatch.setattr(runtime_environment.settings, "hermes_home", str(hermes_home))
+    monkeypatch.setattr(
+        runtime_environment.settings,
+        "hermes_skills_dir",
+        str(hermes_home / "skills"),
+    )
+    monkeypatch.setattr(
+        runtime_environment.settings,
+        "openclaw_skills_dir",
+        str(openclaw_skills),
+    )
+
+    context = build_user_runtime_context(
+        SimpleNamespace(id="user-1"),
+        "conversation-1",
+        run_id="run-1",
+    )
+
+    copied_env_text = (context.openclaw_home / ".openclaw" / ".env").read_text(
+        encoding="utf-8",
+    )
+    assert "OPENCLAW_TEST=1" in copied_env_text
+    assert "OPENCLAW_GATEWAY_URL=" not in copied_env_text

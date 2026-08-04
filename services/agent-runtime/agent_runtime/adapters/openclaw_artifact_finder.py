@@ -89,12 +89,13 @@ async def find_recent_openclaw_artifacts(
     is_primary_output_artifact: Callable[[str], bool],
 ) -> list[str]:
     command = (
-        'for __dir in "$HOME/.openclaw/workspace" "$HOME/.openclaw/artifacts"; do '
+        'for __dir in "$PWD" "$HOME" "$HOME/.openclaw/workspace" "$HOME/.openclaw/artifacts"; do '
         '[ -d "$__dir" ] || continue; '
-        f'find "$__dir" -maxdepth 6 -type f -mmin -240 {ARTIFACT_FIND_EXPR} -print; '
+        f'find "$__dir" -maxdepth 8 -type f -mmin -240 {ARTIFACT_FIND_EXPR} -print; '
         "done"
     )
     paths = await run_find_command(command, build_shell_args=build_shell_args)
+    paths = list(dict.fromkeys(paths))
     return filter_report_artifacts(
         paths,
         skill_key=skill_key,

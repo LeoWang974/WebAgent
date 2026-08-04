@@ -47,6 +47,7 @@ else
   stop_process "webagent-worker"
 fi
 stop_process "webagent-api"
+stop_process "openclaw-gateway"
 
 stop_orphans_by_pattern() {
   local pattern="$1"
@@ -76,7 +77,9 @@ for pattern in \
   "$ROOT_DIR/runtime/users/" \
   "$REPO_DIR/runtime/hermes-prompts/" \
   "$REPO_DIR/ppt_decks/" \
-  "$ROOT_DIR/runtime/sensenova-skills/sn-ppt-workbench/"
+  "$ROOT_DIR/runtime/sensenova-skills/sn-ppt-workbench/" \
+  "openclaw-agent" \
+  "openclaw gateway run"
 do
   stop_orphans_by_pattern "$pattern"
 done

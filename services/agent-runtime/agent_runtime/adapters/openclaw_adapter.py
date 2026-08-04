@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 import json
 import os
 import re
@@ -166,11 +166,14 @@ class OpenClawAdapter(AgentRuntimeAdapter):
         run_id = input_data.run_id or input_data.session_id
         self._reset_last_state()
         final_artifact_found = False
+        should_track_background = self._should_track_task_family(input_data)
+        artifact_filter_key = self._artifact_filter_key(input_data)
         poll_state = self._new_poll_state()
         report_dirs = self._extract_report_dirs(input_data.content)
         report_dirs.update(self._extract_file_parent_dirs(input_data.content))
+        forced_fallback_completion = False
 
-        if input_data.skill_key:
+        if should_track_background:
             yield self._stage_event(
                 run_id,
                 "stage_started",
@@ -184,13 +187,13 @@ class OpenClawAdapter(AgentRuntimeAdapter):
         stderr = b""
         communicate_task = asyncio.create_task(process.communicate())
         try:
-            if input_data.skill_key:
+            if should_track_background:
                 started_at = monotonic()
                 while True:
                     try:
                         stdout, stderr = await asyncio.wait_for(
                             asyncio.shield(communicate_task),
-                            timeout=self._foreground_poll_interval_seconds(input_data.skill_key),
+                            timeout=self._foreground_poll_interval_seconds(artifact_filter_key),
                         )
                         break
                     except TimeoutError:
@@ -217,12 +220,45 @@ class OpenClawAdapter(AgentRuntimeAdapter):
                         )
                         for event in events:
                             yield event
-                        if self._primary_output_artifact_paths(input_data.skill_key):
+                        if self._primary_output_artifact_paths(artifact_filter_key):
                             final_artifact_found = True
                             stdout, stderr = await self._kill_and_collect_output(
                                 process,
                                 communicate_task,
                             )
+                            break
+                        if (
+                            artifact_filter_key in {"html_generation", "ppt_generation"}
+                            and elapsed >= self._no_task_family_timeout_seconds(artifact_filter_key)
+                            and int(self.last_diagnostics.get("matchingTaskCount", 0) or 0) == 0
+                            and not self.last_artifact_paths
+                        ):
+                            forced_fallback_completion = True
+                            stdout, stderr = await self._kill_and_collect_output(
+                                process,
+                                communicate_task,
+                            )
+                            output = (
+                                "OpenClaw did not emit a task family or final artifact in time; "
+                                "WebAgent will discover or synthesize the requested artifact."
+                            )
+                            stdout = output.encode("utf-8")
+                            break
+                        if (
+                            artifact_filter_key in {"html_generation", "ppt_generation"}
+                            and elapsed >= self._no_artifact_timeout_seconds(artifact_filter_key)
+                            and not self._primary_output_artifact_paths(artifact_filter_key)
+                        ):
+                            forced_fallback_completion = True
+                            stdout, stderr = await self._kill_and_collect_output(
+                                process,
+                                communicate_task,
+                            )
+                            output = (
+                                "OpenClaw did not produce a final artifact in time; "
+                                "WebAgent will discover or synthesize the requested artifact."
+                            )
+                            stdout = output.encode("utf-8")
                             break
             else:
                 stdout, stderr = await asyncio.wait_for(
@@ -231,7 +267,7 @@ class OpenClawAdapter(AgentRuntimeAdapter):
                 )
         except TimeoutError as exc:
             cli_timed_out = True
-            if input_data.skill_key:
+            if should_track_background:
                 stdout, stderr = await self._kill_and_collect_output(
                     process,
                     communicate_task,
@@ -271,6 +307,7 @@ class OpenClawAdapter(AgentRuntimeAdapter):
 
         if (
             not final_artifact_found
+            and not forced_fallback_completion
             and (cli_timed_out or self._should_wait_for_background_completion(input_data, output))
         ):
             async for event in self._poll_background_completion(
@@ -281,7 +318,7 @@ class OpenClawAdapter(AgentRuntimeAdapter):
                 poll_state,
             ):
                 yield event
-            final_artifact_found = bool(self._primary_output_artifact_paths(input_data.skill_key))
+            final_artifact_found = bool(self._primary_output_artifact_paths(artifact_filter_key))
 
         if not self.last_artifacts:
             self._create_fallback_artifact_from_output(input_data, run_id, output)
@@ -296,9 +333,16 @@ class OpenClawAdapter(AgentRuntimeAdapter):
             "cliTimedOut": cli_timed_out,
             "finalArtifactFound": final_artifact_found,
             "reportDirs": sorted(report_dirs),
+            "artifactFilterKey": artifact_filter_key,
+            "trackedBackground": should_track_background,
         }
 
-        if process.returncode != 0 and not cli_timed_out and not final_artifact_found:
+        if (
+            process.returncode != 0
+            and not cli_timed_out
+            and not final_artifact_found
+            and not forced_fallback_completion
+        ):
             raise RuntimeError(
                 f"OpenClaw exited with code {process.returncode}: "
                 f"{(raw_stderr or raw_stdout).strip()[-1000:]}"
@@ -394,9 +438,20 @@ class OpenClawAdapter(AgentRuntimeAdapter):
         if process.returncode is None:
             process.kill()
         try:
-            return await communicate_task
+            return await asyncio.wait_for(asyncio.shield(communicate_task), timeout=5)
         except TimeoutError:
-            return await process.communicate()
+            if communicate_task.done():
+                try:
+                    return await asyncio.wait_for(process.communicate(), timeout=5)
+                except (TimeoutError, asyncio.CancelledError):
+                    return b"", b"OpenClaw process did not terminate promptly after kill."
+            if not communicate_task.done():
+                communicate_task.cancel()
+            return b"", b"OpenClaw process did not terminate promptly after kill."
+        except asyncio.CancelledError:
+            if not communicate_task.done():
+                communicate_task.cancel()
+            return b"", b"OpenClaw process did not terminate promptly after kill."
 
     def _build_agent_cli_args(self, input_data: AgentRunCreate) -> list[str]:
         return build_agent_cli_args(
@@ -491,7 +546,10 @@ class OpenClawAdapter(AgentRuntimeAdapter):
             )
         except TimeoutError:
             process.kill()
-            await process.wait()
+            try:
+                await asyncio.wait_for(process.wait(), timeout=5)
+            except TimeoutError:
+                return None
             return None
 
         text = self._first_json_like_text(stdout, stderr)
@@ -520,7 +578,10 @@ class OpenClawAdapter(AgentRuntimeAdapter):
             )
         except TimeoutError:
             process.kill()
-            await process.wait()
+            try:
+                await asyncio.wait_for(process.wait(), timeout=5)
+            except TimeoutError:
+                return None, "", "OpenClaw command did not terminate promptly after kill."
             return None, "", "OpenClaw command timed out."
         return (
             process.returncode,
@@ -574,12 +635,21 @@ class OpenClawAdapter(AgentRuntimeAdapter):
             is_primary_output_artifact=self._is_primary_output_artifact,
         )
 
-    async def _find_recent_openclaw_artifacts(self, skill_key: str | None) -> list[str]:
-        return await find_recent_openclaw_artifacts(
+    async def _find_recent_openclaw_artifacts(
+        self,
+        skill_key: str | None,
+        input_data: AgentRunCreate | None = None,
+    ) -> list[str]:
+        paths = await find_recent_openclaw_artifacts(
             skill_key,
             build_shell_args=self._build_shell_args,
             is_primary_output_artifact=self._is_primary_output_artifact,
         )
+        return [
+            path
+            for path in paths
+            if self._recent_artifact_matches_input(path, skill_key, input_data)
+        ]
 
     async def _discover_report_dirs_from_input(self, input_data: AgentRunCreate) -> set[str]:
         needles = self._report_dir_search_needles(input_data.content)
@@ -658,6 +728,31 @@ for item in sorted(matches):
                 unique.append(needle)
         return unique
 
+    @classmethod
+    def _recent_artifact_matches_input(
+        cls,
+        path: str,
+        skill_key: str | None,
+        input_data: AgentRunCreate | None,
+    ) -> bool:
+        if skill_key not in {"ppt_generation", "html_generation"}:
+            return True
+        if input_data is None:
+            return False
+        needles = [
+            cls._artifact_match_key(needle)
+            for needle in cls._report_dir_search_needles(input_data.content)
+        ]
+        needles = [needle for needle in needles if len(needle) >= 6]
+        if not needles:
+            return False
+        haystack = cls._artifact_match_key(path)
+        return any(needle in haystack for needle in needles)
+
+    @staticmethod
+    def _artifact_match_key(value: str) -> str:
+        return re.sub(r"[\W_]+", "", value, flags=re.UNICODE).lower()
+
     @staticmethod
     def _extract_report_dirs(text: str) -> set[str]:
         pattern = re.compile(
@@ -702,15 +797,19 @@ for item in sorted(matches):
 
     @staticmethod
     def _repair_mojibake(text: str) -> str:
-        if not any(marker in text for marker in ("氓", "莽", "忙", "盲", "猫", "茅", "茂")):
-            return text
-        try:
-            repaired = text.encode("latin1").decode("utf-8")
-        except UnicodeError:
-            return text
-        chinese_count = sum(1 for char in repaired if "\u4e00" <= char <= "\u9fff")
         original_chinese_count = sum(1 for char in text if "\u4e00" <= char <= "\u9fff")
-        return repaired if chinese_count > original_chinese_count else text
+        best = text
+        best_chinese_count = original_chinese_count
+        for encoding in ("latin1", "cp1252"):
+            try:
+                candidate = text.encode(encoding).decode("utf-8")
+            except UnicodeError:
+                continue
+            chinese_count = sum(1 for char in candidate if "\u4e00" <= char <= "\u9fff")
+            if chinese_count > best_chinese_count:
+                best = candidate
+                best_chinese_count = chinese_count
+        return best
 
     @staticmethod
     def _task_family_keys(tasks: list[dict[str, object]]) -> set[str]:
@@ -795,7 +894,7 @@ for item in sorted(matches):
         input_data: AgentRunCreate,
         output: str,
     ) -> bool:
-        if not input_data.skill_key:
+        if not OpenClawAdapter._should_track_task_family(input_data):
             return False
         normalized = output.lower()
         start_markers = [
@@ -821,15 +920,68 @@ for item in sorted(matches):
         )
 
     @staticmethod
+    def _artifact_filter_key(input_data: AgentRunCreate) -> str | None:
+        if input_data.skill_key:
+            return input_data.skill_key
+        normalized = input_data.content.lower()
+        action_markers = (
+            "output",
+            "generate",
+            "create",
+            "write",
+            "export",
+            "research",
+            "调研",
+            "输出",
+            "生成",
+            "创建",
+            "撰写",
+            "导出",
+        )
+        has_action = any(marker in normalized for marker in action_markers)
+        has_cjk = any("\u4e00" <= char <= "\u9fff" for char in input_data.content)
+        if any(marker in normalized for marker in (".pptx", "ppt", "slides", "slide deck", "幻灯片")):
+            return "ppt_generation"
+        if has_action and any(marker in normalized for marker in (".html", " html", "网页", "页面")):
+            return "html_generation"
+        if has_action and any(marker in normalized for marker in ("image", "png", "jpg", "jpeg", "webp", "图片", "生图")):
+            return "u1_image"
+        if has_action and any(
+            marker in normalized
+            for marker in (
+                ".md",
+                "markdown",
+                "report",
+                "research",
+                "调研",
+                "报告",
+                "分析",
+            )
+        ):
+            return "deep_research"
+        if has_action and has_cjk and ("《" in input_data.content and "》" in input_data.content):
+            return "deep_research"
+        return None
+
+    @staticmethod
+    def _should_track_task_family(input_data: AgentRunCreate) -> bool:
+        return OpenClawAdapter._artifact_filter_key(input_data) is not None
+
+    @staticmethod
     def _summarize_task_label(
         task: dict[str, object],
         skill_key: str | None = None,
+        *,
+        user_content: str = "",
     ) -> str:
         task_text = OpenClawAdapter._repair_mojibake(str(task.get("task") or ""))
         status = str(task.get("status") or "running")
+        field_label = OpenClawAdapter._task_field_label(task)
+        if field_label:
+            return field_label
         dimension_match = re.search(r"dimension_id\s*:\s*([A-Za-z0-9_-]+)", task_text)
         dimension_name_match = re.search(
-            r"(?:\u7ef4\u5ea6\u540d\u79f0|维度名称)\s*[:：]\s*([^\n\r]+)",
+            r"(?:维度名称|dimension_name|dimension)\s*[:：]\s*([^\n\r]+)",
             task_text,
         )
         result_match = re.search(
@@ -879,9 +1031,15 @@ for item in sorted(matches):
             source_name = Path(source_match.group(1)).name if source_match else "source report"
             return f"OpenClaw is generating an HTML report from {source_name}."
         if skill_key == "deep_research" and status in {"queued", "running"}:
-            title_match = re.search(r"《([^》]+)》", task_text)
+            title_match = re.search(r"《([^》]+)》", task_text) or re.search(
+                r"《([^》]+)》",
+                user_content,
+            )
             title = f"《{title_match.group(1)}》" if title_match else "the research topic"
-            return f"OpenClaw is researching {title} and collecting report artifacts."
+            return f"OpenClaw 正在调研 {title}，等待阶段输出或 Markdown 产物。"
+        fallback_label = OpenClawAdapter._summarize_user_request_label(user_content, skill_key)
+        if fallback_label:
+            return fallback_label
         if status == "succeeded":
             return f"OpenClaw {runtime} task completed; waiting for child tasks or artifacts."
         useful_lines = [
@@ -898,6 +1056,71 @@ for item in sorted(matches):
                 f"{OpenClawAdapter._compact_label(useful_lines[0], max_chars=220)}"
             )
         return f"OpenClaw {runtime} task status: {status}."
+
+    @staticmethod
+    def _task_field_label(task: dict[str, object]) -> str:
+        for key in (
+            "progressSummary",
+            "progress_summary",
+            "label",
+            "title",
+            "name",
+            "summary",
+            "message",
+            "lastMessage",
+            "last_message",
+            "lastOutput",
+            "last_output",
+            "output",
+        ):
+            value = task.get(key)
+            if not isinstance(value, str) or not value.strip():
+                continue
+            repaired = OpenClawAdapter._repair_mojibake(value)
+            cleaned = OpenClawAdapter._compact_label(repaired, max_chars=220)
+            if OpenClawAdapter._is_low_value_task_label(cleaned):
+                continue
+            return cleaned
+        return ""
+
+    @staticmethod
+    def _is_low_value_task_label(label: str) -> bool:
+        normalized = label.lower().strip()
+        if not normalized:
+            return True
+        low_value_markers = {
+            "running",
+            "queued",
+            "succeeded",
+            "completed",
+            "openclaw cli task is running.",
+            "openclaw cli task status: running.",
+            "openclaw is still working; waiting for task progress.",
+        }
+        return normalized in low_value_markers or "webagent_run_id=" in normalized
+
+    @staticmethod
+    def _summarize_user_request_label(
+        content: str,
+        skill_key: str | None = None,
+        *,
+        suffix: str = "",
+    ) -> str:
+        title_match = re.search(r"《([^》]{2,120})》", content)
+        title = f"《{title_match.group(1)}》" if title_match else ""
+        if skill_key == "ppt_generation":
+            base = f"OpenClaw 正在生成 {title or 'PPT'}"
+        elif skill_key == "html_generation":
+            base = f"OpenClaw 正在生成 {title or 'HTML 页面'}"
+        elif skill_key == "deep_research":
+            base = f"OpenClaw 正在调研 {title or '当前主题'}"
+        elif skill_key == "u1_image":
+            base = f"OpenClaw 正在生成 {title or '图片'}"
+        elif skill_key:
+            base = f"OpenClaw 正在处理 {title or '当前任务'}"
+        else:
+            return ""
+        return f"{base}，{suffix}" if suffix else f"{base}，等待阶段输出或最终产物。"
 
     @staticmethod
     def _compact_label(value: str, max_chars: int = 360) -> str:
@@ -949,7 +1172,7 @@ for item in sorted(matches):
             if not self._is_primary_output_artifact(path):
                 continue
             suffix = Path(path).suffix.lower()
-            if skill_key == "ppt_generation" and suffix not in {".ppt", ".pptx", ".html", ".htm"}:
+            if skill_key == "ppt_generation" and suffix not in {".ppt", ".pptx"}:
                 continue
             if skill_key == "html_generation" and suffix not in {".html", ".htm"}:
                 continue
@@ -1042,7 +1265,7 @@ for item in sorted(matches):
         report_dirs = report_dirs or set()
         report_dirs.update(self._extract_report_dirs(initial_output))
         poll_state = poll_state or self._new_poll_state()
-        wait_seconds = self._background_wait_timeout_seconds(input_data.skill_key)
+        wait_seconds = self._background_wait_timeout_seconds(self._artifact_filter_key(input_data))
         deadline = monotonic() + wait_seconds
         poll_interval = 8
 
@@ -1063,7 +1286,7 @@ for item in sorted(matches):
             )
             for event in events:
                 yield event
-            if self._primary_output_artifact_paths(input_data.skill_key):
+            if self._primary_output_artifact_paths(self._artifact_filter_key(input_data)):
                 return
             await asyncio.sleep(poll_interval)
 
@@ -1082,6 +1305,26 @@ for item in sorted(matches):
             "u1_image": 20 * 60,
         }
         return max(self.command_timeout_seconds, minimum_by_skill.get(skill_key or "", 0))
+
+    @staticmethod
+    def _no_task_family_timeout_seconds(skill_key: str | None) -> int:
+        if skill_key == "ppt_generation":
+            return 25 * 60
+        if skill_key == "html_generation":
+            return 20 * 60
+        if skill_key == "deep_research":
+            return 6 * 60
+        return 0
+
+    @staticmethod
+    def _no_artifact_timeout_seconds(skill_key: str | None) -> int:
+        if skill_key == "ppt_generation":
+            return 25 * 60
+        if skill_key == "html_generation":
+            return 20 * 60
+        if skill_key == "deep_research":
+            return 12 * 60
+        return 0
 
     @staticmethod
     def _failed_background_task_label(tasks: list[dict[str, object]]) -> str | None:
@@ -1110,7 +1353,8 @@ for item in sorted(matches):
         output: str,
     ) -> None:
         content = output.strip()
-        if input_data.skill_key not in {"data_analysis", "deep_research"}:
+        artifact_filter_key = self._artifact_filter_key(input_data)
+        if artifact_filter_key not in {"data_analysis", "deep_research"}:
             return
         if len(content) < 80:
             return
@@ -1121,7 +1365,7 @@ for item in sorted(matches):
         artifact_dir = root / "runtime" / "openclaw-runs" / run_id / "artifacts"
         artifact_dir.mkdir(parents=True, exist_ok=True)
         title = "OpenClaw research report"
-        if input_data.skill_key == "data_analysis":
+        if artifact_filter_key == "data_analysis":
             title = "OpenClaw data analysis"
         file_path = artifact_dir / f"{safe_file_stem(title)}.md"
         file_path.write_text(content, encoding="utf-8")

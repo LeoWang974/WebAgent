@@ -120,6 +120,66 @@ def test_openclaw_adapter_ppt_primary_output_ignores_source_markdown():
     ]
 
 
+def test_openclaw_adapter_ppt_primary_output_does_not_accept_html_as_ppt():
+    adapter = OpenClawAdapter()
+    adapter._remember_artifact_paths(
+        "Generated /home/demo/report.html and /home/demo/deck.pptx"
+    )
+
+    assert adapter._primary_output_artifact_paths("ppt_generation") == [
+        "/home/demo/deck.pptx"
+    ]
+
+
+def test_openclaw_adapter_ppt_fallback_waits_longer_than_slow_exports():
+    adapter = OpenClawAdapter(command_timeout_seconds=600)
+
+    assert adapter._no_task_family_timeout_seconds("ppt_generation") >= 25 * 60
+    assert adapter._no_artifact_timeout_seconds("ppt_generation") >= 25 * 60
+
+
+def test_openclaw_adapter_html_fallback_waits_for_background_export():
+    adapter = OpenClawAdapter(command_timeout_seconds=600)
+
+    assert adapter._no_task_family_timeout_seconds("html_generation") >= 20 * 60
+    assert adapter._no_artifact_timeout_seconds("html_generation") >= 20 * 60
+
+
+def test_openclaw_adapter_recent_ppt_requires_prompt_match():
+    input_data = AgentRunCreate(
+        content="请使用《城市夜经济新机会》报告生成 PPT。",
+        session_id="session_123",
+        run_id="run_123",
+        skill_key=None,
+    )
+
+    assert OpenClawAdapter._recent_artifact_matches_input(
+        "/home/demo/.openclaw/workspace/城市夜经济新机会.pptx",
+        "ppt_generation",
+        input_data,
+    )
+    assert not OpenClawAdapter._recent_artifact_matches_input(
+        "/home/demo/.openclaw/workspace/OpenClaw_同用户并发测试2.pptx",
+        "ppt_generation",
+        input_data,
+    )
+
+
+def test_openclaw_adapter_recent_ppt_without_prompt_match_is_rejected():
+    input_data = AgentRunCreate(
+        content="Use the generated Markdown/HTML report above and create an 8-page PPT.",
+        session_id="session_123",
+        run_id="run_123",
+        skill_key=None,
+    )
+
+    assert not OpenClawAdapter._recent_artifact_matches_input(
+        "/home/demo/.openclaw/workspace/OpenClaw_同用户并发测试2.pptx",
+        "ppt_generation",
+        input_data,
+    )
+
+
 def test_openclaw_adapter_extracts_windows_input_parent_dirs():
     dirs = OpenClawAdapter._extract_file_parent_dirs(
         "C:\\Users\\demo\\Downloads\\report-50ffa786ad.md閹躲儱鎲￠敍宀€鏁撻幋鎬璓T"

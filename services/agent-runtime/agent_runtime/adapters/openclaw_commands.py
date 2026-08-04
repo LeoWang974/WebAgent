@@ -10,10 +10,16 @@ def build_openclaw_message(input_data: AgentRunCreate) -> str:
 
 def with_runtime_env(command: str, extra_env: dict[str, str | None] | None = None) -> str:
     extra_exports = ""
+    path_prefix = (extra_env or {}).get("WEBAGENT_AGENT_PATH_PREFIX") or os.environ.get(
+        "WEBAGENT_AGENT_PATH_PREFIX"
+    )
+    if path_prefix:
+        extra_exports += f"export PATH={shlex.quote(path_prefix)}:$PATH; "
     for key, value in (extra_env or {}).items():
-        if value:
+        if value and key != "WEBAGENT_AGENT_PATH_PREFIX":
             extra_exports += f"export {key}=${{{key}:-{shlex.quote(value)}}}; "
     return (
+        "unset OPENCLAW_BASE_URL OPENCLAW_GATEWAY_URL; "
         "for __f in ~/.hermes/.env ~/.openclaw/.env; do "
         "[ -f \"$__f\" ] || continue; "
         "while IFS= read -r __line || [ -n \"$__line\" ]; do "
@@ -26,6 +32,7 @@ def with_runtime_env(command: str, extra_env: dict[str, str | None] | None = Non
         "done < \"$__f\"; "
         "done; "
         "unset __f __line __key; "
+        "unset OPENCLAW_BASE_URL OPENCLAW_GATEWAY_URL; "
         f"{extra_exports}"
         f"{command}"
     )

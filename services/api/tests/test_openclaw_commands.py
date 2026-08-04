@@ -54,6 +54,7 @@ def test_openclaw_adapter_builds_posix_cli_with_runtime_env(monkeypatch):
     assert "OPENCLAW_HOME=${OPENCLAW_HOME:-/tmp/webagent-runtime/openclaw-home}" in command
     assert "OPENCLAW_SKILLS_DIR=${OPENCLAW_SKILLS_DIR:-/tmp/webagent-runtime/skills}" in command
     assert "~/.openclaw/.env" in command
+    assert "unset OPENCLAW_BASE_URL OPENCLAW_GATEWAY_URL;" in command
 
 
 def test_openclaw_adapter_injects_default_skills_dir_for_wsl_commands():

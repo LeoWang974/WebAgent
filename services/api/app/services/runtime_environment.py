@@ -105,9 +105,7 @@ def _sync_openclaw_config(source_home: Path, destination_home: Path) -> None:
 
 
 def _openclaw_gateway_env_values(config_path: Path) -> dict[str, str | None]:
-    values: dict[str, str | None] = {
-        "OPENCLAW_GATEWAY_URL": environ.get("OPENCLAW_GATEWAY_URL"),
-    }
+    values: dict[str, str | None] = {}
     if not config_path.exists():
         return values
     try:
@@ -118,6 +116,7 @@ def _openclaw_gateway_env_values(config_path: Path) -> dict[str, str | None]:
     auth = gateway.get("auth") if isinstance(gateway, dict) else None
     token = auth.get("token") if isinstance(auth, dict) else None
     if isinstance(token, str) and token.strip():
+        values["OPENCLAW_GATEWAY_URL"] = environ.get("OPENCLAW_GATEWAY_URL")
         values.update(
             {
                 "OPENCLAW_GATEWAY_TOKEN": token.strip(),

@@ -8,6 +8,8 @@ from app.services.artifact_discovery import (
     _repo_root,
     create_artifacts_from_paths,
     create_artifacts_from_refs,
+    create_html_artifact_from_content,
+    create_markdown_artifact_from_content,
     discover_related_artifact_paths,
     extract_artifact_path_strings,
 )
@@ -43,6 +45,55 @@ def test_create_artifacts_from_paths_dedupes_by_content_hash(tmp_path: Path):
     assert artifacts[0].content == "# Report\nsame content"
     assert artifacts[0].metadata
     assert artifacts[0].metadata["contentHash"]
+
+
+def test_create_artifacts_from_paths_resolves_bare_filename_from_candidate_roots(
+    monkeypatch,
+    tmp_path: Path,
+):
+    workspace = tmp_path / ".openclaw" / "workspace"
+    workspace.mkdir(parents=True)
+    deck = workspace / "OpenClaw回归测试_社区商业新机会.pptx"
+    deck.write_bytes(b"pptx")
+    monkeypatch.setattr(
+        "app.services.artifact_discovery._candidate_roots",
+        lambda: [workspace],
+    )
+
+    artifacts = create_artifacts_from_paths("session_1", [deck.name])
+
+    assert len(artifacts) == 1
+    assert artifacts[0].type == "ppt_deck"
+    assert artifacts[0].metadata
+    assert artifacts[0].metadata["path"] == str(deck)
+
+
+def test_create_markdown_artifact_from_short_saved_report_summary():
+    artifact = create_markdown_artifact_from_content(
+        "session_1",
+        "Done. Saved as `openclaw-regression-report.md`.\n\nThe Markdown report is ready.",
+        "run_1",
+        title="openclaw-regression-report",
+    )
+
+    assert artifact is not None
+    assert artifact.type == "markdown_report"
+    assert artifact.metadata
+    assert artifact.metadata["source"] == "assistant_output_fallback"
+
+
+def test_create_html_artifact_from_short_saved_page_summary():
+    artifact = create_html_artifact_from_content(
+        "session_1",
+        "HTML file generated: `openclaw-regression-report.html`.\n\nOpen it in a browser.",
+        "run_1",
+        title="openclaw-regression-report",
+    )
+
+    assert artifact is not None
+    assert artifact.type == "html_page"
+    assert artifact.content
+    assert "<html" in artifact.content.lower()
 
 
 def test_create_artifacts_from_paths_supports_debug_json(tmp_path: Path):

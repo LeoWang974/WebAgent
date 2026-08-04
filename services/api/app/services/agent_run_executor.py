@@ -591,6 +591,17 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
         run = await db.get(AgentRun, run_id_value)
         if run is None:
             return
+        if await is_agent_run_cancelled(db, run_id_value):
+            await finish_db_agent_run(
+                db,
+                run,
+                status="cancelled",
+                label="Agent run cancelled",
+            )
+            conversation = await refresh_conversation(db, conversation_id)
+            conversation.status = "active"
+            await db.commit()
+            return
         await record_db_agent_run_event(
             db,
             run,

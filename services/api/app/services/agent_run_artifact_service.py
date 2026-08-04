@@ -1,21 +1,25 @@
+import asyncio
 import subprocess
 from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import schemas
 from app.api.routes.settings import DEFAULT_INTERFACE, to_interface_schema
 from app.core.config import settings
-from app.models import AgentRun, AgentRunEvent, Message, UserSettings
+from app.models import AgentRun, AgentRunEvent, Artifact, Message, UserSettings
 from app.services.agent_run_control import AgentRunTimeout
 from app.services.artifact_discovery import (
+    create_html_artifact_from_content,
     create_markdown_artifact_from_content,
     create_pptx_from_html_artifacts,
+    discover_artifacts_since,
     discover_artifacts_with_retry,
     discover_related_artifact_paths,
     extract_artifact_path_strings,
 )
-from app.services.persistence import persist_message
+from app.services.persistence import persist_message, to_artifact
 from app.services.session_artifacts import (
     artifact_display_priority,
     is_debug_artifact,
@@ -50,6 +54,12 @@ PLACEHOLDER_OUTPUTS = {
     "openclaw completed. discovering generated artifacts.",
     "agent runtime completed without emitting a visible status update.",
 }
+
+DELAYED_DISCOVERY_ATTEMPTS_BY_TYPE = {
+    "html_page": 6,
+    "ppt_deck": 10,
+}
+DELAYED_DISCOVERY_INTERVAL_SECONDS = 10
 
 
 def _has_positive_token(text: str, tokens: tuple[str, ...]) -> bool:
@@ -106,6 +116,142 @@ def _is_placeholder_output(assistant_output: str) -> bool:
     return not normalized or normalized in PLACEHOLDER_OUTPUTS
 
 
+async def session_source_artifact_paths(
+    db: AsyncSession,
+    conversation_id: str,
+    run_id: str,
+    artifact_types: set[str],
+) -> list[str]:
+    if not artifact_types:
+        return []
+    result = await db.execute(
+        select(Artifact)
+        .where(
+            Artifact.conversation_id == conversation_id,
+            Artifact.run_id != run_id,
+            Artifact.type.in_(artifact_types),
+            Artifact.is_primary.is_(True),
+        )
+        .order_by(Artifact.created_at.desc())
+        .limit(8)
+    )
+    paths: list[str] = []
+    for artifact in result.scalars().all():
+        metadata = artifact.artifact_metadata or {}
+        for key in ("originalPath", "path"):
+            value = metadata.get(key)
+            if isinstance(value, str) and value and value not in paths:
+                paths.append(value)
+    return paths
+
+
+def source_artifact_types_for_request(
+    requested_artifact_types: set[str],
+    skill_key: str | None,
+) -> set[str]:
+    source_types: set[str] = set()
+    if "html_page" in requested_artifact_types or skill_key == "html_generation":
+        source_types.add("markdown_report")
+    if "ppt_deck" in requested_artifact_types or skill_key == "ppt_generation":
+        source_types.update({"markdown_report", "html_page"})
+    return source_types
+
+
+def required_primary_artifact_types(
+    skill_key: str | None,
+    content: str,
+    requested_artifact_types: set[str] | None = None,
+) -> set[str]:
+    required_types = set(PRIMARY_ARTIFACT_TYPES_BY_SKILL.get(skill_key or "", set()))
+    required_types.update(
+        requested_primary_artifact_types(content)
+        if requested_artifact_types is None
+        else requested_artifact_types
+    )
+    return required_types
+
+
+def _artifact_metadata(artifact) -> dict:
+    metadata = getattr(artifact, "artifact_metadata", None)
+    if metadata is None:
+        metadata = getattr(artifact, "metadata", None)
+    return metadata or {}
+
+
+def _artifact_is_debug(artifact) -> bool:
+    metadata = _artifact_metadata(artifact)
+    return (
+        getattr(artifact, "type", None) == "debug_json"
+        or metadata.get("developerOnly") is True
+        or metadata.get("artifactRole") == "intermediate"
+        or (
+            getattr(artifact, "is_primary", True) is False
+            and metadata.get("artifactRole") == "preview_fallback"
+        )
+    )
+
+
+def has_required_primary_artifact(
+    artifacts,
+    required_types: set[str],
+) -> bool:
+    if not required_types:
+        return bool(artifacts)
+    return any(
+        artifact.type in required_types and not _artifact_is_debug(artifact)
+        for artifact in artifacts
+    )
+
+
+def delayed_discovery_attempts(required_types: set[str]) -> int:
+    return max(
+        (DELAYED_DISCOVERY_ATTEMPTS_BY_TYPE.get(artifact_type, 0) for artifact_type in required_types),
+        default=0,
+    )
+
+
+async def delayed_discover_primary_artifacts(
+    session_id: str,
+    since: datetime,
+    explicit_artifact_paths: list[str],
+    source_path_candidates: list[str],
+    run_id: str,
+    explicit_artifacts: list[object],
+    required_types: set[str],
+) -> list[schemas.Artifact]:
+    attempts = delayed_discovery_attempts(required_types)
+    discovered_artifacts: list[schemas.Artifact] = []
+    for attempt in range(attempts):
+        await asyncio.sleep(DELAYED_DISCOVERY_INTERVAL_SECONDS)
+        related_source_artifact_paths = discover_related_artifact_paths(
+            source_path_candidates,
+            since,
+        )
+        for path in related_source_artifact_paths:
+            if path not in explicit_artifact_paths:
+                explicit_artifact_paths.append(path)
+        discovered_artifacts = await discover_artifacts_with_retry(
+            session_id,
+            since,
+            explicit_artifact_paths,
+            run_id,
+            explicit_artifacts,
+        )
+        if not has_required_primary_artifact(discovered_artifacts, required_types):
+            discovered_artifacts.extend(
+                discover_artifacts_since(
+                    session_id,
+                    since,
+                    run_id,
+                )
+            )
+        if has_required_primary_artifact(discovered_artifacts, required_types):
+            return discovered_artifacts
+        if attempt == attempts - 1:
+            return discovered_artifacts
+    return discovered_artifacts
+
+
 async def discover_and_persist_run_artifacts(
     db: AsyncSession,
     run: AgentRun,
@@ -144,6 +290,18 @@ async def discover_and_persist_run_artifacts(
         for path in extract_artifact_path_strings(assistant_output)
         if path not in source_path_candidates
     )
+    requested_artifact_types = requested_primary_artifact_types(content)
+    source_artifact_types = source_artifact_types_for_request(requested_artifact_types, skill_key)
+    if source_artifact_types:
+        for path in await session_source_artifact_paths(
+            db,
+            conversation_id,
+            run_id_value,
+            source_artifact_types,
+        ):
+            if path not in source_path_candidates:
+                source_path_candidates.append(path)
+
     related_source_artifact_paths = discover_related_artifact_paths(
         source_path_candidates,
         run_started_at,
@@ -175,6 +333,30 @@ async def discover_and_persist_run_artifacts(
         run_id_value,
         explicit_artifacts,
     )
+    required_types = required_primary_artifact_types(
+        skill_key,
+        content,
+        requested_artifact_types,
+    )
+    if required_types and not has_required_primary_artifact(discovered_artifacts, required_types):
+        delayed_artifacts = await delayed_discover_primary_artifacts(
+            conversation_id,
+            run_started_at,
+            explicit_artifact_paths,
+            source_path_candidates,
+            run_id_value,
+            explicit_artifacts,
+            required_types,
+        )
+        if delayed_artifacts:
+            discovered_artifacts = delayed_artifacts
+            artifact_discovery_summary["delayed_retry_count"] = delayed_discovery_attempts(
+                required_types
+            )
+            artifact_discovery_summary["delayed_artifact_paths"] = [
+                str(_artifact_metadata(artifact).get("path") or "")
+                for artifact in discovered_artifacts
+            ]
     if (
         skill_key == "ppt_generation"
         and any(artifact.type == "html_page" for artifact in discovered_artifacts)
@@ -204,7 +386,6 @@ async def discover_and_persist_run_artifacts(
     current_run_artifacts = [
         artifact for artifact in stored_artifacts if artifact.run_id == run_id_value
     ]
-    requested_artifact_types = requested_primary_artifact_types(content)
     should_create_markdown_fallback = (
         "markdown_report" in requested_artifact_types
         or skill_key in {"data_analysis", "deep_research"}
@@ -232,6 +413,69 @@ async def discover_and_persist_run_artifacts(
             current_run_artifacts = [
                 artifact for artifact in stored_artifacts if artifact.run_id == run_id_value
             ]
+    should_create_html_fallback = "html_page" in requested_artifact_types
+    if (
+        not current_run_artifacts
+        and assistant_output
+        and not _is_placeholder_output(assistant_output)
+        and should_create_html_fallback
+    ):
+        fallback_artifact = create_html_artifact_from_content(
+            conversation_id,
+            assistant_output,
+            run_id_value,
+        )
+        if fallback_artifact is not None:
+            stored_artifacts.extend(
+                await persist_discovered_artifacts(
+                    db,
+                    conversation_id,
+                    [fallback_artifact],
+                    run_id_value,
+                )
+            )
+            current_run_artifacts = [
+                artifact for artifact in stored_artifacts if artifact.run_id == run_id_value
+            ]
+    should_create_ppt_fallback = "ppt_deck" in requested_artifact_types or skill_key == "ppt_generation"
+    if should_create_ppt_fallback and not any(
+        artifact.type == "ppt_deck" for artifact in current_run_artifacts
+    ):
+        html_candidates = [
+            artifact for artifact in current_run_artifacts if artifact.type == "html_page"
+        ]
+        if not html_candidates:
+            html_candidates = await latest_session_html_artifacts(db, conversation_id)
+        if html_candidates:
+            try:
+                pptx_artifact = create_pptx_from_html_artifacts(
+                    conversation_id,
+                    html_candidates,
+                    run_id_value,
+                    settings.agent_run_ppt_export_timeout_seconds,
+                )
+                if pptx_artifact is not None:
+                    stored_artifacts.extend(
+                        await persist_discovered_artifacts(
+                            db,
+                            conversation_id,
+                            [pptx_artifact],
+                            run_id_value,
+                        )
+                    )
+                    current_run_artifacts = [
+                        artifact
+                        for artifact in stored_artifacts
+                        if artifact.run_id == run_id_value
+                    ]
+            except subprocess.TimeoutExpired as error:
+                raise AgentRunTimeout(
+                    "ppt_export_timeout",
+                    (
+                        "PPTX export from existing HTML exceeded "
+                        f"{settings.agent_run_ppt_export_timeout_seconds} seconds."
+                    ),
+                ) from error
     if not current_run_artifacts:
         raise_for_fatal_runtime_diagnostics(adapter, assistant_output or "")
     validate_primary_artifacts(skill_key, current_run_artifacts, content, requested_artifact_types)
@@ -266,11 +510,10 @@ def validate_primary_artifacts(
     primary_candidates = [
         artifact for artifact in current_run_artifacts if not is_debug_artifact(artifact)
     ]
-    required_primary_types = set(PRIMARY_ARTIFACT_TYPES_BY_SKILL.get(skill_key or "", set()))
-    required_primary_types.update(
-        requested_primary_artifact_types(content)
-        if requested_artifact_types is None
-        else requested_artifact_types
+    required_primary_types = required_primary_artifact_types(
+        skill_key,
+        content,
+        requested_artifact_types,
     )
     if required_primary_types and not any(
         artifact.type in required_primary_types for artifact in primary_candidates
@@ -316,6 +559,24 @@ async def final_assistant_message(
         ),
         [artifact.id for artifact in response_artifacts] or None,
     )
+
+
+async def latest_session_html_artifacts(
+    db: AsyncSession,
+    conversation_id: str,
+    limit: int = 20,
+):
+    result = await db.execute(
+        select(Artifact)
+        .where(
+            Artifact.conversation_id == conversation_id,
+            Artifact.type == "html_page",
+            Artifact.is_primary.is_(True),
+        )
+        .order_by(Artifact.created_at.desc())
+        .limit(limit)
+    )
+    return [to_artifact(artifact) for artifact in result.scalars().all()]
 
 
 async def user_developer_mode_by_id(db: AsyncSession, user_id: str) -> bool:
