@@ -23,7 +23,7 @@ from app.services.agent_run_control import (
     AgentRunTimeout,
     is_agent_run_cancelled,
 )
-from app.services.agent_run_workspace import run_workspace_dir
+from app.services.agent_run_workspace import run_artifacts_dir, run_workspace_dir
 from app.services.agent_runs import (
     finish_db_agent_run,
     record_db_agent_run_event,
@@ -310,6 +310,8 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
             skill_key=skill_key,
             model_id=model_id,
             run_id=run_id_value,
+            working_dir=str(run_workspace),
+            artifacts_dir=str(run_artifacts_dir(run_id_value, conversation_id, user_id)),
         )
 
         if hasattr(adapter, "stream_response_events") or hasattr(adapter, "stream_response"):

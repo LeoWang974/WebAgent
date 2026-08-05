@@ -186,6 +186,8 @@ class HermesAdapter(AgentRuntimeAdapter):
             run_id=input_data.run_id,
             toolsets=None,
             skills=None,
+            working_dir=input_data.working_dir,
+            artifacts_dir=input_data.artifacts_dir,
         ):
             if hasattr(event, "content"):
                 content = str(event.content or "").strip()

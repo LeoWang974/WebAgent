@@ -16,12 +16,16 @@ class AgentRunCreate:
         skill_key: str | None = None,
         model_id: str | None = None,
         run_id: str | None = None,
+        working_dir: str | None = None,
+        artifacts_dir: str | None = None,
     ):
         self.content = content
         self.session_id = session_id
         self.skill_key = skill_key
         self.model_id = model_id
         self.run_id = run_id
+        self.working_dir = working_dir
+        self.artifacts_dir = artifacts_dir
 
 
 class AgentRun:

@@ -173,6 +173,15 @@ class HermesCliWrapper:
             wsl_path = prompt_path.as_posix()
         return prompt_path, wsl_path
 
+    @staticmethod
+    def _shell_visible_path(path_value: str) -> str:
+        path = Path(path_value).expanduser()
+        drive = path.drive.rstrip(":").lower()
+        if drive:
+            rest = path.as_posix().split(":", 1)[1].lstrip("/")
+            return f"/mnt/{drive}/{rest}"
+        return path.as_posix()
+
     def _build_chat_exec_args(
         self,
         question: str,
@@ -686,9 +695,26 @@ class HermesCliWrapper:
         skills: str | None = None,
         model: str | None = None,
         run_id: str | None = None,
+        working_dir: str | None = None,
+        artifacts_dir: str | None = None,
     ) -> AsyncGenerator[HermesStreamEvent, None]:
         self.last_artifact_paths = []
         self.last_artifacts = []
+        process_cwd: str | None = None
+        if working_dir:
+            shell_working_dir = self._shell_visible_path(working_dir)
+            self._env.update(
+                {
+                    "WEBAGENT_RUN_WORKSPACE": shell_working_dir,
+                    "HERMES_WORKSPACE": shell_working_dir,
+                    "WORKSPACE": shell_working_dir,
+                }
+            )
+            cwd_path = Path(working_dir).expanduser()
+            if os.name != "nt" and cwd_path.exists():
+                process_cwd = str(cwd_path)
+        if artifacts_dir:
+            self._env["WEBAGENT_ARTIFACTS_DIR"] = self._shell_visible_path(artifacts_dir)
         self.last_diagnostics = {
             "artifact_paths": [],
             "artifacts": [],
@@ -697,6 +723,8 @@ class HermesCliWrapper:
             "raw_log_path": None,
             "stderr_tail": "",
             "stdout_tail": "",
+            "working_dir": working_dir,
+            "artifacts_dir": artifacts_dir,
         }
 
         logger.info(
@@ -735,6 +763,7 @@ class HermesCliWrapper:
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            cwd=process_cwd,
         )
         if run_id:
             self.active_processes[run_id] = process
