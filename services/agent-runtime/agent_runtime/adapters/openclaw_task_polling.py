@@ -20,7 +20,19 @@ async def poll_task_family_snapshot(
         timeout_seconds=20,
     )
     tasks = []
+    if tasks_payload is None:
+        failures = int(poll_state.get("task_list_failures", 0)) + 1
+        poll_state["task_list_failures"] = failures
+        events.append(
+            adapter._stage_event(
+                run_id,
+                "stage_update",
+                "OpenClaw task list is unavailable; checking artifact directories directly.",
+                min(80, int(poll_state.get("progress", 20)) + 4),
+            )
+        )
     if isinstance(tasks_payload, dict):
+        poll_state["task_list_failures"] = 0
         raw_tasks = tasks_payload.get("tasks")
         tasks = raw_tasks if isinstance(raw_tasks, list) else []
 
@@ -42,13 +54,23 @@ async def poll_task_family_snapshot(
         report_dirs.update(await adapter._discover_report_dirs_from_input(input_data))
 
     artifact_paths = await adapter._find_report_artifacts(report_dirs)
-    if not artifact_paths and not adapter._primary_output_artifact_paths(artifact_filter_key):
-        artifact_paths = await adapter._find_recent_openclaw_artifacts(
+    if not adapter._primary_output_artifact_paths(artifact_filter_key):
+        recent_artifact_paths = await adapter._find_recent_openclaw_artifacts(
             artifact_filter_key,
             input_data,
         )
+        artifact_paths = list(dict.fromkeys([*artifact_paths, *recent_artifact_paths]))
     for path in artifact_paths:
         adapter._remember_artifact_path(path)
+
+    if (
+        int(poll_state.get("task_list_failures", 0)) >= 3
+        and not adapter._primary_output_artifact_paths(artifact_filter_key)
+    ):
+        raise RuntimeError(
+            "OpenClaw task list did not respond and no final artifact was found in "
+            "the run or gateway artifact directories."
+        )
 
     failed_task_label = adapter._failed_background_task_label(matching_tasks)
     if failed_task_label and not adapter._primary_output_artifact_paths(artifact_filter_key):

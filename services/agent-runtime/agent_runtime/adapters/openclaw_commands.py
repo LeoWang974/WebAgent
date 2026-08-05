@@ -10,6 +10,7 @@ def build_openclaw_message(input_data: AgentRunCreate) -> str:
 
 def with_runtime_env(command: str, extra_env: dict[str, str | None] | None = None) -> str:
     extra_exports = ""
+    cwd_command = ""
     path_prefix = (extra_env or {}).get("WEBAGENT_AGENT_PATH_PREFIX") or os.environ.get(
         "WEBAGENT_AGENT_PATH_PREFIX"
     )
@@ -17,7 +18,11 @@ def with_runtime_env(command: str, extra_env: dict[str, str | None] | None = Non
         extra_exports += f"export PATH={shlex.quote(path_prefix)}:$PATH; "
     for key, value in (extra_env or {}).items():
         if value and key != "WEBAGENT_AGENT_PATH_PREFIX":
-            extra_exports += f"export {key}=${{{key}:-{shlex.quote(value)}}}; "
+            extra_exports += f"export {key}={shlex.quote(value)}; "
+    agent_cwd = (extra_env or {}).get("WEBAGENT_AGENT_CWD")
+    if agent_cwd:
+        quoted_cwd = shlex.quote(agent_cwd)
+        cwd_command = f"mkdir -p {quoted_cwd}; cd {quoted_cwd}; "
     return (
         "unset OPENCLAW_BASE_URL OPENCLAW_GATEWAY_URL; "
         "for __f in ~/.hermes/.env ~/.openclaw/.env; do "
@@ -34,6 +39,7 @@ def with_runtime_env(command: str, extra_env: dict[str, str | None] | None = Non
         "unset __f __line __key; "
         "unset OPENCLAW_BASE_URL OPENCLAW_GATEWAY_URL; "
         f"{extra_exports}"
+        f"{cwd_command}"
         f"{command}"
     )
 

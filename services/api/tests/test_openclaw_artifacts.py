@@ -50,6 +50,49 @@ def test_openclaw_adapter_extracts_artifact_refs():
     assert artifacts[1].artifact_type == "ppt_deck"
 
 
+def test_openclaw_adapter_resolves_quoted_relative_artifact_refs(tmp_path):
+    workspace_dir = tmp_path / ".openclaw" / "workspace"
+    workspace_dir.mkdir(parents=True)
+    report_path = workspace_dir / "OpenClaw_即时零售服务新趋势.md"
+    report_path.write_text("# 即时零售服务新趋势\n\n这是完整报告正文。", encoding="utf-8")
+    adapter = OpenClawAdapter(home_dir=str(tmp_path))
+
+    adapter._remember_artifact_paths(
+        "文件已生成：`OpenClaw_即时零售服务新趋势.md`，规模 18KB。"
+    )
+
+    artifacts = adapter.get_last_artifacts()
+    assert adapter.get_last_artifact_paths() == [str(report_path)]
+    assert artifacts[0].artifact_type == "markdown_report"
+    assert artifacts[0].source_dir == str(workspace_dir)
+
+
+def test_openclaw_adapter_skips_unresolved_relative_artifact_refs(tmp_path):
+    adapter = OpenClawAdapter(home_dir=str(tmp_path))
+
+    adapter._remember_artifact_paths("文件已生成：`missing-report.md`。")
+
+    assert adapter.get_last_artifacts() == []
+    assert adapter._unresolved_relative_artifact_refs("文件已生成：`missing-report.md`。") == [
+        "missing-report.md"
+    ]
+
+
+def test_openclaw_adapter_does_not_mark_resolved_relative_refs_unresolved(tmp_path):
+    workspace_dir = tmp_path / ".openclaw" / "workspace"
+    workspace_dir.mkdir(parents=True)
+    (workspace_dir / "resolved-report.md").write_text("# Report", encoding="utf-8")
+    adapter = OpenClawAdapter(home_dir=str(tmp_path))
+
+    assert adapter._unresolved_relative_artifact_refs("文件已生成：`resolved-report.md`。") == []
+
+
+def test_openclaw_adapter_ignores_bootstrap_relative_refs_as_unresolved(tmp_path):
+    adapter = OpenClawAdapter(home_dir=str(tmp_path))
+
+    assert adapter._unresolved_relative_artifact_refs("Loaded `AGENTS.md` and `SOUL.md`.") == []
+
+
 def test_openclaw_adapter_extracts_structured_artifact_paths():
     paths = extract_structured_artifact_paths(
         "",
@@ -176,6 +219,31 @@ def test_openclaw_adapter_recent_ppt_without_prompt_match_is_rejected():
     assert not OpenClawAdapter._recent_artifact_matches_input(
         "/home/demo/.openclaw/workspace/OpenClaw_同用户并发测试2.pptx",
         "ppt_generation",
+        input_data,
+    )
+
+
+def test_openclaw_adapter_recent_research_requires_prompt_match():
+    input_data = AgentRunCreate(
+        content="请调研《社区微旅行服务新趋势-20260804120854》，输出中文 Markdown 报告。",
+        session_id="session_123",
+        run_id="run_123",
+        skill_key=None,
+    )
+
+    assert not OpenClawAdapter._recent_artifact_matches_input(
+        "/home/demo/.openclaw/workspace/OpenClaw_社区微旅行服务新趋势.md",
+        "deep_research",
+        input_data,
+    )
+    assert not OpenClawAdapter._recent_artifact_matches_input(
+        "/home/demo/.openclaw/workspace/OpenClaw_AI教育工具的新机会.pptx",
+        "deep_research",
+        input_data,
+    )
+    assert OpenClawAdapter._recent_artifact_matches_input(
+        "/home/demo/.openclaw/workspace/OpenClaw_社区微旅行服务新趋势-20260804120854.md",
+        "deep_research",
         input_data,
     )
 

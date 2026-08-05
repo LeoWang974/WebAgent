@@ -1,4 +1,6 @@
 import asyncio
+import os
+import signal
 import shlex
 from collections.abc import Callable
 from pathlib import Path
@@ -22,6 +24,7 @@ async def run_find_command(
         *build_shell_args(command),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        **({"start_new_session": True} if os.name != "nt" else {}),
     )
     try:
         stdout, _ = await asyncio.wait_for(
@@ -29,7 +32,10 @@ async def run_find_command(
             timeout=timeout_seconds,
         )
     except TimeoutError:
-        process.kill()
+        if os.name != "nt" and process.pid:
+            os.killpg(process.pid, signal.SIGKILL)
+        else:
+            process.kill()
         await process.wait()
         return []
     return [
@@ -89,10 +95,15 @@ async def find_recent_openclaw_artifacts(
     is_primary_output_artifact: Callable[[str], bool],
 ) -> list[str]:
     command = (
-        'for __dir in "$PWD" "$HOME" "$HOME/.openclaw/workspace" "$HOME/.openclaw/artifacts"; do '
+        'for __dir in "$WEBAGENT_RUN_ARTIFACT_DIR" "$WEBAGENT_RUN_ROOT" '
+        '"$WEBAGENT_OPENCLAW_GATEWAY_HOME/.openclaw/workspace" '
+        '"$WEBAGENT_OPENCLAW_GATEWAY_HOME/.openclaw/artifacts" '
+        '"$HOME" "$HOME/.openclaw/workspace" "$HOME/.openclaw/artifacts"; do '
+        '[ -n "$__dir" ] || continue; '
         '[ -d "$__dir" ] || continue; '
-        f'find "$__dir" -maxdepth 8 -type f -mmin -240 {ARTIFACT_FIND_EXPR} -print; '
-        "done"
+        f'find "$__dir" -maxdepth 8 -type f -mmin -240 {ARTIFACT_FIND_EXPR} '
+        "-printf '%T@ %p\\n'; "
+        "done | sort -rn | cut -d' ' -f2-"
     )
     paths = await run_find_command(command, build_shell_args=build_shell_args)
     paths = list(dict.fromkeys(paths))

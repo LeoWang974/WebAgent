@@ -254,6 +254,90 @@ def test_openclaw_adapter_detects_chinese_markdown_research_prompt():
 
 
 @pytest.mark.asyncio
+async def test_openclaw_adapter_long_run_does_not_call_task_list(monkeypatch):
+    class HangingProcess:
+        returncode = None
+
+        async def communicate(self):
+            await asyncio.sleep(60)
+            return b"", b""
+
+    adapter = OpenClawAdapter(command_timeout_seconds=1)
+    process = HangingProcess()
+
+    async def fail_json_command(args, timeout_seconds=20):
+        raise AssertionError(f"task API should not be called: {args}")
+
+    async def fake_start(input_data, run_id):
+        return process
+
+    async def fake_find_report_artifacts(report_dirs):
+        return []
+
+    async def fake_find_recent_artifacts(skill_key, input_data=None):
+        return []
+
+    async def fake_discover_report_dirs(input_data):
+        return set()
+
+    async def fake_kill_and_collect_output(process, communicate_task):
+        communicate_task.cancel()
+        process.returncode = -9
+        return b"", b""
+
+    async def fake_poll_background_completion(*args, **kwargs):
+        if False:
+            yield None
+
+    monkeypatch.setattr(adapter, "_run_openclaw_json_command", fail_json_command)
+    monkeypatch.setattr(adapter, "_start_agent_process", fake_start)
+    monkeypatch.setattr(adapter, "_foreground_poll_interval_seconds", lambda skill_key: 0.01)
+    monkeypatch.setattr(adapter, "_find_report_artifacts", fake_find_report_artifacts)
+    monkeypatch.setattr(adapter, "_find_recent_openclaw_artifacts", fake_find_recent_artifacts)
+    monkeypatch.setattr(adapter, "_discover_report_dirs_from_input", fake_discover_report_dirs)
+    monkeypatch.setattr(adapter, "_kill_and_collect_output", fake_kill_and_collect_output)
+    monkeypatch.setattr(adapter, "_should_wait_for_background_completion", lambda *_: False)
+    monkeypatch.setattr(adapter, "_poll_background_completion", fake_poll_background_completion)
+
+    events = [
+        event
+        async for event in adapter.stream_response_events(
+            AgentRunCreate(
+                content="Research retail trends and output a Markdown report.",
+                session_id="session_123",
+                run_id="run_123",
+                skill_key="deep_research",
+            )
+        )
+    ]
+
+    assert any(event.step and "OpenClaw" in event.step.label for event in events)
+    assert adapter.get_last_diagnostics()["taskApiUsed"] is False
+
+
+@pytest.mark.asyncio
+async def test_openclaw_cancel_without_known_task_ids_does_not_call_task_list(monkeypatch):
+    adapter = OpenClawAdapter()
+
+    async def fail_json_command(args, timeout_seconds=20):
+        raise AssertionError(f"task API should not be called: {args}")
+
+    monkeypatch.setattr(adapter, "_run_openclaw_json_command", fail_json_command)
+
+    async def fake_terminate_registered_run_process(run_id):
+        return None
+
+    monkeypatch.setattr(
+        "agent_runtime.adapters.openclaw_adapter.terminate_registered_run_process",
+        fake_terminate_registered_run_process,
+    )
+
+    result = await adapter.cancel_run("run_without_task_ids")
+
+    assert result.status == "cancelled"
+
+
+@pytest.mark.asyncio
 async def test_openclaw_adapter_polls_background_after_cli_timeout(monkeypatch):
     class TimeoutProcess:
         returncode = None
@@ -516,7 +600,7 @@ async def test_openclaw_adapter_forces_fallback_when_artifact_task_never_outputs
     monkeypatch.setattr(adapter, "_start_agent_process", fake_start)
     monkeypatch.setattr(adapter, "_foreground_poll_interval_seconds", lambda skill_key: 0.01)
     monkeypatch.setattr(adapter, "_no_artifact_timeout_seconds", lambda skill_key: 0.02)
-    monkeypatch.setattr(adapter, "_poll_task_family_snapshot", fake_poll_snapshot)
+    monkeypatch.setattr(adapter, "_poll_artifact_snapshot", fake_poll_snapshot)
     monkeypatch.setattr(adapter, "_kill_and_collect_output", fake_kill_and_collect_output)
 
     events = [

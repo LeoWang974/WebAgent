@@ -173,7 +173,12 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
         current_adapter_key,
         run.status,
     )
-    if run.status == "cancelled":
+    if run.status != "queued":
+        logger.info(
+            "Skipping non-queued agent run task: run_id=%s status=%s",
+            run_id_value,
+            run.status,
+        )
         return
     content = str(queued_payload.get("content") or "")
     model_id = queued_payload.get("modelId")

@@ -15,6 +15,19 @@ OPENCLAW_SKILL_NAMES = {
     "u1_image": "OpenClaw image generation",
 }
 
+ARTIFACT_PATH_EXTENSIONS = (
+    "md|markdown|html|htm|pptx|ppt|png|jpg|jpeg|webp|csv|xlsx|json"
+)
+ABSOLUTE_ARTIFACT_PATH_PATTERN = re.compile(
+    r"(?P<path>(?:[A-Za-z]:\\|/mnt/[a-z]/|/)[^\s'\"<>]+"
+    rf"\.(?:{ARTIFACT_PATH_EXTENSIONS}))",
+    re.IGNORECASE,
+)
+QUOTED_ARTIFACT_REF_PATTERN = re.compile(
+    rf"[`\"'“”](?P<path>[^`\"'“”\r\n<>]{{1,240}}\.(?:{ARTIFACT_PATH_EXTENSIONS}))",
+    re.IGNORECASE,
+)
+
 
 def now_iso() -> str:
     return datetime.now(UTC).isoformat()
@@ -80,12 +93,15 @@ def extract_output(stdout: str, stderr: str) -> str:
 
 
 def extract_paths(text: str) -> list[str]:
-    pattern = re.compile(
-        r"(?P<path>(?:[A-Za-z]:\\|/mnt/[a-z]/|/)[^\s'\"<>]+"
-        r"\.(?:md|markdown|html|htm|pptx|ppt|png|jpg|jpeg|webp|csv|xlsx|json))",
-        re.IGNORECASE,
-    )
-    return [match.group("path").rstrip(".,;:") for match in pattern.finditer(text)]
+    paths: list[str] = []
+    seen: set[str] = set()
+    for pattern in (ABSOLUTE_ARTIFACT_PATH_PATTERN, QUOTED_ARTIFACT_REF_PATTERN):
+        for match in pattern.finditer(text):
+            path = match.group("path").strip().rstrip(".,;:")
+            if path and path not in seen:
+                paths.append(path)
+                seen.add(path)
+    return paths
 
 
 def guess_artifact_type(path: str) -> str | None:

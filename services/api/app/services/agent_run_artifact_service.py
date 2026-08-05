@@ -1,4 +1,5 @@
 import asyncio
+import re
 import subprocess
 from datetime import datetime
 
@@ -62,32 +63,52 @@ DELAYED_DISCOVERY_ATTEMPTS_BY_TYPE = {
 DELAYED_DISCOVERY_INTERVAL_SECONDS = 10
 
 
-def _has_positive_token(text: str, tokens: tuple[str, ...]) -> bool:
-    negative_markers = ("不", "不要", "不得", "无需", "不是", "非", "no ", "not ", "without ")
-    for token in tokens:
-        start = 0
-        while True:
-            index = text.find(token, start)
-            if index < 0:
-                break
-            prefix = text[max(0, index - 16) : index]
-            if not any(marker in prefix for marker in negative_markers):
-                return True
-            start = index + len(token)
+REQUEST_ACTION_PATTERN = (
+    r"(生成|制作|输出|导出|创建|转换|转成|做成|generate|create|export|convert|produce|make)"
+)
+NEGATIVE_CONTEXT_PATTERN = r"(不要|不需要|无需|不得|不是|非|no|not|without)"
+
+
+def _mentions_requested_artifact(text: str, artifact_pattern: str) -> bool:
+    return bool(
+        re.search(rf"{REQUEST_ACTION_PATTERN}.{{0,24}}{artifact_pattern}", text, re.IGNORECASE)
+        or re.search(
+            rf"{artifact_pattern}.{{0,24}}{REQUEST_ACTION_PATTERN}",
+            text,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _has_positive_requested_artifact(text: str, artifact_pattern: str) -> bool:
+    for match in re.finditer(artifact_pattern, text, re.IGNORECASE):
+        if text[match.end() : match.end() + 1] in {"/", "／"}:
+            continue
+        context = text[max(0, match.start() - 32) : match.end() + 32]
+        artifact_prefix = text[max(0, match.start() - 12) : match.start()]
+        artifact_phrase = text[max(0, match.start() - 12) : match.end()]
+        if re.search(NEGATIVE_CONTEXT_PATTERN, artifact_prefix, re.IGNORECASE) or re.search(
+            rf"{NEGATIVE_CONTEXT_PATTERN}.{{0,12}}{artifact_pattern}",
+            artifact_phrase,
+            re.IGNORECASE,
+        ):
+            continue
+        if _mentions_requested_artifact(context, artifact_pattern):
+            return True
     return False
 
 
 def requested_primary_artifact_types(content: str) -> set[str]:
     lowered = content.lower()
-    if _has_positive_token(lowered, ("ppt", "pptx", "幻灯片", "演示文稿")):
+    if _has_positive_requested_artifact(lowered, r"(pptx?|幻灯片|演示文稿)"):
         return {"ppt_deck"}
-    if _has_positive_token(lowered, ("html", "网页", "页面")):
+    if _has_positive_requested_artifact(lowered, r"(html|网页|页面)"):
         return {"html_page"}
-    if _has_positive_token(lowered, ("图片", "图像", "生图", "image", "png", "jpg", "jpeg")):
+    if _has_positive_requested_artifact(lowered, r"(图片|图像|生图|image|png|jpe?g)"):
         return {"image_result"}
-    if _has_positive_token(lowered, ("csv", "excel", "xlsx", "数据表文件", "表格文件")):
+    if _has_positive_requested_artifact(lowered, r"(csv|excel|xlsx|数据表文件|表格文件)"):
         return {"data_table"}
-    if _has_positive_token(lowered, ("markdown", ".md", " md", "md文件", "md 文件")):
+    if _has_positive_requested_artifact(lowered, r"(markdown|\.md\b|md 文件|md文件)"):
         return {"markdown_report"}
     return set()
 

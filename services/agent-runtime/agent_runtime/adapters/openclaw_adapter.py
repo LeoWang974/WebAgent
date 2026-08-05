@@ -2,6 +2,7 @@
 import json
 import os
 import re
+import signal
 import shlex
 from collections.abc import AsyncGenerator
 from pathlib import Path
@@ -212,7 +213,7 @@ class OpenClawAdapter(AgentRuntimeAdapter):
                             }
                             break
 
-                        events = await self._poll_task_family_snapshot(
+                        events = await self._poll_artifact_snapshot(
                             input_data,
                             run_id,
                             report_dirs,
@@ -230,7 +231,6 @@ class OpenClawAdapter(AgentRuntimeAdapter):
                         if (
                             artifact_filter_key in {"html_generation", "ppt_generation"}
                             and elapsed >= self._no_task_family_timeout_seconds(artifact_filter_key)
-                            and int(self.last_diagnostics.get("matchingTaskCount", 0) or 0) == 0
                             and not self.last_artifact_paths
                         ):
                             forced_fallback_completion = True
@@ -294,6 +294,9 @@ class OpenClawAdapter(AgentRuntimeAdapter):
         raw_stderr = stderr.decode("utf-8", errors="replace")
         self._remember_artifact_paths(raw_stdout)
         self._remember_artifact_paths(raw_stderr)
+        unresolved_artifact_refs = self._unresolved_relative_artifact_refs(
+            f"{raw_stdout}\n{raw_stderr}"
+        )
         output = extract_output(raw_stdout, raw_stderr)
         structured_artifacts = extract_structured_artifacts(
             raw_stdout,
@@ -320,6 +323,27 @@ class OpenClawAdapter(AgentRuntimeAdapter):
                 yield event
             final_artifact_found = bool(self._primary_output_artifact_paths(artifact_filter_key))
 
+        if not self.last_artifacts and unresolved_artifact_refs:
+            self.last_diagnostics = {
+                "adapter": "openclaw",
+                "mode": self.mode,
+                "exitCode": process.returncode,
+                "stderrTail": raw_stderr[-2000:],
+                "stdoutTail": raw_stdout[-2000:],
+                "unresolvedArtifactRefs": unresolved_artifact_refs,
+                "artifactCount": 0,
+                "cliTimedOut": cli_timed_out,
+                "finalArtifactFound": False,
+                "reportDirs": sorted(report_dirs),
+                "artifactFilterKey": artifact_filter_key,
+                "trackedBackground": should_track_background,
+                "taskApiUsed": False,
+            }
+            refs = ", ".join(unresolved_artifact_refs[:5])
+            raise RuntimeError(
+                "OpenClaw referenced artifact files but WebAgent could not resolve them: "
+                f"{refs}"
+            )
         if not self.last_artifacts:
             self._create_fallback_artifact_from_output(input_data, run_id, output)
         self.last_diagnostics = {
@@ -335,6 +359,7 @@ class OpenClawAdapter(AgentRuntimeAdapter):
             "reportDirs": sorted(report_dirs),
             "artifactFilterKey": artifact_filter_key,
             "trackedBackground": should_track_background,
+            "taskApiUsed": False,
         }
 
         if (
@@ -436,7 +461,7 @@ class OpenClawAdapter(AgentRuntimeAdapter):
         communicate_task: asyncio.Task,
     ) -> tuple[bytes, bytes]:
         if process.returncode is None:
-            process.kill()
+            OpenClawAdapter._kill_process_tree(process)
         try:
             return await asyncio.wait_for(asyncio.shield(communicate_task), timeout=5)
         except TimeoutError:
@@ -485,11 +510,39 @@ class OpenClawAdapter(AgentRuntimeAdapter):
         return with_runtime_env(command, extra_env)
 
     def _runtime_env(self) -> dict[str, str | None]:
+        run_root = self._shell_parent_dir(self.home_dir)
+        run_artifact_dir = self._join_shell_path(run_root, "artifacts")
         return {
             "HOME": self.home_dir,
             "OPENCLAW_HOME": self.home_dir,
             "OPENCLAW_SKILLS_DIR": self.skills_dir,
+            "WEBAGENT_AGENT_CWD": run_artifact_dir,
+            "WEBAGENT_RUN_ARTIFACT_DIR": run_artifact_dir,
+            "WEBAGENT_RUN_ROOT": run_root,
+            "WEBAGENT_OPENCLAW_GATEWAY_HOME": os.environ.get(
+                "WEBAGENT_OPENCLAW_GATEWAY_HOME"
+            ),
         }
+
+    @staticmethod
+    def _shell_parent_dir(path: str | None) -> str | None:
+        if not path:
+            return None
+        normalized = path.rstrip("/\\")
+        if "/" in normalized and ("\\" not in normalized or normalized.startswith("/")):
+            parent = normalized.rsplit("/", maxsplit=1)[0]
+            return parent or "/"
+        if "\\" in normalized:
+            return normalized.rsplit("\\", maxsplit=1)[0] or normalized
+        return str(Path(normalized).parent)
+
+    @staticmethod
+    def _join_shell_path(parent: str | None, child: str) -> str | None:
+        if not parent:
+            return None
+        separator = "\\" if "\\" in parent and not parent.startswith("/") else "/"
+        stripped_parent = parent.rstrip("/\\")
+        return f"{stripped_parent}{separator}{child}"
 
     def _reset_last_state(self) -> None:
         self.last_artifact_paths = []
@@ -503,9 +556,90 @@ class OpenClawAdapter(AgentRuntimeAdapter):
     def _remember_artifact_path(self, path: str) -> None:
         self._remember_artifact_ref(AgentArtifactRef(path=path))
 
+    def _unresolved_relative_artifact_refs(self, text: str) -> list[str]:
+        refs: list[str] = []
+        seen: set[str] = set()
+        if not self.home_dir:
+            return refs
+        bootstrap_names = {
+            "AGENTS.md",
+            "SOUL.md",
+            "TOOLS.md",
+            "IDENTITY.md",
+            "USER.md",
+            "HEARTBEAT.md",
+            "BOOTSTRAP.md",
+        }
+        for path in extract_paths(text):
+            if not path or Path(path).is_absolute() or Path(path).name in bootstrap_names:
+                continue
+            resolved = self._resolve_artifact_ref(AgentArtifactRef(path=path))
+            if resolved.path == path and path not in seen:
+                refs.append(path)
+                seen.add(path)
+        return refs
+
+    def _resolve_artifact_ref(self, artifact: AgentArtifactRef) -> AgentArtifactRef:
+        path = artifact.path.strip()
+        if not path:
+            return artifact
+        candidate = Path(path)
+        if candidate.is_absolute():
+            return artifact
+        if not self.home_dir:
+            return artifact
+
+        search_roots = []
+        if artifact.source_dir:
+            search_roots.append(Path(artifact.source_dir))
+        run_root = Path(self.home_dir).parent if self.home_dir else None
+        if run_root:
+            search_roots.extend([run_root / "artifacts", run_root])
+        gateway_home = os.environ.get("WEBAGENT_OPENCLAW_GATEWAY_HOME")
+        if gateway_home:
+            gateway_root = Path(gateway_home)
+            search_roots.extend(
+                [
+                    gateway_root / ".openclaw" / "workspace",
+                    gateway_root / ".openclaw" / "artifacts",
+                ]
+            )
+        search_roots.extend(
+            [
+                Path(self.home_dir),
+                Path(self.home_dir) / ".openclaw" / "workspace",
+                Path(self.home_dir) / ".openclaw" / "artifacts",
+            ]
+        )
+        for root in search_roots:
+            direct_candidate = root / path
+            if direct_candidate.is_file():
+                artifact.path = str(direct_candidate)
+                artifact.source_dir = artifact.source_dir or str(direct_candidate.parent)
+                return artifact
+            try:
+                matches = [
+                    item
+                    for item in root.rglob(candidate.name)
+                    if item.is_file() and item.name == candidate.name
+                ]
+            except OSError:
+                matches = []
+            if matches:
+                resolved = max(matches, key=lambda item: item.stat().st_mtime)
+                artifact.path = str(resolved)
+                artifact.source_dir = artifact.source_dir or str(resolved.parent)
+                return artifact
+        return artifact
+
     def _remember_artifact_ref(self, artifact: AgentArtifactRef) -> None:
+        original_path = artifact.path.strip()
+        original_is_relative = bool(original_path) and not Path(original_path).is_absolute()
+        artifact = self._resolve_artifact_ref(artifact)
         path = artifact.path
-        if is_openclaw_bootstrap_path(path):
+        if self.home_dir and original_is_relative and path == original_path:
+            return
+        if is_openclaw_bootstrap_path(path) or not self._is_primary_output_artifact(path):
             return
         existing_index = next(
             (index for index, item in enumerate(self.last_artifacts) if item.path == path),
@@ -538,6 +672,7 @@ class OpenClawAdapter(AgentRuntimeAdapter):
             *self._build_cli_args(args),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            **({"start_new_session": True} if os.name != "nt" else {}),
         )
         try:
             stdout, stderr = await asyncio.wait_for(
@@ -545,7 +680,7 @@ class OpenClawAdapter(AgentRuntimeAdapter):
                 timeout=timeout_seconds,
             )
         except TimeoutError:
-            process.kill()
+            self._kill_process_tree(process)
             try:
                 await asyncio.wait_for(process.wait(), timeout=5)
             except TimeoutError:
@@ -570,6 +705,7 @@ class OpenClawAdapter(AgentRuntimeAdapter):
             *self._build_cli_args(args),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            **({"start_new_session": True} if os.name != "nt" else {}),
         )
         try:
             stdout, stderr = await asyncio.wait_for(
@@ -577,7 +713,7 @@ class OpenClawAdapter(AgentRuntimeAdapter):
                 timeout=timeout_seconds,
             )
         except TimeoutError:
-            process.kill()
+            self._kill_process_tree(process)
             try:
                 await asyncio.wait_for(process.wait(), timeout=5)
             except TimeoutError:
@@ -589,25 +725,19 @@ class OpenClawAdapter(AgentRuntimeAdapter):
             stderr.decode("utf-8", errors="replace"),
         )
 
+    @staticmethod
+    def _kill_process_tree(process: asyncio.subprocess.Process) -> None:
+        pid = getattr(process, "pid", None)
+        if os.name != "nt" and pid:
+            try:
+                os.killpg(pid, signal.SIGKILL)
+                return
+            except ProcessLookupError:
+                return
+        process.kill()
+
     async def _cancel_openclaw_tasks(self, run_id: str) -> None:
         task_ids = set(self.run_task_ids.pop(run_id, set()))
-        tasks_payload = await self._run_openclaw_json_command(
-            ["tasks", "list", "--json"],
-            timeout_seconds=20,
-        )
-        raw_tasks = []
-        if isinstance(tasks_payload, dict):
-            raw = tasks_payload.get("tasks")
-            raw_tasks = raw if isinstance(raw, list) else []
-        for task in raw_tasks:
-            if not isinstance(task, dict):
-                continue
-            task_text = self._task_text(task)
-            if f"webagent_run_id={run_id}" not in task_text:
-                continue
-            task_id = task.get("taskId")
-            if isinstance(task_id, str) and task.get("status") in {"queued", "running"}:
-                task_ids.add(task_id)
         for task_id in sorted(task_ids):
             await self._run_openclaw_command(
                 ["tasks", "cancel", task_id],
@@ -735,17 +865,21 @@ for item in sorted(matches):
         skill_key: str | None,
         input_data: AgentRunCreate | None,
     ) -> bool:
-        if skill_key not in {"ppt_generation", "html_generation"}:
-            return True
         if input_data is None:
-            return False
+            return skill_key not in {
+                "deep_research",
+                "ppt_generation",
+                "html_generation",
+                "data_analysis",
+                "u1_image",
+            }
         needles = [
             cls._artifact_match_key(needle)
             for needle in cls._report_dir_search_needles(input_data.content)
         ]
         needles = [needle for needle in needles if len(needle) >= 6]
         if not needles:
-            return False
+            return skill_key not in {"ppt_generation", "html_generation"}
         haystack = cls._artifact_match_key(path)
         return any(needle in haystack for needle in needles)
 
@@ -1226,6 +1360,90 @@ for item in sorted(matches):
             poll_state,
         )
 
+    async def _poll_artifact_snapshot(
+        self,
+        input_data: AgentRunCreate,
+        run_id: str,
+        report_dirs: set[str],
+        poll_state: dict[str, object],
+    ) -> list[AgentRunEvent]:
+        events: list[AgentRunEvent] = []
+        artifact_filter_key = self._artifact_filter_key(input_data)
+        if not self._primary_output_artifact_paths(artifact_filter_key):
+            report_dirs.update(await self._discover_report_dirs_from_input(input_data))
+
+        artifact_paths = await self._find_report_artifacts(report_dirs)
+        if not self._primary_output_artifact_paths(artifact_filter_key):
+            recent_artifact_paths = await self._find_recent_openclaw_artifacts(
+                artifact_filter_key,
+                input_data,
+            )
+            artifact_paths = list(dict.fromkeys([*artifact_paths, *recent_artifact_paths]))
+        for path in artifact_paths:
+            self._remember_artifact_path(path)
+
+        progress = int(poll_state.get("progress", 20))
+        last_artifact_count = int(poll_state.get("last_artifact_count", 0))
+        primary_paths = self._primary_output_artifact_paths(artifact_filter_key)
+        if len(self.last_artifact_paths) > last_artifact_count:
+            poll_state["last_artifact_count"] = len(self.last_artifact_paths)
+            progress = 90 if primary_paths else min(88, progress + 6)
+            poll_state["progress"] = progress
+            if primary_paths:
+                for artifact in self.last_artifacts:
+                    artifact.run_id = artifact.run_id or run_id
+                events.append(
+                    AgentRunEvent(
+                        run_id=run_id,
+                        event_type="artifact_found",
+                        status="running",
+                        progress=90,
+                        payload={
+                            "protocol": "openclaw.cli.v1",
+                            "mode": self.mode,
+                            "artifact_paths": list(self.last_artifact_paths),
+                            "artifacts": [
+                                artifact_to_payload(item) for item in self.last_artifacts
+                            ],
+                            "reportDirs": sorted(report_dirs),
+                            "taskApiUsed": False,
+                        },
+                        step=AgentRunStep(
+                            id=f"{run_id}_openclaw_artifact_found",
+                            label=f"OpenClaw final artifact found: {primary_paths[-1]}",
+                            status="completed",
+                            timestamp=now_iso(),
+                        ),
+                    )
+                )
+
+        label = self._summarize_user_request_label(
+            input_data.content,
+            artifact_filter_key,
+            suffix="等待 OpenClaw 最终返回或产物目录中的主产物。",
+        )
+        now = monotonic()
+        last_label = str(poll_state.get("last_label", ""))
+        last_emit_at = float(poll_state.get("last_visible_emit_at", 0.0))
+        should_emit_heartbeat = now - last_emit_at >= 60
+        if not primary_paths and (label != last_label or should_emit_heartbeat):
+            poll_state["last_label"] = label
+            poll_state["last_visible_emit_at"] = now
+            progress = min(85, int(poll_state.get("progress", 20)) + 8)
+            poll_state["progress"] = progress
+            events.append(self._stage_event(run_id, "stage_update", label, progress))
+
+        self.last_diagnostics.update(
+            {
+                "reportDirs": sorted(report_dirs),
+                "artifactPaths": list(self.last_artifact_paths),
+                "artifactCount": len(self.last_artifact_paths),
+                "lastStage": label,
+                "taskApiUsed": False,
+            }
+        )
+        return events
+
     def _remember_run_task_ids(
         self,
         run_id: str,
@@ -1272,13 +1490,13 @@ for item in sorted(matches):
         yield self._stage_event(
             run_id,
             "stage_started",
-            "OpenClaw entered a background workflow; tracking task family and artifacts.",
+            "OpenClaw returned before a final artifact was found; watching artifact directories.",
             int(poll_state.get("progress", 20)),
         )
         poll_state["last_visible_emit_at"] = monotonic()
 
         while monotonic() < deadline:
-            events = await self._poll_task_family_snapshot(
+            events = await self._poll_artifact_snapshot(
                 input_data,
                 run_id,
                 report_dirs,

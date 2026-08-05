@@ -55,6 +55,7 @@ fi
 
 export PATH="$AGENT_BIN_DIR:$HERMES_NODE_DIR:$PATH"
 export WEBAGENT_AGENT_PATH_PREFIX="$AGENT_BIN_DIR:$HERMES_NODE_DIR:$ROOT_DIR/runtime/conda-webagent/bin"
+export WEBAGENT_OPENCLAW_GATEWAY_HOME="$AGENT_HOME_DIR"
 export OPENCLAW_DISABLE_BONJOUR="${OPENCLAW_DISABLE_BONJOUR:-1}"
 export LD_LIBRARY_PATH="$ROOT_DIR/runtime/conda-webagent/lib:${LD_LIBRARY_PATH:-}"
 export PYTHONPATH="$REPO_DIR/services/api:$REPO_DIR/services/agent-runtime"

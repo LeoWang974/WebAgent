@@ -45,7 +45,7 @@ class _TruncatedAdapter:
 
 def test_requested_primary_artifact_types_from_user_prompt():
     assert requested_primary_artifact_types("输出中文 Markdown 报告") == {"markdown_report"}
-    assert requested_primary_artifact_types("生成一份12页PPT，全过程自己决策") == {"ppt_deck"}
+    assert requested_primary_artifact_types("生成一份 12 页 PPT，全过程自己决策") == {"ppt_deck"}
     assert requested_primary_artifact_types("使用 report-html-v2 输出 HTML 文件") == {"html_page"}
     assert requested_primary_artifact_types("输出中文纯 Markdown 报告，不要混合 HTML 格式") == {
         "markdown_report"
@@ -55,13 +55,14 @@ def test_requested_primary_artifact_types_from_user_prompt():
     }
     assert requested_primary_artifact_types(
         "请使用上述 Markdown 报告和 HTML 文件生成 6 页 PPT"
-    ) == {
-        "ppt_deck"
-    }
+    ) == {"ppt_deck"}
     assert requested_primary_artifact_types("输出 Markdown 报告，包含一个对比表格") == {
         "markdown_report"
     }
-
+    assert requested_primary_artifact_types(
+        "请调研《AI 原生办公软件的新机会》，重点分析知识管理、自动化工作流、"
+        "PPT/文档生成、数据分析助手和企业协作场景。输出中文纯 Markdown 报告。"
+    ) == {"markdown_report"}
 
 def test_source_artifact_types_follow_artifact_chain():
     assert source_artifact_types_for_request({"html_page"}, None) == {"markdown_report"}
