@@ -15,6 +15,13 @@ def test_openclaw_adapter_uses_longer_background_timeout_for_html_generation():
     assert adapter._background_wait_timeout_seconds("html_generation") == 30 * 60
 
 
+def test_openclaw_adapter_shortens_post_return_wait_without_task_or_artifact():
+    assert OpenClawAdapter._post_return_no_artifact_timeout_seconds("ppt_generation") == 3 * 60
+    assert OpenClawAdapter._post_return_no_artifact_timeout_seconds("html_generation") == 3 * 60
+    assert OpenClawAdapter._post_return_no_artifact_timeout_seconds("deep_research") == 5 * 60
+    assert OpenClawAdapter._post_return_no_artifact_timeout_seconds(None) == 90
+
+
 def test_openclaw_adapter_waits_for_background_long_skill():
     input_data = AgentRunCreate(
         content="Output Chinese Markdown report",

@@ -1484,6 +1484,13 @@ for item in sorted(matches):
         report_dirs.update(self._extract_report_dirs(initial_output))
         poll_state = poll_state or self._new_poll_state()
         wait_seconds = self._background_wait_timeout_seconds(self._artifact_filter_key(input_data))
+        if not self.run_task_ids.get(run_id) and not self.last_artifact_paths:
+            wait_seconds = min(
+                wait_seconds,
+                self._post_return_no_artifact_timeout_seconds(
+                    self._artifact_filter_key(input_data)
+                ),
+            )
         deadline = monotonic() + wait_seconds
         poll_interval = 8
 
@@ -1523,6 +1530,14 @@ for item in sorted(matches):
             "u1_image": 20 * 60,
         }
         return max(self.command_timeout_seconds, minimum_by_skill.get(skill_key or "", 0))
+
+    @staticmethod
+    def _post_return_no_artifact_timeout_seconds(skill_key: str | None) -> int:
+        if skill_key in {"ppt_generation", "html_generation"}:
+            return 3 * 60
+        if skill_key in {"deep_research", "data_analysis", "u1_image"}:
+            return 5 * 60
+        return 90
 
     @staticmethod
     def _no_task_family_timeout_seconds(skill_key: str | None) -> int:

@@ -86,6 +86,14 @@ for command_name in hermes openclaw; do
   fi
 done
 
+if [ -x "$REPO_DIR/scripts/patch-openclaw-write-tool.sh" ]; then
+  "$REPO_DIR/scripts/patch-openclaw-write-tool.sh" >> "$LOG_DIR/openclaw-gateway.log" 2>&1 || {
+    echo "OpenClaw write tool schema patch failed. See $LOG_DIR/openclaw-gateway.log." >&2
+    tail -n 80 "$LOG_DIR/openclaw-gateway.log" >&2 || true
+    exit 1
+  }
+fi
+
 if ! "$PYTHON_BIN" - <<'PY' >/dev/null 2>&1
 import httpx
 PY
