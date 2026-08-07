@@ -99,6 +99,9 @@ class HermesCliWrapper:
             "HERMES_HOME": self.hermes_home,
             "HERMES_QUIET": "1",
             "HOME": self.hermes_home,
+            "SEARCH_PROVIDER": os.getenv("SEARCH_PROVIDER", "serper"),
+            "WEBAGENT_SEARCH_PROVIDER": os.getenv("SEARCH_PROVIDER", "serper"),
+            "WEBAGENT_SERPER_CONFIGURED": "1" if os.getenv("SERPER_API_KEY") else "0",
         }
         self.auto_approve_commands = os.getenv("WEBAGENT_HERMES_YOLO", "1").lower() not in {
             "0",
@@ -164,7 +167,7 @@ class HermesCliWrapper:
         prompt_dir.mkdir(parents=True, exist_ok=True)
         prompt_name = run_id or datetime.now().strftime("%Y%m%d-%H%M%S-%f")
         prompt_path = prompt_dir / f"{prompt_name}.txt"
-        prompt_path.write_text(question, encoding="utf-8")
+        prompt_path.write_text(self._with_runtime_search_guidance(question), encoding="utf-8")
         drive = prompt_path.drive.rstrip(":").lower()
         if drive:
             rest = prompt_path.as_posix().split(":", 1)[1].lstrip("/")
@@ -172,6 +175,25 @@ class HermesCliWrapper:
         else:
             wsl_path = prompt_path.as_posix()
         return prompt_path, wsl_path
+
+    @staticmethod
+    def _with_runtime_search_guidance(question: str) -> str:
+        search_provider = os.getenv("SEARCH_PROVIDER", "serper").strip().lower()
+        if search_provider != "serper" and not os.getenv("SERPER_API_KEY"):
+            return question
+        guidance = (
+            "\n\n[WebAgent runtime context]\n"
+            "- SEARCH_PROVIDER=serper. Serper is configured in the WebAgent runtime.\n"
+            "- If web search is needed, use the configured Serper search tool directly.\n"
+            "- Do not use terminal/curl probes against Google or arbitrary HTTPS sites to decide "
+            "whether search is available.\n"
+            "- If a Serper tool call fails, report the Serper tool error briefly and continue with "
+            "the best available evidence.\n"
+            "[/WebAgent runtime context]\n"
+        )
+        if "[WebAgent runtime context]" in question:
+            return question
+        return f"{question.rstrip()}{guidance}"
 
     @staticmethod
     def _shell_visible_path(path_value: str) -> str:
@@ -782,7 +804,7 @@ class HermesCliWrapper:
         last_raw_activity_emit = datetime.now()
         last_raw_summary = ""
         last_raw_summary_emit = datetime.min
-        raw_activity_interval_seconds = 120
+        raw_activity_interval_seconds = 60
         should_stop_on_completion_signal = skills not in {"sn-ppt-entry", "sn-ppt-workbench"}
 
         async def stop_after_completion() -> None:
@@ -799,6 +821,28 @@ class HermesCliWrapper:
             if not text or not self._should_emit_box(text):
                 return None
             return self._summarize_box_text(text)
+
+        def heartbeat_event(
+            content: str,
+            *,
+            heartbeat_type: str,
+        ) -> HermesStreamEvent:
+            self.last_diagnostics["last_stage"] = content
+            self.last_diagnostics["stdout_tail"] = stdout_tail
+            self.last_diagnostics["stderr_tail"] = stderr_tail
+            return self._build_stream_event(
+                content=content,
+                raw_log_path=raw_log_path,
+                run_id=run_id,
+                completion_detected=False,
+                artifact_found=False,
+                payload={
+                    "rawActivityHeartbeat": True,
+                    "heartbeatType": heartbeat_type,
+                    "stdoutTail": stdout_tail[-1000:],
+                    "stderrTail": stderr_tail[-1000:],
+                },
+            )
 
         def parse_box_line(raw_line: str) -> tuple[bool, bool, str | None]:
             cleaned = self._clean_line(raw_line)
@@ -864,15 +908,27 @@ class HermesCliWrapper:
             while finished_streams < len(stream_tasks):
                 try:
                     completion_timeout = (
-                        8 if completion_detected and should_stop_on_completion_signal else None
+                        8
+                        if completion_detected and should_stop_on_completion_signal
+                        else raw_activity_interval_seconds
                     )
                     raw_line = await asyncio.wait_for(
                         line_queue.get(),
                         timeout=completion_timeout,
                     )
                 except TimeoutError:
-                    await stop_after_completion()
-                    break
+                    if completion_detected and should_stop_on_completion_signal:
+                        await stop_after_completion()
+                        break
+                    if process.returncode is not None:
+                        break
+                    now = datetime.now()
+                    last_raw_activity_emit = now
+                    yield heartbeat_event(
+                        "Hermes 正在执行工具调用，等待下一段运行输出...",
+                        heartbeat_type="process_alive",
+                    )
+                    continue
 
                 if raw_line is None:
                     finished_streams += 1
@@ -980,15 +1036,9 @@ class HermesCliWrapper:
                         now - last_raw_activity_emit
                     ).total_seconds() >= raw_activity_interval_seconds:
                         last_raw_activity_emit = now
-                        activity_content = "Hermes is still running; raw output is being received."
-                        self.last_diagnostics["last_stage"] = activity_content
-                        yield self._build_stream_event(
-                            content=activity_content,
-                            raw_log_path=raw_log_path,
-                            run_id=run_id,
-                            completion_detected=False,
-                            artifact_found=False,
-                            payload={"rawActivityHeartbeat": True},
+                        yield heartbeat_event(
+                            "Hermes 正在持续输出运行日志，任务仍在执行...",
+                            heartbeat_type="raw_output",
                         )
         except asyncio.CancelledError:
             if run_id:

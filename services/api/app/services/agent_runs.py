@@ -345,8 +345,39 @@ async def mark_stale_agent_runs(
         return
 
     for run in stale_runs:
+        latest_event = await _latest_run_event(db, run.id)
+        latest_payload = latest_event.payload if latest_event is not None else {}
+        latest_step = latest_payload.get("step") if isinstance(latest_payload, dict) else {}
+        latest_label = (
+            latest_step.get("label")
+            if isinstance(latest_step, dict)
+            else None
+        )
+        raw_log_path = (
+            latest_payload.get("rawLogPath")
+            if isinstance(latest_payload, dict)
+            else None
+        )
+        runtime_diagnostics = (
+            latest_payload.get("runtimeDiagnostics")
+            if isinstance(latest_payload, dict)
+            else None
+        )
+        stdout_tail = (
+            latest_payload.get("stdoutTail")
+            if isinstance(latest_payload, dict)
+            else None
+        )
+        stderr_tail = (
+            latest_payload.get("stderrTail")
+            if isinstance(latest_payload, dict)
+            else None
+        )
         run.status = "disconnected"
-        run.error = "Agent run disconnected before a terminal status was recorded."
+        run.error = (
+            "Agent run disconnected before a terminal status was recorded. "
+            f"Last stage: {latest_label or 'unknown'}"
+        )
         run.progress = min(run.progress or 0, 99)
         db.add(
             DBAgentRunEvent(
@@ -357,14 +388,38 @@ async def mark_stale_agent_runs(
                     "status": "disconnected",
                     "progress": run.progress,
                     "error": run.error,
+                    "diagnosticType": "stale_run",
+                    "lastEventType": latest_event.event_type if latest_event else None,
+                    "lastEventAt": (
+                        latest_event.created_at.isoformat() if latest_event else None
+                    ),
+                    "lastStage": latest_label,
+                    "rawLogPath": raw_log_path,
+                    "runtimeDiagnostics": runtime_diagnostics,
+                    "stdoutTail": stdout_tail,
+                    "stderrTail": stderr_tail,
                     "step": {
-                        "label": "Agent run disconnected",
+                        "label": (
+                            "Agent run disconnected"
+                            if not latest_label
+                            else f"Agent run disconnected after: {latest_label}"
+                        ),
                         "status": "failed",
                     },
                 },
             )
         )
     await db.commit()
+
+
+async def _latest_run_event(db: AsyncSession, run_id: str) -> DBAgentRunEvent | None:
+    result = await db.execute(
+        select(DBAgentRunEvent)
+        .where(DBAgentRunEvent.run_id == run_id)
+        .order_by(DBAgentRunEvent.created_at.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
 
 
 async def create_db_agent_run(
