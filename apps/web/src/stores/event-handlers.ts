@@ -226,6 +226,9 @@ function applyStreamAssistantDelta(
   const now = new Date().toISOString();
   const currentRun = state.agentRuns.find((run) => run.id === context.currentRunId);
   const nextProgress = Math.min(90, (currentRun?.progress ?? 5) + 8);
+  const existingMessageIndex = state.messages.findIndex(
+    (message) => message.id === event.messageId,
+  );
   const pendingIndex = state.messages.findIndex(
     (message) =>
       message.sessionId === context.sessionId &&
@@ -272,22 +275,48 @@ function applyStreamAssistantDelta(
             hasAssistantResponse: true,
             progress: nextProgress,
             status: "running" as const,
-            steps: [
-              ...run.steps.map((step) =>
-                step.status === "running" ? { ...step, status: "completed" as const } : step,
-              ),
-              {
-                id: event.messageId,
-                label: chunk,
-                status: "completed" as const,
-                timestamp: now,
-              },
-            ],
+            steps: appendAssistantStepOnce(run, event.messageId, chunk, now),
           }
         : run,
     ),
-    messages: nextMessages,
+    messages:
+      existingMessageIndex >= 0
+        ? state.messages.map((message) =>
+            message.id === event.messageId
+              ? {
+                  ...message,
+                  content: chunk,
+                  waitStartedAt:
+                    message.waitStartedAt ??
+                    (pendingIndex >= 0 ? state.messages[pendingIndex].waitStartedAt : undefined),
+                }
+              : message,
+          )
+        : nextMessages,
   };
+}
+
+function appendAssistantStepOnce(
+  run: AgentRun,
+  messageId: string,
+  label: string,
+  timestamp: string,
+) {
+  const normalizedSteps = run.steps.map((step) =>
+    step.status === "running" ? { ...step, status: "completed" as const } : step,
+  );
+  if (normalizedSteps.some((step) => step.id === messageId)) {
+    return normalizedSteps;
+  }
+  return [
+    ...normalizedSteps,
+    {
+      id: messageId,
+      label,
+      status: "completed" as const,
+      timestamp,
+    },
+  ];
 }
 
 function applyStreamArtifactCreated(
