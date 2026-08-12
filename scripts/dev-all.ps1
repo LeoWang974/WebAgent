@@ -9,6 +9,12 @@ Start-Process powershell.exe -ArgumentList @(
 Start-Process powershell.exe -ArgumentList @(
   "-NoExit",
   "-ExecutionPolicy", "Bypass",
+  "-File", (Join-Path $PSScriptRoot "api-worker.ps1")
+) -WindowStyle Normal
+
+Start-Process powershell.exe -ArgumentList @(
+  "-NoExit",
+  "-ExecutionPolicy", "Bypass",
   "-File", (Join-Path $PSScriptRoot "dev-web.ps1")
 ) -WindowStyle Normal
 

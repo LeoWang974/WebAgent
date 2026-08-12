@@ -49,6 +49,9 @@ Current backend coverage:
 - `tests/test_hermes_adapter.py`
   - User prompts are passed to Hermes verbatim.
   - WebAgent does not inject skill mapping or runtime prompt guidance.
+- `tests/test_settings_service.py`
+  - Listing model configurations never deletes legacy-named user records.
+  - Default model repair leaves exactly one default configuration.
 
 Compile check:
 
@@ -57,14 +60,12 @@ cd services\api
 .\.venv\Scripts\python.exe -m compileall -q app ..\agent-runtime\agent_runtime
 ```
 
-Focused Ruff check for real static bugs:
+Full Ruff check:
 
 ```powershell
 cd services\api
-.\.venv\Scripts\python.exe -m ruff check app ..\agent-runtime\agent_runtime tests --select F401,F841
+.\.venv\Scripts\python.exe -m ruff check app ..\agent-runtime\agent_runtime tests
 ```
-
-Full Ruff currently still reports style and formatting work such as import ordering, line length, and FastAPI `Depends` default warnings. Treat those as a separate cleanup pass.
 
 ## Frontend
 
@@ -117,7 +118,7 @@ Before committing a stable checkpoint:
 
 cd services\api
 .\.venv\Scripts\python.exe -m compileall -q app ..\agent-runtime\agent_runtime
-.\.venv\Scripts\python.exe -m ruff check app ..\agent-runtime\agent_runtime tests --select F401,F841
+.\.venv\Scripts\python.exe -m ruff check app ..\agent-runtime\agent_runtime tests
 
 cd ..\..
 pnpm --filter web test

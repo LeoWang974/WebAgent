@@ -15,31 +15,20 @@ if (-not (Test-Path -LiteralPath $python)) {
   throw "Backend venv not found: $python"
 }
 
-$unitTests = @(
-  "tests/test_artifact_discovery.py",
-  "tests/test_agent_run_artifact_service.py",
-  "tests/test_agent_run_queue.py",
-  "tests/test_artifact_slides.py",
-  "tests/test_cleanup.py",
-  "tests/test_hermes_adapter.py",
-  "tests/test_hermes_env.py",
-  "tests/test_hermes_protocol.py",
-  "tests/test_model_runtime_config.py",
-  "tests/test_model_runtime_health.py",
-  "tests/test_runtime_context_builder.py",
-  "tests/test_skills_update.py",
-  "tests/test_source_encoding.py"
-)
-
 $integrationTests = @(
   "tests/test_agent_runtime_isolation.py",
   "tests/test_api_integration.py"
 )
 
+$allTests = Get-ChildItem -LiteralPath (Join-Path $apiRoot "tests") -Filter "test_*.py" |
+  ForEach-Object { "tests/$($_.Name)" } |
+  Sort-Object
+$unitTests = @($allTests | Where-Object { $integrationTests -notcontains $_ })
+
 switch ($Group) {
   "unit" { $selectedTests = $unitTests }
   "integration" { $selectedTests = $integrationTests }
-  "all" { $selectedTests = $unitTests + $integrationTests }
+  "all" { $selectedTests = $allTests }
 }
 
 Set-Location -LiteralPath $apiRoot

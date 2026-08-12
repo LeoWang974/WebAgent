@@ -7,7 +7,6 @@ from sqlalchemy.orm import selectinload
 
 from app import schemas
 from app.api.dependencies import CurrentUser, DbSession
-from app.api.routes.settings import user_developer_mode
 from app.models import (
     AgentRun,
     AgentRunEvent,
@@ -39,6 +38,7 @@ from app.services.session_artifacts import (
 )
 from app.services.session_message_service import send_message_core
 from app.services.session_stream_service import stream_session_message_response
+from app.services.settings_service import user_developer_mode
 
 router = APIRouter()
 logger = logging.getLogger(__name__)

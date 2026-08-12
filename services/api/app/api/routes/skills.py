@@ -2,7 +2,7 @@ from fastapi import APIRouter
 
 from app import schemas
 from app.api.dependencies import DbSession
-from app.api.routes.settings import list_skill_configs, to_skill_schema
+from app.services.settings_service import list_skill_configs, to_skill_schema
 
 router = APIRouter()
 

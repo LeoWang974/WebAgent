@@ -10,9 +10,6 @@ importers:
 
   apps/web:
     dependencies:
-      '@webagent/shared':
-        specifier: workspace:*
-        version: link:../../packages/shared
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
@@ -74,10 +71,6 @@ importers:
       typescript:
         specifier: ^5.7.2
         version: 5.9.3
-
-  packages/shared: {}
-
-  packages/ui: {}
 
 packages:
 

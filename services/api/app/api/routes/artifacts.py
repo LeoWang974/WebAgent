@@ -10,7 +10,6 @@ from sqlalchemy import or_, select
 
 from app import schemas
 from app.api.dependencies import CurrentUser, DbSession
-from app.api.routes.settings import user_developer_mode
 from app.models import Artifact, Conversation, ConversationShare
 from app.services.persistence import (
     get_conversation_or_404,
@@ -18,6 +17,7 @@ from app.services.persistence import (
     to_artifact,
 )
 from app.services.session_artifacts import is_debug_artifact
+from app.services.settings_service import user_developer_mode
 
 router = APIRouter()
 

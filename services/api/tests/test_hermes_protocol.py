@@ -1,4 +1,8 @@
+import asyncio
+from datetime import datetime
 from pathlib import Path
+
+import pytest
 
 from agent_runtime.adapters.hermes_cli import HermesCliWrapper
 
@@ -85,6 +89,90 @@ def test_hermes_extracts_report_path_from_generated_message():
 
     assert wrapper.last_artifact_paths == ["/home/demo/.hermes/reports/topic/topic-report.md"]
     assert wrapper.last_artifacts[0]["artifact_type"] == "markdown_report"
+
+
+def test_hermes_resolves_relative_artifacts_from_final_output(tmp_path: Path):
+    wrapper = HermesCliWrapper()
+    pptx_path = tmp_path / "2026 AI assistant trends.pptx"
+    html_path = tmp_path / "deck-preview.html"
+    pptx_path.write_bytes(b"pptx")
+    html_path.write_text("<html></html>", encoding="utf-8")
+
+    wrapper._remember_final_output_artifact_paths(
+        (
+            "PPTX（主交付物）：2026 AI assistant trends.pptx\n"
+            "HTML preview: deck-preview.html"
+        ),
+        working_dir=str(tmp_path),
+        artifacts_dir=None,
+    )
+
+    assert str(pptx_path.resolve()) in wrapper.last_artifact_paths
+    assert str(html_path.resolve()) in wrapper.last_artifact_paths
+    artifact_types = {item["artifact_type"] for item in wrapper.last_artifacts}
+    assert {"ppt_deck", "html_page"}.issubset(artifact_types)
+
+
+def test_hermes_final_discovery_scans_only_run_directories(tmp_path: Path):
+    wrapper = HermesCliWrapper()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    pptx_path = run_dir / "final.pptx"
+    pptx_path.write_bytes(b"pptx")
+
+    wrapper._discover_run_directory_artifacts(
+        working_dir=str(run_dir),
+        artifacts_dir=None,
+        started_at=datetime.fromtimestamp(pptx_path.stat().st_mtime),
+    )
+
+    assert wrapper.last_artifact_paths == [str(pptx_path.resolve())]
+
+
+@pytest.mark.asyncio
+async def test_hermes_emits_artifact_found_after_final_output_discovery(
+    tmp_path: Path,
+    monkeypatch,
+):
+    wrapper = HermesCliWrapper()
+    pptx_path = tmp_path / "final-deck.pptx"
+    pptx_path.write_bytes(b"pptx")
+
+    stdout = asyncio.StreamReader()
+    stdout.feed_data(b"PPTX: final-deck.pptx\n")
+    stdout.feed_eof()
+    stderr = asyncio.StreamReader()
+    stderr.feed_eof()
+
+    class FakeProcess:
+        pid = 12345
+        returncode = 0
+
+        def __init__(self):
+            self.stdout = stdout
+            self.stderr = stderr
+
+        async def wait(self):
+            return self.returncode
+
+    async def fake_create_subprocess_exec(*args, **kwargs):
+        return FakeProcess()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+    monkeypatch.setattr(wrapper, "_build_chat_exec_args", lambda *args, **kwargs: ["hermes"])
+    monkeypatch.setattr(wrapper, "_raw_log_path", lambda: tmp_path / "hermes-raw.log")
+
+    events = [
+        event
+        async for event in wrapper.ask_stream_events(
+            "create a deck",
+            working_dir=str(tmp_path),
+        )
+    ]
+
+    artifact_event = next(event for event in events if event.event_type == "artifact_found")
+    assert artifact_event.artifact_paths == [str(pptx_path.resolve())]
+    assert artifact_event.payload["finalDiscovery"] is True
 
 
 def test_hermes_stream_event_classification():

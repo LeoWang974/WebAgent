@@ -12,26 +12,18 @@ if [ ! -x "$PYTHON_BIN" ]; then
   exit 1
 fi
 
-unit_tests=(
-  tests/test_artifact_discovery.py
-  tests/test_agent_run_artifact_service.py
-  tests/test_agent_run_queue.py
-  tests/test_artifact_slides.py
-  tests/test_cleanup.py
-  tests/test_hermes_adapter.py
-  tests/test_hermes_env.py
-  tests/test_hermes_protocol.py
-  tests/test_model_runtime_config.py
-  tests/test_model_runtime_health.py
-  tests/test_runtime_context_builder.py
-  tests/test_skills_update.py
-  tests/test_source_encoding.py
-)
-
 integration_tests=(
   tests/test_agent_runtime_isolation.py
   tests/test_api_integration.py
 )
+
+mapfile -t all_tests < <(find tests -maxdepth 1 -type f -name 'test_*.py' -printf '%p\n' | sort)
+unit_tests=()
+for test_file in "${all_tests[@]}"; do
+  if [[ " ${integration_tests[*]} " != *" $test_file "* ]]; then
+    unit_tests+=("$test_file")
+  fi
+done
 
 case "$GROUP" in
   unit)
@@ -41,7 +33,7 @@ case "$GROUP" in
     selected_tests=("${integration_tests[@]}")
     ;;
   all)
-    selected_tests=("${unit_tests[@]}" "${integration_tests[@]}")
+    selected_tests=("${all_tests[@]}")
     ;;
   *)
     echo "Usage: $0 [unit|integration|all] [extra pytest args...]" >&2

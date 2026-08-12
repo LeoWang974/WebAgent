@@ -6,6 +6,7 @@ from app.services.agent_run_dispatcher import enqueue_agent_run_message
 from app.services.persistence import persist_message, to_message, to_session
 from app.services.session_artifacts import refresh_conversation
 
+
 async def send_message_core(
     db: AsyncSession,
     conversation: Conversation,

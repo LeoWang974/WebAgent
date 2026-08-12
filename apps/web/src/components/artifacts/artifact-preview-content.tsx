@@ -1,11 +1,9 @@
 import type { Artifact } from "@/types";
 import { ArtifactEmptyState } from "./artifact-empty-state";
-import { DataPreviewPlaceholder } from "./data-preview-placeholder";
 import { DataTableViewer } from "./data-table-viewer";
 import { FileArtifactViewer } from "./file-artifact-viewer";
 import { HtmlViewer } from "./html-viewer";
 import { ImageViewer } from "./image-viewer";
-import { MarkdownPreviewPlaceholder } from "./markdown-preview-placeholder";
 import { MarkdownViewer } from "./markdown-viewer";
 import { PptArtifactViewer } from "./ppt-artifact-viewer";
 import { PptViewer } from "./ppt-viewer";
@@ -58,7 +56,12 @@ export function ArtifactPreviewContent({ artifact }: ArtifactPreviewContentProps
       return <MarkdownViewer content={artifact.content} title={artifact.title} />;
     }
 
-    return <MarkdownPreviewPlaceholder />;
+    return (
+      <FileArtifactViewer
+        artifact={artifact}
+        description="The Markdown file is ready, but no embeddable content is available."
+      />
+    );
   }
 
   if (artifact.type === "html_page") {
@@ -131,7 +134,12 @@ export function ArtifactPreviewContent({ artifact }: ArtifactPreviewContentProps
       );
     }
 
-    return <DataPreviewPlaceholder />;
+    return (
+      <FileArtifactViewer
+        artifact={artifact}
+        description="The data file is ready, but no tabular preview is available."
+      />
+    );
   }
 
   return <ArtifactEmptyState />;

@@ -91,6 +91,24 @@ def test_create_artifacts_from_paths_resolves_bare_filename_from_candidate_roots
     assert artifacts[0].metadata["path"] == str(deck)
 
 
+def test_create_artifacts_from_paths_resolves_bare_filename_from_api_workdir(
+    monkeypatch, tmp_path: Path
+):
+    report = tmp_path / "services" / "api" / "report.md"
+    report.parent.mkdir(parents=True)
+    report.write_text("# API workdir report\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "app.services.artifact_discovery._candidate_roots",
+        lambda: [report.parent],
+    )
+
+    artifacts = create_artifacts_from_paths("session_1", [report.name])
+
+    assert len(artifacts) == 1
+    assert artifacts[0].content == "# API workdir report\n"
+    assert artifacts[0].metadata["path"] == str(report)
+
+
 def test_create_artifacts_from_paths_supports_debug_json(tmp_path: Path):
     json_file = tmp_path / "briefing.json"
     json_file.write_text('{"topic":"future food","steps":2}', encoding="utf-8")

@@ -3,7 +3,6 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.routes.settings import DEFAULT_INTERFACE
 from app.models import AgentRun, AgentRunEvent, Message, UserSettings
 from app.services.artifact_discovery import (
     discover_artifacts_with_retry,
@@ -16,6 +15,7 @@ from app.services.session_artifacts import (
     is_debug_artifact,
     persist_discovered_artifacts,
 )
+from app.services.settings_service import DEFAULT_INTERFACE
 
 FATAL_RUNTIME_MARKERS = (
     "ratelimiterror",

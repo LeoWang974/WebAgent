@@ -34,14 +34,12 @@ class Settings(BaseSettings):
     sensenova_base_url: str | None = None
     sensenova_default_model: str = "sensenova-6.7-flash-lite"
     serper_api_key: str | None = None
-    hermes_base_url: str = "http://localhost:8642"
     hermes_cli_path: str = "hermes"
     hermes_home: str = "~/.hermes"
     hermes_skills_dir: str | None = None
     hermes_wsl_distribution: str = "Ubuntu"
     agent_run_idle_timeout_seconds: int = 30 * 60
     agent_run_overall_timeout_seconds: int = 2 * 60 * 60
-    agent_run_ppt_export_timeout_seconds: int = 180
     agent_run_event_poll_interval_seconds: float = 1.0
     upload_max_size_bytes: int = 25 * 1024 * 1024
     agent_run_queue_enabled: bool = False

@@ -1,86 +1,34 @@
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from sqlalchemy import select, update
+from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import schemas
 from app.api.dependencies import CurrentUser, DbSession
 from app.core.security import create_access_token, hash_password, verify_password
-from app.models import AgentRun, ModelConfig, SkillConfig, SkillVersion, User, UserSettings
-from app.services.model_secret_encryption import encrypt_model_secret, mask_model_secret
-from app.services.model_runtime_config import model_runtime_config_builder
+from app.models import AgentRun, ModelConfig, SkillVersion, User
+from app.services.model_secret_encryption import encrypt_model_secret
 from app.services.persistence import (
     get_user_by_username,
     normalize_email,
     normalize_username,
 )
+from app.services.settings_service import (
+    check_runtime_model,
+    ensure_default_models,
+    ensure_user_settings,
+    get_skill_config,
+    get_user_model,
+    list_skill_configs,
+    list_user_models,
+    to_data_context_schema,
+    to_interface_schema,
+    to_model_schema,
+    to_skill_schema,
+)
 
 router = APIRouter()
-
-DEFAULT_DATA_CONTEXT = {
-    "auto_summarize_context": True,
-    "context_retention_days": 30,
-    "max_context_messages": 40,
-    "save_conversation_history": True,
-    "save_uploaded_files": True,
-}
-
-DEFAULT_INTERFACE = {
-    "developer_mode": False,
-}
-
-DEFAULT_MODELS = [
-    {
-        "name": "SenseNova default model",
-        "provider": "sensenova",
-        "base_url": None,
-        "encrypted_api_key": None,
-        "is_default": True,
-        "is_available": True,
-    },
-]
-
-DEFAULT_SKILLS = [
-    {
-        "key": "data_analysis",
-        "name": "Data analysis",
-        "description": "Upload datasets and analyze trends, charts, and summaries.",
-        "enabled": True,
-        "is_default": False,
-        "current_version": "0.1.0",
-    },
-    {
-        "key": "deep_research",
-        "name": "Deep research",
-        "description": "Turn a topic into a structured research report.",
-        "enabled": True,
-        "is_default": True,
-        "current_version": "0.1.0",
-    },
-    {
-        "key": "ppt_generation",
-        "name": "PPT generation",
-        "description": "Generate slide structures and preview presentation drafts.",
-        "enabled": True,
-        "is_default": False,
-        "current_version": "0.1.0",
-    },
-    {
-        "key": "u1_image",
-        "name": "u1 image",
-        "description": "Generate image concepts from prompts.",
-        "enabled": True,
-        "is_default": False,
-        "current_version": "0.1.0",
-    },
-]
-
-
-def mask_api_key(value: str | None) -> str | None:
-    return mask_model_secret(value)
-
 
 def get_input_value(input_data: dict[str, Any], camel_key: str, snake_key: str, default=None):
     if camel_key in input_data:
@@ -100,13 +48,6 @@ def get_model_name_input(input_data: dict[str, Any], default: str) -> str:
     return str(value).strip() or default
 
 
-def is_legacy_runtime_selector(model: ModelConfig) -> bool:
-    marker = f"{model.name or ''} {model.base_url or ''}".lower()
-    return not model.encrypted_api_key and (
-        "openclaw" in marker or "hermes" in marker or "18789" in marker or "8642" in marker
-    )
-
-
 def to_user_schema(user: User) -> schemas.User:
     return schemas.User(
         id=user.id,
@@ -116,206 +57,6 @@ def to_user_schema(user: User) -> schemas.User:
         avatar_url=user.avatar_url,
         role=user.role,
     )
-
-
-def to_model_schema(
-    model: ModelConfig,
-    runtime_status: dict[str, Any] | None = None,
-) -> schemas.ModelConfig:
-    return schemas.ModelConfig(
-        id=model.id,
-        name=model.name,
-        provider=model.provider,
-        base_url=model.base_url,
-        is_default=model.is_default,
-        is_available=model.is_available,
-        masked_api_key=mask_api_key(model.encrypted_api_key),
-        runtime_status=runtime_status,
-    )
-
-
-async def check_runtime_model(
-    db: AsyncSession,
-    current_user: User,
-    model: ModelConfig,
-) -> dict[str, Any]:
-    from app.services.agent_runs import create_hermes_adapter
-
-    runtime_config = await model_runtime_config_builder.build_for_user(
-        db,
-        current_user,
-        model.id,
-    )
-    adapter_key = "hermes"
-    adapter = create_hermes_adapter(
-        current_user,
-        model_runtime_config=runtime_config,
-    )
-    if adapter is None:
-        return {
-            "adapterKey": adapter_key,
-            "ok": False,
-            "status": "unavailable",
-            "message": "Runtime adapter is unavailable.",
-        }
-
-    if not hasattr(adapter, "health_check"):
-        return {
-            "adapterKey": adapter_key,
-            "ok": True,
-            "status": "available",
-            "message": "Runtime adapter is available; no active health check is implemented.",
-        }
-
-    try:
-        health = await adapter.health_check()
-    except Exception as error:
-        return {
-            "adapterKey": adapter_key,
-            "ok": False,
-            "status": "unavailable",
-            "message": str(error),
-        }
-
-    ok = bool(health.get("ok")) if isinstance(health, dict) else False
-    return {
-        "adapterKey": adapter_key,
-        "ok": ok,
-        "status": "connected" if ok else "unavailable",
-        "message": "Runtime health check passed." if ok else "Runtime health check failed.",
-        "health": health,
-    }
-
-
-def to_skill_schema(skill: SkillConfig) -> schemas.Skill:
-    return schemas.Skill(
-        key=skill.key,
-        name=skill.name,
-        description=skill.description,
-        version=skill.current_version,
-        enabled=skill.enabled,
-        is_default=skill.is_default,
-        last_updated_at=skill.updated_at.isoformat() if skill.updated_at else None,
-    )
-
-
-def to_data_context_schema(settings: UserSettings) -> schemas.DataContextSettings:
-    data = {**DEFAULT_DATA_CONTEXT, **(settings.data_context or {})}
-    return schemas.DataContextSettings(**data)
-
-
-def to_interface_schema(settings: UserSettings) -> schemas.InterfaceSettings:
-    data = {**DEFAULT_INTERFACE, **(settings.interface or {})}
-    return schemas.InterfaceSettings(**data)
-
-
-async def user_developer_mode(db: AsyncSession, user: User) -> bool:
-    settings = await ensure_user_settings(db, user)
-    return to_interface_schema(settings).developer_mode
-
-
-async def ensure_default_models(db: AsyncSession, user: User) -> None:
-    result = await db.execute(select(ModelConfig).where(ModelConfig.user_id == user.id))
-    existing_models = list(result.scalars().all())
-    changed = False
-
-    for model in list(existing_models):
-        if not is_legacy_runtime_selector(model):
-            continue
-        await db.execute(
-            update(AgentRun)
-            .where(AgentRun.model_config_id == model.id)
-            .values(model_config_id=None)
-        )
-        await db.delete(model)
-        existing_models.remove(model)
-        changed = True
-
-    existing_by_name = {model.name: model for model in existing_models}
-
-    for item in DEFAULT_MODELS:
-        model = existing_by_name.get(item["name"])
-        if model is None:
-            db.add(ModelConfig(user_id=user.id, **item))
-            changed = True
-            continue
-
-    if existing_models and not any(model.is_default for model in existing_models):
-        existing_models[0].is_default = True
-        changed = True
-
-    if changed:
-        await db.commit()
-
-
-async def list_user_models(db: AsyncSession, user: User) -> list[ModelConfig]:
-    await ensure_default_models(db, user)
-    result = await db.execute(
-        select(ModelConfig)
-        .where(ModelConfig.user_id == user.id)
-        .order_by(ModelConfig.is_default.desc(), ModelConfig.created_at.asc())
-    )
-    return list(result.scalars().all())
-
-
-async def get_user_model(db: AsyncSession, user: User, model_id: str) -> ModelConfig:
-    result = await db.execute(
-        select(ModelConfig).where(
-            ModelConfig.id == model_id,
-            ModelConfig.user_id == user.id,
-        )
-    )
-    model = result.scalar_one_or_none()
-    if model is None:
-        raise HTTPException(status_code=404, detail="Model not found")
-    return model
-
-
-async def ensure_user_settings(db: AsyncSession, user: User) -> UserSettings:
-    result = await db.execute(select(UserSettings).where(UserSettings.user_id == user.id))
-    settings = result.scalar_one_or_none()
-    if settings is not None:
-        return settings
-
-    settings = UserSettings(
-        user_id=user.id,
-        data_context=DEFAULT_DATA_CONTEXT,
-        interface=DEFAULT_INTERFACE,
-    )
-    db.add(settings)
-    await db.commit()
-    await db.refresh(settings)
-    return settings
-
-
-async def ensure_default_skills(db: AsyncSession) -> None:
-    result = await db.execute(select(SkillConfig))
-    existing_keys = {item.key for item in result.scalars().all()}
-    changed = False
-
-    for item in DEFAULT_SKILLS:
-        if item["key"] in existing_keys:
-            continue
-        db.add(SkillConfig(**item))
-        changed = True
-
-    if changed:
-        await db.commit()
-
-
-async def list_skill_configs(db: AsyncSession) -> list[SkillConfig]:
-    await ensure_default_skills(db)
-    result = await db.execute(select(SkillConfig).order_by(SkillConfig.created_at.asc()))
-    return list(result.scalars().all())
-
-
-async def get_skill_config(db: AsyncSession, skill_key: str) -> SkillConfig:
-    await ensure_default_skills(db)
-    result = await db.execute(select(SkillConfig).where(SkillConfig.key == skill_key))
-    skill = result.scalar_one_or_none()
-    if skill is None:
-        raise HTTPException(status_code=404, detail="Skill not found")
-    return skill
 
 
 @router.put("/profile", response_model=schemas.User)
@@ -515,6 +256,7 @@ async def test_model_connection(
 async def set_default_skill(
     payload: dict[str, str],
     db: DbSession,
+    _current_user: CurrentUser,
 ) -> list[schemas.Skill]:
     skill_key = payload.get("skillKey") or payload.get("skill_key")
     if not skill_key:
@@ -533,6 +275,7 @@ async def set_default_skill(
 async def toggle_skill_enabled(
     skill_key: str,
     db: DbSession,
+    _current_user: CurrentUser,
 ) -> list[schemas.Skill]:
     skill = await get_skill_config(db, skill_key)
     skill.enabled = not skill.enabled
@@ -546,6 +289,7 @@ async def update_skill_version(
     skill_key: str,
     payload: dict[str, str],
     db: DbSession,
+    _current_user: CurrentUser,
 ) -> list[schemas.Skill]:
     skill = await get_skill_config(db, skill_key)
     direction = payload.get("direction", "update")

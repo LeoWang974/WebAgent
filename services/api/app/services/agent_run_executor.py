@@ -357,7 +357,16 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
             )
 
         if await is_agent_run_cancelled(db, run_id_value):
-            raise AgentRunCancelled()
+            diagnostics = (
+                adapter.get_last_diagnostics()
+                if hasattr(adapter, "get_last_diagnostics")
+                else {}
+            )
+            adapter_completed = bool(diagnostics.get("completion_detected")) or (
+                diagnostics.get("exit_code") == 0
+            )
+            if not adapter_completed:
+                raise AgentRunCancelled()
 
         fresh_run = await db.get(AgentRun, run_id_value)
         if fresh_run is None:
@@ -510,9 +519,6 @@ async def _complete_run(
     run_id_value = run.id
     conversation = await refresh_conversation(db, conversation_id)
     conversation.status = "active"
-    if await is_agent_run_cancelled(db, run_id_value):
-        await db.commit()
-        return
     await finish_db_agent_run(
         db,
         run,

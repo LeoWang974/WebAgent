@@ -7,7 +7,7 @@ export const translations = {
     actions: "\u64cd\u4f5c",
     admin: "\u7ba1\u7406\u540e\u53f0",
     adminDescription:
-      "\u8fd9\u91cc\u9884\u7559 skill \u7248\u672c\u521b\u5efa\u3001\u53d1\u5e03\u3001\u56de\u6eda\u548c\u542f\u7528\u72b6\u6001\u7ba1\u7406\u80fd\u529b\u3002",
+      "\u7ba1\u7406\u7528\u6237\u3001\u89d2\u8272\u3001\u5bc6\u7801\u91cd\u7f6e\u548c\u7cfb\u7edf\u8fd0\u7ef4\u64cd\u4f5c\u3002",
     accountSecurity: "\u8d26\u53f7\u5b89\u5168",
     accountSecurityDescription: "\u66f4\u65b0 WebAgent \u8d26\u53f7\u7684\u767b\u5f55\u5bc6\u7801\u3002",
     agentWorkspace: "Agent \u5de5\u4f5c\u53f0",
@@ -17,7 +17,7 @@ export const translations = {
     artifact: "\u4ea7\u7269",
     addModel: "\u6dfb\u52a0\u6a21\u578b",
     addModelDescription:
-      "\u6dfb\u52a0 OpenAI compatible \u6216\u81ea\u5b9a\u4e49\u6a21\u578b\uff0c\u540e\u7eed\u63a5\u5165\u540e\u7aef\u540e\u4f1a\u52a0\u5bc6\u4fdd\u5b58 API Key\u3002",
+      "\u6dfb\u52a0 OpenAI compatible \u6216\u81ea\u5b9a\u4e49\u6a21\u578b\uff0cAPI Key \u4f1a\u7531\u540e\u7aef\u52a0\u5bc6\u4fdd\u5b58\u3002",
     apiKey: "API Key",
     avatarUrl: "\u5934\u50cf URL",
     alreadyHaveAccount: "\u5df2\u6709\u8d26\u53f7\uff1f",
@@ -232,7 +232,7 @@ export const translations = {
     actions: "Actions",
     admin: "Admin",
     adminDescription:
-      "This placeholder keeps skill version creation, publishing, rollback, and enable controls visible.",
+      "Manage users, roles, password resets, and system maintenance operations.",
     accountSecurity: "Account security",
     accountSecurityDescription: "Update the password used for this WebAgent account.",
     agentWorkspace: "Agent workspace",
@@ -241,7 +241,7 @@ export const translations = {
     artifact: "Artifact",
     addModel: "Add model",
     addModelDescription:
-      "Add an OpenAI-compatible or custom model. API keys will be encrypted once backend storage is connected.",
+      "Add an OpenAI-compatible or custom model. API keys are encrypted by the backend.",
     apiKey: "API Key",
     avatarUrl: "Avatar URL",
     alreadyHaveAccount: "Already have an account?",

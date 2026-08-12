@@ -2,8 +2,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.api.routes.settings import check_runtime_model
 from app.models import ModelConfig
+from app.services.settings_service import check_runtime_model
 
 
 class FailingHermesAdapter:
@@ -38,7 +38,7 @@ def stub_runtime_config(monkeypatch):
         return None
 
     monkeypatch.setattr(
-        "app.api.routes.settings.model_runtime_config_builder.build_for_user",
+        "app.services.settings_service.model_runtime_config_builder.build_for_user",
         fake_build_for_user,
     )
 

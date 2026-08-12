@@ -151,6 +151,10 @@ def _candidate_roots() -> list[Path]:
     user_home = Path.home()
     roots = [
         repo_root / "deep-research-reports",
+        # Hermes can write a relative final filename from the API process cwd.
+        # Keep this root explicit so a completion line such as "report.md"
+        # is resolved before the broader fallback scans run.
+        repo_root / "services" / "api",
         repo_root / "services" / "api" / "deep-research-reports",
         repo_root / "ppt_decks",
         repo_root / "artifacts",

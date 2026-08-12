@@ -24,6 +24,22 @@ ARTIFACT_PATH_RE = re.compile(
     r"(?P<path>(?:[A-Za-z]:\\|/mnt/[a-zA-Z]/|/home/|/tmp/)[^\"'<>|`\r\n]+?\.(?:md|html?|pptx|png|jpe?g|csv|xlsx|json))",
     re.IGNORECASE,
 )
+FINAL_ARTIFACT_NAME_RE = re.compile(
+    r"(?P<path>[^\"'<>|`\r\n:：]*?\.(?:md|html?|pptx|png|jpe?g|csv|xlsx|json))",
+    re.IGNORECASE,
+)
+ARTIFACT_SUFFIXES = {
+    ".md",
+    ".html",
+    ".htm",
+    ".pptx",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".csv",
+    ".xlsx",
+    ".json",
+}
 BOX_CODEPOINTS = {
     0x2500,
     0x2502,
@@ -358,20 +374,103 @@ class HermesCliWrapper:
             return str(PureWindowsPath(path).parent)
         return str(PurePosixPath(path.replace("\\", "/")).parent)
 
+    def _remember_artifact_path(self, path: str) -> bool:
+        if path in self.last_artifact_paths:
+            return False
+        self.last_artifact_paths.append(path)
+        self.last_artifacts.append(
+            {
+                "artifact_path": path,
+                "artifact_type": self._artifact_type_from_path(path),
+                "run_id": None,
+                "source_dir": self._source_dir_from_path(path),
+            }
+        )
+        return True
+
     def _remember_artifact_paths(self, text: str) -> None:
         cleaned_text = ANSI_RE.sub("", text).replace("\r", "\n")
         for match in ARTIFACT_PATH_RE.finditer(cleaned_text):
             path = self._normalize_artifact_path(match.group("path"))
-            if path not in self.last_artifact_paths:
-                self.last_artifact_paths.append(path)
-                self.last_artifacts.append(
-                    {
-                        "artifact_path": path,
-                        "artifact_type": self._artifact_type_from_path(path),
-                        "run_id": None,
-                        "source_dir": self._source_dir_from_path(path),
-                    }
-                )
+            self._remember_artifact_path(path)
+
+    @staticmethod
+    def _final_artifact_search_roots(
+        working_dir: str | None,
+        artifacts_dir: str | None,
+    ) -> list[Path]:
+        roots: list[Path] = []
+        candidates = [
+            artifacts_dir,
+            working_dir,
+            str(Path.cwd()),
+            str(Path(__file__).resolve().parents[4] / "services" / "api"),
+        ]
+        for candidate in candidates:
+            if not candidate:
+                continue
+            path = Path(candidate).expanduser()
+            if path.exists() and path not in roots:
+                roots.append(path)
+        return roots
+
+    def _remember_final_output_artifact_paths(
+        self,
+        text: str,
+        *,
+        working_dir: str | None,
+        artifacts_dir: str | None,
+    ) -> None:
+        """Resolve relative artifact names that Hermes reports in its final message."""
+
+        self._remember_artifact_paths(text)
+        roots = self._final_artifact_search_roots(working_dir, artifacts_dir)
+        cleaned_text = ANSI_RE.sub("", text).replace("\r", "\n")
+        for line in cleaned_text.splitlines():
+            for match in FINAL_ARTIFACT_NAME_RE.finditer(line):
+                candidate = match.group("path").strip().strip(".,;:：()[]{} ")
+                if not candidate or ARTIFACT_PATH_RE.fullmatch(candidate):
+                    continue
+                candidate_path = Path(candidate.replace("\\", os.sep).replace("/", os.sep))
+                if candidate_path.is_absolute():
+                    if candidate_path.exists():
+                        self._remember_artifact_path(str(candidate_path.resolve()))
+                    continue
+                for root in roots:
+                    resolved = (root / candidate_path).resolve()
+                    if resolved.is_file():
+                        self._remember_artifact_path(str(resolved))
+                        break
+
+    def _discover_run_directory_artifacts(
+        self,
+        *,
+        working_dir: str | None,
+        artifacts_dir: str | None,
+        started_at: datetime,
+    ) -> None:
+        """Perform a final, run-scoped filesystem discovery after Hermes exits."""
+
+        roots: list[Path] = []
+        for candidate in (artifacts_dir, working_dir):
+            if not candidate:
+                continue
+            root = Path(candidate).expanduser()
+            if root.exists() and root not in roots:
+                roots.append(root)
+
+        threshold = started_at.timestamp() - 2
+        for root in roots:
+            for candidate in root.rglob("*"):
+                try:
+                    if (
+                        candidate.is_file()
+                        and candidate.suffix.lower() in ARTIFACT_SUFFIXES
+                        and candidate.stat().st_mtime >= threshold
+                    ):
+                        self._remember_artifact_path(str(candidate.resolve()))
+                except OSError:
+                    continue
 
     @staticmethod
     def _summarize_raw_runtime_line(text: str) -> str | None:
@@ -675,6 +774,7 @@ class HermesCliWrapper:
     ) -> AsyncGenerator[HermesStreamEvent, None]:
         self.last_artifact_paths = []
         self.last_artifacts = []
+        stream_started_at = datetime.now()
         process_cwd: str | None = None
         if working_dir:
             shell_working_dir = self._shell_visible_path(working_dir)
@@ -743,6 +843,7 @@ class HermesCliWrapper:
         last_emitted = ""
         stdout_tail = ""
         stderr_tail = ""
+        final_output_tail = ""
         stderr_chunks: list[str] = []
         line_queue: asyncio.Queue[str | None] = asyncio.Queue()
         completion_detected = False
@@ -807,7 +908,7 @@ class HermesCliWrapper:
             return False, False, cleaned
 
         async def read_stream(stream: asyncio.StreamReader | None, is_stderr: bool) -> None:
-            nonlocal completion_detected, stderr_tail, stdout_tail
+            nonlocal completion_detected, final_output_tail, stderr_tail, stdout_tail
 
             if stream is None:
                 await line_queue.put(None)
@@ -817,12 +918,14 @@ class HermesCliWrapper:
             decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
 
             async def consume_decoded(decoded: str) -> None:
-                nonlocal completion_detected, stderr_tail, stdout_tail, stream_pending
+                nonlocal completion_detected, final_output_tail
+                nonlocal stderr_tail, stdout_tail, stream_pending
                 if not decoded:
                     return
                 with raw_log_path.open("a", encoding="utf-8", errors="replace") as raw_log:
                     raw_log.write(("STDERR " if is_stderr else "STDOUT ") + decoded)
                 self._remember_artifact_paths(decoded)
+                final_output_tail = (final_output_tail + decoded)[-131072:]
                 if self._is_completion_signal(decoded):
                     completion_detected = True
                 if is_stderr:
@@ -859,6 +962,7 @@ class HermesCliWrapper:
             asyncio.create_task(read_stream(process.stderr, True)),
         ]
         finished_streams = 0
+        artifacts_before_final_discovery = 0
 
         try:
             while finished_streams < len(stream_tasks):
@@ -1025,6 +1129,17 @@ class HermesCliWrapper:
         try:
             await process.wait()
             await asyncio.gather(*stream_tasks)
+            artifacts_before_final_discovery = emitted_artifact_count
+            self._remember_final_output_artifact_paths(
+                final_output_tail,
+                working_dir=working_dir,
+                artifacts_dir=artifacts_dir,
+            )
+            self._discover_run_directory_artifacts(
+                working_dir=working_dir,
+                artifacts_dir=artifacts_dir,
+                started_at=stream_started_at,
+            )
             for artifact in self.last_artifacts:
                 artifact["run_id"] = run_id
             self.last_diagnostics.update(
@@ -1046,6 +1161,17 @@ class HermesCliWrapper:
             if run_id:
                 await terminate_processes_by_marker(run_id)
                 unregister_run_process(run_id, process.pid)
+
+        if len(self.last_artifact_paths) > artifacts_before_final_discovery:
+            discovered_count = len(self.last_artifact_paths) - artifacts_before_final_discovery
+            yield self._build_stream_event(
+                content=f"Hermes generated {discovered_count} artifact(s).",
+                raw_log_path=raw_log_path,
+                run_id=run_id,
+                completion_detected=False,
+                artifact_found=True,
+                payload={"finalDiscovery": True},
+            )
 
         if process.returncode == 0 and not emitted_output:
             fallback_content = "Hermes completed. Discovering generated artifacts."

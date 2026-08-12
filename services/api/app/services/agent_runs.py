@@ -285,10 +285,18 @@ async def record_db_agent_run_event(
     progress: int | None = None,
     step_status: str = "completed",
     payload: dict | None = None,
+    _refresh_run: bool = True,
 ) -> DBAgentRunEvent:
-    await db.refresh(run)
-    terminal_statuses = {"completed", "failed", "cancelled", "disconnected"}
-    if run.status in terminal_statuses and status not in terminal_statuses:
+    if _refresh_run:
+        await db.refresh(run)
+    if run.status == "completed" and status != "completed":
+        status = run.status
+        progress = run.progress
+    elif (
+        run.status in TERMINAL_RUN_STATUSES
+        and status != run.status
+        and not (run.status == "cancelled" and status == "completed")
+    ):
         status = run.status
         progress = run.progress
     run.status = status or run.status
@@ -296,6 +304,7 @@ async def record_db_agent_run_event(
         run.progress = progress
     run.updated_at = datetime.now(UTC)
     event_payload = {
+        **(payload or {}),
         "eventType": event_type,
         "status": run.status,
         "progress": run.progress,
@@ -303,7 +312,6 @@ async def record_db_agent_run_event(
             "label": label,
             "status": step_status,
         },
-        **(payload or {}),
     }
     event = DBAgentRunEvent(run_id=run.id, event_type=event_type, payload=event_payload)
     db.add(event)
@@ -322,18 +330,42 @@ async def finish_db_agent_run(
     error: str | None = None,
     output: str | None = None,
 ) -> DBAgentRunEvent:
-    run.status = status
-    run.progress = 100 if status == "completed" else run.progress
-    run.error = error
+    await db.refresh(run)
+    requested_status = status
+    if run.status == "completed" and status != "completed":
+        status = run.status
+    elif (
+        run.status in TERMINAL_RUN_STATUSES
+        and status != run.status
+        and not (run.status == "cancelled" and status == "completed")
+    ):
+        status = run.status
+
+    transition_ignored = status != requested_status
+    if status == "completed":
+        run.progress = 100
+        run.error = None
+    elif status == requested_status:
+        run.error = error
     return await record_db_agent_run_event(
         db,
         run,
-        event_type=status,
-        label=label,
+        event_type="terminal_transition_ignored" if transition_ignored else status,
+        label=(
+            f"Ignored terminal transition to {requested_status}; run remains {status}"
+            if transition_ignored
+            else label
+        ),
         status=status,
         progress=run.progress,
         step_status="completed" if status == "completed" else "failed",
-        payload={"error": error, "output": output},
+        payload={
+            "error": run.error,
+            "output": output,
+            "requestedStatus": requested_status,
+            "transitionIgnored": transition_ignored,
+        },
+        _refresh_run=False,
     )
 
 

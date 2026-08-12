@@ -86,7 +86,7 @@ Hermes receives the original message and makes that decision itself.
 ## Verification
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/test-api.ps1
+powershell -ExecutionPolicy Bypass -File scripts/test-api.ps1 -Group all
 pnpm --dir apps/web test
 pnpm --dir apps/web build
 ```

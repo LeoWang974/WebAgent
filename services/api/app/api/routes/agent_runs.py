@@ -10,12 +10,12 @@ from app.core.config import settings
 from app.services.agent_runs import (
     TERMINAL_RUN_STATUSES,
     create_db_agent_run,
+    create_hermes_adapter,
     finish_db_agent_run,
     get_db_agent_run,
     list_agent_runs_for_user,
     list_run_events,
     record_db_agent_run_event,
-    create_hermes_adapter,
     to_agent_run_event_schema,
     to_agent_run_schema,
 )
@@ -103,6 +103,9 @@ async def cancel_agent_run(
 ) -> schemas.AgentRun:
     run = await get_db_agent_run(db, run_id, current_user)
     await get_conversation_or_404(db, run.conversation_id, current_user, require_write=True)
+    if run.status in TERMINAL_RUN_STATUSES:
+        events = await list_run_events(db, run_id)
+        return to_agent_run_schema(run, events)
     adapter_cancelled = False
     adapter_error = None
     if terminate_registered_run_process is not None:
