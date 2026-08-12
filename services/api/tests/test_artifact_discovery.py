@@ -169,6 +169,48 @@ def test_create_artifacts_from_paths_accepts_run_scoped_runtime_report(
     assert artifacts[0].metadata["path"] == str(report)
 
 
+def test_create_artifacts_from_paths_accepts_agent_run_artifact(
+    monkeypatch,
+    tmp_path: Path,
+):
+    report = tmp_path / "runtime" / "agent-runs" / "run_1" / "artifacts" / "report.html"
+    report.parent.mkdir(parents=True)
+    report.write_text("<html><body>Report</body></html>", encoding="utf-8")
+    monkeypatch.setattr("app.services.artifact_discovery._repo_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        "app.services.artifact_discovery._archive_artifact_path",
+        lambda path, run_id: path,
+    )
+
+    artifacts = create_artifacts_from_paths("session_1", [str(report)], "run_1")
+
+    assert len(artifacts) == 1
+    assert artifacts[0].type == "html_page"
+    assert artifacts[0].metadata
+    assert artifacts[0].metadata["path"] == str(report)
+
+
+def test_create_artifacts_from_paths_accepts_agent_run_root_artifact(
+    monkeypatch,
+    tmp_path: Path,
+):
+    deck = tmp_path / "runtime" / "agent-runs" / "run_1" / "report.pptx"
+    deck.parent.mkdir(parents=True)
+    deck.write_bytes(b"pptx")
+    monkeypatch.setattr("app.services.artifact_discovery._repo_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        "app.services.artifact_discovery._archive_artifact_path",
+        lambda path, run_id: path,
+    )
+
+    artifacts = create_artifacts_from_paths("session_1", [str(deck)], "run_1")
+
+    assert len(artifacts) == 1
+    assert artifacts[0].type == "ppt_deck"
+    assert artifacts[0].metadata
+    assert artifacts[0].metadata["path"] == str(deck)
+
+
 def test_create_artifacts_from_paths_ignores_runtime_skill_docs(tmp_path: Path):
     skill_doc = tmp_path / ".hermes" / "skills" / "SenseNova-Skills" / "docs" / "skill.md"
     skill_doc.parent.mkdir(parents=True, exist_ok=True)

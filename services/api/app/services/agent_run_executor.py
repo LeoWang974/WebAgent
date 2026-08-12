@@ -22,7 +22,11 @@ from app.services.agent_run_control import (
     AgentRunTimeout,
     is_agent_run_cancelled,
 )
-from app.services.agent_run_workspace import run_artifacts_dir, run_workspace_dir
+from app.services.agent_run_workspace import (
+    run_artifacts_dir,
+    run_workspace_dir,
+    stage_conversation_artifacts,
+)
 from app.services.agent_runs import (
     create_hermes_adapter,
     finish_db_agent_run,
@@ -136,6 +140,18 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
             model_runtime_config=model_runtime_config,
         )
         run_workspace = run_workspace_dir(run_id_value, conversation_id, user_id)
+        staged_context_artifacts = await stage_conversation_artifacts(
+            db,
+            conversation_id,
+            run_workspace,
+            mirror_dirs=(user_runtime_context.hermes_home / "context",),
+        )
+        logger.info(
+            "Staged conversation artifacts: run_id=%s count=%s workspace=%s",
+            run_id_value,
+            len(staged_context_artifacts),
+            run_workspace,
+        )
         logger.info(
             "Resolving adapter for queued run: run_id=%s adapter=%s",
             run_id_value,
@@ -171,6 +187,7 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
                 "adapterLockScope": user_runtime_context.adapter_lock_scope(),
                 "userRuntimeRoot": str(user_runtime_context.root_dir),
                 "workspaceDir": str(run_workspace),
+                "contextArtifacts": [str(path) for path in staged_context_artifacts],
             },
         )
         if adapter is None:

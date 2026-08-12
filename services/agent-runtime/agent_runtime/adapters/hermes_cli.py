@@ -272,6 +272,9 @@ class HermesCliWrapper:
         command = self._with_runtime_env(
             f"{env_str} python3 -c {shlex.quote(python_code)}".strip()
         )
+        workspace = env.get("WEBAGENT_RUN_WORKSPACE")
+        if workspace:
+            command = f"cd {shlex.quote(workspace)} && {command}"
         if use_pty:
             command = f"script -q -e -c {shlex.quote(command)} /dev/null"
         logger.info("Hermes prompt file: %s", prompt_path)

@@ -1,7 +1,7 @@
 import pytest
 
 from agent_runtime.adapters.hermes_adapter import HermesAdapter
-from agent_runtime.adapters.hermes_cli import HermesStreamEvent
+from agent_runtime.adapters.hermes_cli import HermesCliWrapper, HermesStreamEvent
 from agent_runtime.schemas import AgentRunCreate
 
 
@@ -11,6 +11,15 @@ def test_hermes_adapter_has_no_skill_mapping_helpers():
     assert not hasattr(adapter, "_get_skills_for_skill")
     assert not hasattr(adapter, "_get_toolsets_for_skill")
     assert not hasattr(adapter, "_build_runtime_prompt")
+
+
+def test_hermes_chat_command_starts_in_run_workspace(tmp_path):
+    cli = HermesCliWrapper()
+    cli._env["WEBAGENT_RUN_WORKSPACE"] = "/tmp/webagent-run"
+
+    command = cli._build_chat_bash_command("hello", run_id="run-1")
+
+    assert command.startswith("cd /tmp/webagent-run && ")
 
 
 @pytest.mark.asyncio

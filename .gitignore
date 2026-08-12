@@ -39,6 +39,7 @@ Thumbs.db
 .idea/
 
 # Generated files
+dump.rdb
 /.hermes/
 /uploads/
 /output/

@@ -268,6 +268,8 @@ def _wsl_artifact_mtime(path: Path) -> float | None:
             ["wsl.exe", "-d", "Ubuntu", "--", "stat", "-c", "%F:%Y", wsl_path],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=10,
             check=False,
         )
@@ -331,10 +333,12 @@ def _is_repo_runtime_temp_path(path: Path) -> bool:
         return False
 
     parts = relative_path.parts
+    normalized_parts = {part.lower() for part in parts}
+    if parts and parts[0] == "agent-runs":
+        return False
     if len(parts) >= 3 and parts[0] == "hermes-runs":
-        return "artifacts" not in parts
+        return "artifacts" not in normalized_parts
     if parts and parts[0] == "users":
-        normalized_parts = {part.lower() for part in parts}
         run_output_dirs = {
             "artifacts",
             "deep-research-reports",
