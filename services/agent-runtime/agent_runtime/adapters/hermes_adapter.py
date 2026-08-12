@@ -1,9 +1,7 @@
-import asyncio
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 
-from ..schemas import AgentArtifactRef, AgentRun, AgentRunCreate, AgentRunEvent, AgentRunStep
-from .base import AgentRuntimeAdapter
+from ..schemas import AgentArtifactRef, AgentRunCreate, AgentRunEvent, AgentRunStep
 from .hermes_cli import HermesCliWrapper
 
 
@@ -11,169 +9,23 @@ def now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
-class HermesAdapter(AgentRuntimeAdapter):
+class HermesAdapter:
     def __init__(
         self,
         hermes_path: str = "hermes",
         hermes_home: str = "~/.hermes",
         wsl_distribution: str = "Ubuntu",
+        serper_configured: bool = False,
     ):
-        self.cli = HermesCliWrapper(hermes_path, hermes_home, wsl_distribution)
-
-    async def create_run(self, input_data: AgentRunCreate) -> AgentRun:
-        try:
-            output_chunks: list[str] = []
-            async for event in self.stream_response_events(input_data):
-                if event.output:
-                    output_chunks.append(event.output)
-                elif event.step and event.step.label:
-                    output_chunks.append(event.step.label)
-
-            response = "\n\n".join(chunk for chunk in output_chunks if chunk).strip()
-
-            run_id = input_data.run_id or f"run_hermes_{input_data.session_id}"
-            run = AgentRun(
-                id=run_id,
-                session_id=input_data.session_id,
-                status="completed",
-                title="Hermes Agent Run",
-                progress=100,
-                steps=[
-                    AgentRunStep(
-                        id=f"{run_id}_step_1",
-                        label="Completed",
-                        status="completed",
-                        timestamp=now_iso(),
-                    )
-                ],
-                started_at=now_iso(),
-                completed_at=now_iso(),
-                output=response or "Hermes agent run completed.",
-            )
-
-            return run
-
-        except Exception as e:
-            return AgentRun(
-                id=f"run_hermes_{input_data.session_id}",
-                session_id=input_data.session_id,
-                status="failed",
-                title="Hermes Agent Run",
-                progress=0,
-                steps=[],
-                started_at=now_iso(),
-                error=str(e),
-            )
-
-    async def get_run(self, run_id: str) -> AgentRun:
-        return AgentRun(
-            id=run_id,
-            session_id="",
-            status="completed",
-            title="Hermes Agent Run",
-            progress=100,
-            steps=[],
-            started_at=now_iso(),
-            completed_at=now_iso(),
+        self.cli = HermesCliWrapper(
+            hermes_path,
+            hermes_home,
+            wsl_distribution,
+            serper_configured=serper_configured,
         )
 
-    async def cancel_run(self, run_id: str) -> AgentRun:
-        await self.cli.cancel_run(run_id)
-        return AgentRun(
-            id=run_id,
-            session_id="",
-            status="cancelled",
-            title="Hermes Agent Run",
-            progress=0,
-            steps=[],
-            started_at=now_iso(),
-            completed_at=now_iso(),
-        )
-
-    async def stream_events(
-        self, run_id: str
-    ) -> AsyncGenerator[AgentRunEvent, None]:
-        yield AgentRunEvent(
-            run_id=run_id,
-            status="queued",
-            progress=10,
-            completed_at=None,
-            step=AgentRunStep(
-                id=f"{run_id}_step_1",
-                label="Initializing Hermes Agent",
-                status="running",
-                timestamp=now_iso(),
-            ),
-        )
-
-        await asyncio.sleep(0.5)
-
-        yield AgentRunEvent(
-            run_id=run_id,
-            status="running",
-            progress=30,
-            completed_at=None,
-            step=AgentRunStep(
-                id=f"{run_id}_step_2",
-                label="Processing request",
-                status="running",
-                timestamp=now_iso(),
-            ),
-        )
-
-        await asyncio.sleep(0.5)
-
-        yield AgentRunEvent(
-            run_id=run_id,
-            status="tool_calling",
-            progress=60,
-            completed_at=None,
-            step=AgentRunStep(
-                id=f"{run_id}_step_3",
-                label="Executing tools",
-                status="running",
-                timestamp=now_iso(),
-            ),
-        )
-
-        await asyncio.sleep(0.5)
-
-        yield AgentRunEvent(
-            run_id=run_id,
-            status="rendering",
-            progress=85,
-            completed_at=None,
-            step=AgentRunStep(
-                id=f"{run_id}_step_4",
-                label="Generating response",
-                status="running",
-                timestamp=now_iso(),
-            ),
-        )
-
-        await asyncio.sleep(0.5)
-
-        yield AgentRunEvent(
-            run_id=run_id,
-            status="completed",
-            progress=100,
-            completed_at=now_iso(),
-            step=AgentRunStep(
-                id=f"{run_id}_step_5",
-                label="Completed",
-                status="completed",
-                timestamp=now_iso(),
-            ),
-            output="Hermes agent run completed successfully.",
-        )
-
-    async def stream_response(
-        self,
-        input_data: AgentRunCreate,
-    ) -> AsyncGenerator[str, None]:
-        async for event in self.stream_response_events(input_data):
-            if event.step and event.step.label:
-                yield event.step.label
+    async def cancel_run(self, run_id: str) -> bool:
+        return await self.cli.cancel_run(run_id)
 
     async def stream_response_events(
         self,
@@ -184,8 +36,6 @@ class HermesAdapter(AgentRuntimeAdapter):
         async for event in self.cli.ask_stream_events(
             question=input_data.content,
             run_id=input_data.run_id,
-            toolsets=None,
-            skills=None,
             working_dir=input_data.working_dir,
             artifacts_dir=input_data.artifacts_dir,
         ):

@@ -115,7 +115,7 @@ async def create_session(
         folder_id=input_data.folder_id,
         user_id=current_user.id,
         title=input_data.title or "新对话",
-        type=input_data.skill_key or "chat",
+        type="chat",
         pinned=False,
         status="active",
         visibility=input_data.visibility or "private",
@@ -239,7 +239,16 @@ async def stream_session_message(
     db: DbSession,
     current_user: CurrentUser,
 ) -> StreamingResponse:
-    return await stream_session_message_response(session_id, input_data, db, current_user)
+    stream = stream_session_message_response(db, session_id, input_data, current_user)
+    return StreamingResponse(
+        stream,
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/{session_id}/artifacts", response_model=list[schemas.Artifact])

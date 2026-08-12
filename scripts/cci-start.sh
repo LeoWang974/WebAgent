@@ -14,7 +14,6 @@ HERMES_NODE_DIR="$ROOT_DIR/runtime/agent-home/.hermes/node/bin"
 HERMES_PPT_EXPORT_DIR="$ROOT_DIR/runtime/agent-home/.hermes/skills/sn-ppt-standard/scripts/export_pptx"
 WEB_PORT="${WEB_PORT:-3000}"
 API_PORT="${API_PORT:-8010}"
-OPENCLAW_GATEWAY_PORT="${OPENCLAW_GATEWAY_PORT:-18789}"
 WORKER_POOL="${WORKER_POOL:-solo}"
 WORKER_CONCURRENCY="${WORKER_CONCURRENCY:-1}"
 WORKER_INSTANCES="${WORKER_INSTANCES:-4}"
@@ -55,8 +54,6 @@ fi
 
 export PATH="$AGENT_BIN_DIR:$HERMES_NODE_DIR:$PATH"
 export WEBAGENT_AGENT_PATH_PREFIX="$AGENT_BIN_DIR:$HERMES_NODE_DIR:$ROOT_DIR/runtime/conda-webagent/bin"
-export WEBAGENT_OPENCLAW_GATEWAY_HOME="$AGENT_HOME_DIR"
-export OPENCLAW_DISABLE_BONJOUR="${OPENCLAW_DISABLE_BONJOUR:-1}"
 export LD_LIBRARY_PATH="$ROOT_DIR/runtime/conda-webagent/lib:${LD_LIBRARY_PATH:-}"
 export PYTHONPATH="$REPO_DIR/services/api:$REPO_DIR/services/agent-runtime"
 export BACKEND_CORS_ORIGINS="${BACKEND_CORS_ORIGINS:-$DEFAULT_CORS_ORIGINS}"
@@ -79,19 +76,9 @@ if [ -f /etc/ssl/certs/ca-certificates.crt ]; then
   export REQUESTS_CA_BUNDLE="${REQUESTS_CA_BUNDLE:-/etc/ssl/certs/ca-certificates.crt}"
 fi
 
-for command_name in hermes openclaw; do
-  if ! command -v "$command_name" >/dev/null 2>&1; then
-    echo "Missing agent command on PATH: $command_name" >&2
-    exit 1
-  fi
-done
-
-if [ -x "$REPO_DIR/scripts/patch-openclaw-write-tool.sh" ]; then
-  "$REPO_DIR/scripts/patch-openclaw-write-tool.sh" >> "$LOG_DIR/openclaw-gateway.log" 2>&1 || {
-    echo "OpenClaw write tool schema patch failed. See $LOG_DIR/openclaw-gateway.log." >&2
-    tail -n 80 "$LOG_DIR/openclaw-gateway.log" >&2 || true
-    exit 1
-  }
+if ! command -v hermes >/dev/null 2>&1; then
+  echo "Missing Hermes command on PATH." >&2
+  exit 1
 fi
 
 if ! "$PYTHON_BIN" - <<'PY' >/dev/null 2>&1
@@ -121,7 +108,6 @@ fi
 for pattern in \
   "uvicorn app.main:app --host 0.0.0.0 --port $API_PORT" \
   "celery -A app.workers.celery_app.celery_app worker" \
-  "openclaw gateway run --port $OPENCLAW_GATEWAY_PORT" \
   "next start -H 0.0.0.0 -p $WEB_PORT" \
   "next start -H 0.0.0.0 -p 3002"
 do
@@ -136,7 +122,6 @@ sleep 2
 for pattern in \
   "uvicorn app.main:app --host 0.0.0.0 --port $API_PORT" \
   "celery -A app.workers.celery_app.celery_app worker" \
-  "openclaw gateway run --port $OPENCLAW_GATEWAY_PORT" \
   "next start -H 0.0.0.0 -p $WEB_PORT" \
   "next start -H 0.0.0.0 -p 3002"
 do
@@ -181,39 +166,7 @@ echo "Migrating stored model credentials..." >> "$LOG_DIR/webagent-api.log"
 
 : > "$LOG_DIR/webagent-worker.log"
 : > "$LOG_DIR/webagent-web.log"
-touch "$LOG_DIR/openclaw-gateway.log"
 rm -f "$RUN_DIR"/webagent-worker*.pid
-
-nohup env \
-  HOME="$AGENT_HOME_DIR" \
-  OPENCLAW_HOME="$AGENT_HOME_DIR" \
-  OPENCLAW_DISABLE_BONJOUR="$OPENCLAW_DISABLE_BONJOUR" \
-  PATH="$WEBAGENT_AGENT_PATH_PREFIX:$PATH" \
-  openclaw gateway run --port "$OPENCLAW_GATEWAY_PORT" --auth none --bind loopback --force --compact \
-  >> "$LOG_DIR/openclaw-gateway.log" 2>&1 &
-echo "$!" > "$RUN_DIR/openclaw-gateway.pid"
-
-for attempt in {1..40}; do
-  if "$PYTHON_BIN" - "$OPENCLAW_GATEWAY_PORT" <<'PY' >/dev/null 2>&1
-import socket
-import sys
-
-port = int(sys.argv[1])
-sock = socket.socket()
-sock.settimeout(1)
-sock.connect(("127.0.0.1", port))
-sock.close()
-PY
-  then
-    break
-  fi
-  if [ "$attempt" -eq 40 ]; then
-    echo "OpenClaw Gateway did not become ready on port $OPENCLAW_GATEWAY_PORT." >&2
-    tail -n 80 "$LOG_DIR/openclaw-gateway.log" >&2 || true
-    exit 1
-  fi
-  sleep 1
-done
 
 nohup "$PYTHON_BIN" -m uvicorn app.main:app --host 0.0.0.0 --port "$API_PORT" \
   >> "$LOG_DIR/webagent-api.log" 2>&1 &

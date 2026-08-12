@@ -33,18 +33,12 @@ class Settings(BaseSettings):
     sensenova_api_key: str | None = None
     sensenova_base_url: str | None = None
     sensenova_default_model: str = "sensenova-6.7-flash-lite"
-    agent_runtime_default: str = "hermes"
-    openclaw_base_url: str = "ws://127.0.0.1:18789"
-    openclaw_agent_id: str = "main"
-    openclaw_cli_path: str = "openclaw"
-    openclaw_command_timeout_seconds: int = 1800
-    openclaw_mode: str = "gateway_cli"
+    serper_api_key: str | None = None
     hermes_base_url: str = "http://localhost:8642"
     hermes_cli_path: str = "hermes"
     hermes_home: str = "~/.hermes"
     hermes_skills_dir: str | None = None
     hermes_wsl_distribution: str = "Ubuntu"
-    openclaw_skills_dir: str | None = None
     agent_run_idle_timeout_seconds: int = 30 * 60
     agent_run_overall_timeout_seconds: int = 2 * 60 * 60
     agent_run_ppt_export_timeout_seconds: int = 180
@@ -58,7 +52,6 @@ class Settings(BaseSettings):
     agent_adapter_limit_scope: str = "per_user"
     agent_adapter_default_concurrency: int = 1
     hermes_adapter_concurrency: int = 1
-    openclaw_adapter_concurrency: int = 1
     agent_adapter_lock_poll_seconds: float = 2.0
     agent_adapter_lock_status_interval_seconds: int = 30
     agent_adapter_lock_ttl_seconds: int = 120

@@ -30,11 +30,6 @@ def is_low_value_runtime_update(content: str, event_payload: dict) -> bool:
     normalized = normalize_runtime_update(content)
     low_value_messages = {
         "hermes is still running; raw output is being received.",
-        "openclaw cli task status: running.",
-        "openclaw cli task is running.",
-        "openclaw is still working; waiting for task progress.",
-        "openclaw is still working; watching the report directory.",
-        "openclaw is still working; waiting for report files.",
         "reading related files...",
         "writing intermediate files...",
         "finding related files and artifacts...",
@@ -53,9 +48,7 @@ def should_suppress_stage_bubble(
     if is_low_value_runtime_update(content, event_payload):
         return True, stage_key
     protocol = str(event_payload.get("protocol") or "")
-    event_type = str(
-        event_payload.get("hermesEventType") or event_payload.get("openclawEventType") or ""
-    )
+    event_type = str(event_payload.get("hermesEventType") or "")
     if protocol and event_type in {
         "stage_started",
         "tool_call",

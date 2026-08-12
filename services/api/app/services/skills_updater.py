@@ -15,7 +15,6 @@ class SkillsUpdateResult:
     cache_dir: str
     commit: str | None
     hermes_updated: bool = False
-    openclaw_updated: bool = False
     source_dir: str | None = None
 
 
@@ -25,10 +24,6 @@ def repo_root() -> Path:
 
 def default_skills_cache_dir() -> Path:
     return repo_root() / "runtime" / "sensenova-skills"
-
-
-def default_openclaw_skills_dir() -> Path:
-    return repo_root() / "runtime" / "openclaw-skills"
 
 
 def _run_command(args: list[str], *, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
@@ -139,7 +134,6 @@ async def update_sensenova_skills(
     source_subdir: str,
     branch: str | None,
     hermes_skills_dir: str | None,
-    openclaw_skills_dir: str | None,
     wsl_distribution: str,
 ) -> SkillsUpdateResult:
     resolved_cache_dir = Path(cache_dir).expanduser() if cache_dir else default_skills_cache_dir()
@@ -155,16 +149,10 @@ async def update_sensenova_skills(
             hermes_skills_dir,
             wsl_distribution=wsl_distribution,
         )
-        openclaw_updated = _sync_skills_target(
-            source_dir,
-            openclaw_skills_dir,
-            wsl_distribution=wsl_distribution,
-        )
         return SkillsUpdateResult(
             cache_dir=str(resolved_cache_dir),
             commit=commit,
             hermes_updated=hermes_updated,
-            openclaw_updated=openclaw_updated,
             source_dir=str(source_dir),
         )
 

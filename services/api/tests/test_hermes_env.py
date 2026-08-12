@@ -6,6 +6,8 @@ from agent_runtime.adapters.hermes_cli import HermesCliWrapper
 def test_hermes_wsl_command_sources_runtime_env():
     wrapper = HermesCliWrapper(hermes_home="/home/demo/.hermes", wsl_distribution="Ubuntu")
 
+    assert wrapper.hermes_home == "/home/demo/.hermes"
+
     command = wrapper._build_wsl_command(["/home/demo/.local/bin/hermes", "tools", "list"])
 
     assert "~/.hermes/.env" in command
@@ -16,13 +18,40 @@ def test_hermes_wsl_command_sources_runtime_env():
     assert "\"$__key\" != PATH" in command
 
 
+def test_hermes_marks_serper_as_configured_from_runtime_settings():
+    wrapper = HermesCliWrapper(serper_configured=True)
+
+    assert wrapper._env["WEBAGENT_SERPER_CONFIGURED"] == "1"
+
+
+def test_hermes_decodes_utf8_chinese_without_mojibake():
+    text = "会话切换正常"
+
+    assert HermesCliWrapper._decode_stream_chunk(text.encode("utf-8")) == text
+
+
+def test_hermes_repairs_gb18030_mojibake_from_pty_output():
+    expected = "编码正常"
+    mojibake = expected.encode("utf-8").decode("gb18030")
+
+    assert HermesCliWrapper._repair_mojibake_text(mojibake) == expected
+
+
+def test_hermes_keeps_valid_chinese_unchanged():
+    text = "最终验收通过"
+
+    assert HermesCliWrapper._repair_mojibake_text(text) == text
+
+
+def test_hermes_emits_concise_chinese_box_reply_without_punctuation():
+    assert HermesCliWrapper._should_emit_box("最终中文回复正常") is True
+
+
 def test_hermes_chat_exec_args_keep_prompt_out_of_shell():
     wrapper = HermesCliWrapper(hermes_home="/home/demo/.hermes", wsl_distribution="Ubuntu")
 
     args = wrapper._build_chat_exec_args(
         "Research global theme parks and analyze Disney's model.",
-        skills="sn-research-report",
-        toolsets="web,terminal,file",
         run_id="run_quote_test",
     )
     command = " ".join(args)
@@ -38,8 +67,6 @@ def test_hermes_chat_exec_args_auto_approve_background_tool_calls():
 
     args = wrapper._build_chat_exec_args(
         "Generate a report with the search tool.",
-        skills="sn-deep-research",
-        toolsets="web,terminal,file",
         run_id="run_yolo_test",
     )
 
@@ -51,8 +78,6 @@ def test_hermes_chat_exec_args_avoid_windows_shell_quoting():
 
     args = wrapper._build_chat_exec_args(
         "Research global theme parks and analyze Disney's model.",
-        skills="sn-research-report",
-        toolsets="web,terminal,file",
         run_id="run_exec_quote_test",
     )
 

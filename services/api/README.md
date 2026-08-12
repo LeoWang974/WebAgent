@@ -41,4 +41,4 @@ celery -A app.workers.celery_app.celery_app worker --loglevel=info
 - SSE endpoint for queued and direct agent run progress
 - SQLAlchemy models and Alembic migrations for the current core tables
 - Celery worker scaffold backed by Redis
-- Scheduled SenseNova skills updater for Hermes and OpenClaw
+- Scheduled SenseNova skills updater for Hermes

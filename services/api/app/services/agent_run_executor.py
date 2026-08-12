@@ -2,7 +2,6 @@ import asyncio
 import logging
 from datetime import datetime
 
-import httpx
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,9 +24,9 @@ from app.services.agent_run_control import (
 )
 from app.services.agent_run_workspace import run_artifacts_dir, run_workspace_dir
 from app.services.agent_runs import (
+    create_hermes_adapter,
     finish_db_agent_run,
     record_db_agent_run_event,
-    resolve_adapter_for_model,
 )
 from app.services.model_runtime_config import model_runtime_config_builder
 from app.services.persistence import persist_message, to_artifact, to_message, to_session
@@ -93,79 +92,12 @@ async def execute_queued_agent_run(run_id: str) -> None:
         await _execute_queued_agent_run(db, run_id)
 
 
-async def _complete_plain_chat_with_sensenova(
-    db: AsyncSession,
-    run: AgentRun,
-    conversation: Conversation,
-    content: str,
-) -> None:
-    model_runtime_config = model_runtime_config_builder.build_for_run(run)
-    if not model_runtime_config.supports_openai_chat_completions():
-        return
-
-    run.adapter_key = run.adapter_key or "sensenova"
-    await record_db_agent_run_event(
-        db,
-        run,
-        event_type="started",
-        label="Plain chat started",
-        status="running",
-        progress=10,
-        step_status="running",
-        payload={"adapterKey": "sensenova", "mode": "direct_chat"},
-    )
-    base_url = (model_runtime_config.base_url or "https://token.sensenova.cn/v1").rstrip("/")
-    try:
-        async with httpx.AsyncClient(timeout=45) as client:
-            response = await client.post(
-                f"{base_url}/chat/completions",
-                headers={"Authorization": f"Bearer {model_runtime_config.api_key}"},
-                json={
-                    "model": model_runtime_config.model_name,
-                    "messages": [{"role": "user", "content": content}],
-                },
-            )
-            response.raise_for_status()
-    except httpx.HTTPStatusError as error:
-        detail = error.response.text[:500]
-        message = f"SenseNova chat error: {error.response.status_code} {detail}"
-        raise RuntimeError(message) from error
-    except httpx.HTTPError as error:
-        raise RuntimeError(f"SenseNova chat request failed: {error}") from error
-
-    payload = response.json()
-    reply = payload.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
-    if not reply:
-        raise RuntimeError("SenseNova chat returned an empty response.")
-
-    assistant_message = await persist_message(db, conversation.id, "assistant", reply)
-    await record_db_agent_run_event(
-        db,
-        run,
-        event_type="stage_update",
-        label=reply,
-        status="running",
-        progress=90,
-        payload={
-            "content": reply,
-            "directPlainChat": True,
-            "messageId": assistant_message.id,
-        },
-    )
-    await _complete_run(
-        db,
-        run,
-        conversation.id,
-        *(await _message_snapshot(db, assistant_message)),
-    )
-
-
 async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
     run, conversation, user, queued_payload = await _load_run_context(db, run_id)
     run_id_value = run.id
     conversation_id = conversation.id
     user_id = user.id
-    current_adapter_key = run.adapter_key
+    current_adapter_key = "hermes"
     logger.info(
         "Queued agent run loaded: run_id=%s conversation_id=%s adapter=%s status=%s",
         run_id_value,
@@ -182,7 +114,6 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
         return
     content = str(queued_payload.get("content") or "")
     model_id = queued_payload.get("modelId")
-    skill_key = queued_payload.get("skillKey")
     run_started_at = run.created_at or datetime.now()
     assistant_messages: list[Message] = []
     assistant_output_parts: list[str] = []
@@ -194,18 +125,10 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
     adapter_capacity_lease = None
     user_runtime_context = None
     run_started_monotonic = asyncio.get_running_loop().time()
-    model_runtime_config = model_runtime_config_builder.build_for_run(run)
-    requested_runtime_adapter = current_adapter_key in {"hermes", "openclaw"}
+    model_runtime_config = None
 
     try:
-        if (
-            skill_key is None
-            and not requested_runtime_adapter
-            and model_runtime_config.supports_openai_chat_completions()
-        ):
-            await _complete_plain_chat_with_sensenova(db, run, conversation, content)
-            return
-
+        model_runtime_config = model_runtime_config_builder.build_for_run(run)
         user_runtime_context = build_user_runtime_context(
             user,
             conversation_id,
@@ -218,18 +141,14 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
             run_id_value,
             current_adapter_key,
         )
-        adapter_key, adapter = await resolve_adapter_for_model(
-            db,
+        adapter = create_hermes_adapter(
             user,
-            model_id,
-            adapter_key=current_adapter_key,
             conversation_id=conversation_id,
             run_id=run_id_value,
             model_runtime_config=model_runtime_config,
         )
         if await is_agent_run_cancelled(db, run_id_value):
             raise AgentRunCancelled()
-        current_adapter_key = adapter_key or current_adapter_key
         run.adapter_key = current_adapter_key
         logger.info(
             "Resolved adapter for queued run: run_id=%s adapter=%s available=%s",
@@ -248,7 +167,6 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
             payload={
                 "content": content,
                 "modelId": model_id,
-                "skillKey": skill_key,
                 "adapterKey": current_adapter_key,
                 "adapterLockScope": user_runtime_context.adapter_lock_scope(),
                 "userRuntimeRoot": str(user_runtime_context.root_dir),
@@ -307,139 +225,102 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
         adapter_input = AdapterAgentRunCreate(
             content=content,
             session_id=conversation_id,
-            skill_key=skill_key,
             model_id=model_id,
             run_id=run_id_value,
             working_dir=str(run_workspace),
             artifacts_dir=str(run_artifacts_dir(run_id_value, conversation_id, user_id)),
         )
 
-        if hasattr(adapter, "stream_response_events") or hasattr(adapter, "stream_response"):
-            stream = (
-                adapter.stream_response_events(adapter_input)
-                if hasattr(adapter, "stream_response_events")
-                else adapter.stream_response(adapter_input)
+        stream = adapter.stream_response_events(adapter_input)
+        logger.info(
+            "Starting adapter stream loop: run_id=%s adapter=%s",
+            run_id_value,
+            current_adapter_key,
+        )
+        while True:
+            elapsed_seconds = asyncio.get_running_loop().time() - run_started_monotonic
+            overall_remaining = settings.agent_run_overall_timeout_seconds - elapsed_seconds
+            if overall_remaining <= 0:
+                if hasattr(adapter, "cancel_run"):
+                    await adapter.cancel_run(run_id_value)
+                raise AgentRunTimeout(
+                    "overall_timeout",
+                    "Agent run exceeded the overall task timeout.",
+                )
+
+            wait_timeout = min(
+                settings.agent_run_idle_timeout_seconds,
+                max(1, overall_remaining),
             )
-            logger.info(
-                "Starting adapter stream loop: run_id=%s adapter=%s",
-                run_id_value,
-                current_adapter_key,
+            timeout_type = (
+                "overall_timeout"
+                if wait_timeout < settings.agent_run_idle_timeout_seconds
+                else "idle_timeout"
             )
-            while True:
-                elapsed_seconds = asyncio.get_running_loop().time() - run_started_monotonic
-                overall_remaining = settings.agent_run_overall_timeout_seconds - elapsed_seconds
-                if overall_remaining <= 0:
-                    if hasattr(adapter, "cancel_run"):
-                        await adapter.cancel_run(run_id_value)
+            try:
+                logger.info("Waiting for adapter stream chunk: run_id=%s", run_id_value)
+                chunk = await asyncio.wait_for(stream.__anext__(), timeout=wait_timeout)
+                logger.info("Received adapter stream chunk: run_id=%s", run_id_value)
+            except StopAsyncIteration:
+                break
+            except TimeoutError as error:
+                if hasattr(adapter, "cancel_run"):
+                    await adapter.cancel_run(run_id_value)
+                if timeout_type == "overall_timeout":
                     raise AgentRunTimeout(
                         "overall_timeout",
                         "Agent run exceeded the overall task timeout.",
-                    )
-
-                wait_timeout = min(
-                    settings.agent_run_idle_timeout_seconds,
-                    max(1, overall_remaining),
-                )
-                timeout_type = (
-                    "overall_timeout"
-                    if wait_timeout < settings.agent_run_idle_timeout_seconds
-                    else "idle_timeout"
-                )
-                try:
-                    logger.info("Waiting for adapter stream chunk: run_id=%s", run_id_value)
-                    chunk = await asyncio.wait_for(stream.__anext__(), timeout=wait_timeout)
-                    logger.info("Received adapter stream chunk: run_id=%s", run_id_value)
-                except StopAsyncIteration:
-                    break
-                except TimeoutError as error:
-                    if hasattr(adapter, "cancel_run"):
-                        await adapter.cancel_run(run_id_value)
-                    if timeout_type == "overall_timeout":
-                        raise AgentRunTimeout(
-                            "overall_timeout",
-                            "Agent run exceeded the overall task timeout.",
-                        ) from error
-                    raise AgentRunTimeout(
-                        "idle_timeout",
-                        (
-                            "Agent runtime did not emit output within "
-                            f"{settings.agent_run_idle_timeout_seconds} seconds."
-                        ),
                     ) from error
+                raise AgentRunTimeout(
+                    "idle_timeout",
+                    (
+                        "Agent runtime did not emit output within "
+                        f"{settings.agent_run_idle_timeout_seconds} seconds."
+                    ),
+                ) from error
 
-                if await is_agent_run_cancelled(db, run_id_value):
-                    raise AgentRunCancelled()
+            if await is_agent_run_cancelled(db, run_id_value):
+                raise AgentRunCancelled()
 
-                if hasattr(chunk, "step"):
-                    step = getattr(chunk, "step", None)
-                    message_content = str(getattr(step, "label", "") or "").strip()
-                    event_type = str(getattr(chunk, "event_type", "stage_update"))
-                    event_payload = dict(getattr(chunk, "payload", {}) or {})
-                    progress = int(getattr(chunk, "progress", 0) or 0)
-                else:
-                    message_content = str(chunk).strip()
-                    event_type = "stage_update"
-                    event_payload = {}
-                    progress = 0
-                if not message_content:
-                    continue
+            if hasattr(chunk, "step"):
+                step = getattr(chunk, "step", None)
+                message_content = str(getattr(step, "label", "") or "").strip()
+                event_type = str(getattr(chunk, "event_type", "stage_update"))
+                event_payload = dict(getattr(chunk, "payload", {}) or {})
+                progress = int(getattr(chunk, "progress", 0) or 0)
+            else:
+                message_content = str(chunk).strip()
+                event_type = "stage_update"
+                event_payload = {}
+                progress = 0
+            if not message_content:
+                continue
 
-                progress = progress or min(90, 10 + assistant_event_count * 8)
-                should_suppress, stage_key = should_suppress_stage_bubble(
-                    message_content,
-                    event_payload,
-                    stage_bubble_counts,
-                    last_stage_bubble_key,
-                )
-                last_stage_bubble_key = stage_key
-                if should_suppress:
-                    if (
-                        skill_key is None
-                        and not requested_runtime_adapter
-                        and elapsed_seconds >= 45
-                    ):
-                        if hasattr(adapter, "cancel_run"):
-                            await adapter.cancel_run(run_id_value)
-                        raise AgentRunTimeout(
-                            "plain_chat_timeout",
-                            "Plain chat did not return a visible response within 45 seconds.",
-                        )
-                    await record_db_agent_run_event(
-                        db,
-                        run,
-                        event_type="raw_activity",
-                        label=message_content,
-                        status="running",
-                        progress=progress,
-                        payload={
-                            **event_payload,
-                            "stageKey": stage_key,
-                            "suppressedStageBubble": True,
-                        },
-                    )
-                    continue
-
-                if event_type == "artifact_found":
-                    await record_db_agent_run_event(
-                        db,
-                        run,
-                        event_type=event_type,
-                        label=message_content,
-                        status="running",
-                        progress=progress,
-                        payload=event_payload,
-                    )
-                    continue
-
-                assistant_message = await persist_message(
+            progress = progress or min(90, 10 + assistant_event_count * 8)
+            should_suppress, stage_key = should_suppress_stage_bubble(
+                message_content,
+                event_payload,
+                stage_bubble_counts,
+                last_stage_bubble_key,
+            )
+            last_stage_bubble_key = stage_key
+            if should_suppress:
+                await record_db_agent_run_event(
                     db,
-                    conversation_id,
-                    "assistant",
-                    message_content,
+                    run,
+                    event_type="raw_activity",
+                    label=message_content,
+                    status="running",
+                    progress=progress,
+                    payload={
+                        **event_payload,
+                        "stageKey": stage_key,
+                        "suppressedStageBubble": True,
+                    },
                 )
-                assistant_output_parts.append(message_content)
-                assistant_messages.append(assistant_message)
-                assistant_event_count += 1
+                continue
+
+            if event_type == "artifact_found":
                 await record_db_agent_run_event(
                     db,
                     run,
@@ -447,24 +328,10 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
                     label=message_content,
                     status="running",
                     progress=progress,
-                    payload={
-                        "content": message_content,
-                        "messageId": assistant_message.id,
-                        "stageKey": stage_key,
-                        **event_payload,
-                    },
+                    payload=event_payload,
                 )
-                if skill_key is None and not requested_runtime_adapter:
-                    break
-        else:
-            runtime_run = await adapter.create_run(adapter_input)
-            if await is_agent_run_cancelled(db, run_id_value):
-                raise AgentRunCancelled()
-            message_content = (
-                getattr(runtime_run, "output", None)
-                or runtime_run.error
-                or "Agent runtime did not return a response."
-            )
+                continue
+
             assistant_message = await persist_message(
                 db,
                 conversation_id,
@@ -473,28 +340,24 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
             )
             assistant_output_parts.append(message_content)
             assistant_messages.append(assistant_message)
+            assistant_event_count += 1
             await record_db_agent_run_event(
                 db,
                 run,
-                event_type="stage_update",
+                event_type=event_type,
                 label=message_content,
                 status="running",
-                progress=80,
-                payload={"content": message_content, "messageId": assistant_message.id},
+                progress=progress,
+                payload={
+                    "content": message_content,
+                    "messageId": assistant_message.id,
+                    "stageKey": stage_key,
+                    **event_payload,
+                },
             )
 
         if await is_agent_run_cancelled(db, run_id_value):
             raise AgentRunCancelled()
-
-        if skill_key is None and not requested_runtime_adapter and assistant_messages:
-            assistant_message = assistant_messages[-1]
-            await _complete_run(
-                db,
-                run,
-                conversation_id,
-                *(await _message_snapshot(db, assistant_message)),
-            )
-            return
 
         fresh_run = await db.get(AgentRun, run_id_value)
         if fresh_run is None:
@@ -504,7 +367,6 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
             db,
             run,
             conversation_id,
-            skill_key,
             run_started_at,
             adapter,
             artifact_discovery_summary,

@@ -8,27 +8,22 @@ from app import schemas
 from app.core.config import settings
 from app.models import AgentRun as DBAgentRun
 from app.models import AgentRunEvent as DBAgentRunEvent
-from app.models import Conversation, ConversationShare, ModelConfig, User
-from app.services.model_runtime_config import (
-    ADAPTER_MODEL_ALIASES,
-    ModelRuntimeConfig,
-)
+from app.models import Conversation, ConversationShare, User
+from app.services.model_runtime_config import ModelRuntimeConfig
 from app.services.persistence import get_conversation_or_404
 from app.services.runtime_environment import build_user_runtime_context
 
 try:
-    from agent_runtime.adapters import HermesAdapter, OpenClawAdapter
+    from agent_runtime.adapters import HermesAdapter
 except ImportError:
     HermesAdapter = None
-    OpenClawAdapter = None
 
 ACTIVE_RUN_STATUSES = {"queued", "running", "tool_calling", "rendering"}
 TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled", "disconnected"}
 STALE_RUN_GRACE_SECONDS = 30 * 60
 
 
-def _build_adapter(
-    adapter_key: str,
+def create_hermes_adapter(
     current_user: User,
     conversation_id: str | None = None,
     run_id: str | None = None,
@@ -40,187 +35,20 @@ def _build_adapter(
         run_id=run_id,
         model_runtime_config=model_runtime_config,
     )
-    if adapter_key == "hermes" and HermesAdapter is not None:
-        return HermesAdapter(
-            hermes_path=settings.hermes_cli_path,
-            hermes_home=runtime_context.hermes_home_for_shell(),
-            wsl_distribution=settings.hermes_wsl_distribution,
-        )
-    if adapter_key == "openclaw" and OpenClawAdapter is not None:
-        return OpenClawAdapter(
-            settings.openclaw_base_url,
-            agent_id=settings.openclaw_agent_id,
-            cli_path=settings.openclaw_cli_path,
-            command_timeout_seconds=settings.openclaw_command_timeout_seconds,
-            mode=settings.openclaw_mode,
-            home_dir=runtime_context.openclaw_home_for_shell(),
-            skills_dir=runtime_context.openclaw_skills_dir_for_shell(),
-        )
-    return None
-
-
-def _resolve_adapter(
-    current_user: User,
-    model_id: str | None = None,
-    adapter_key: str | None = None,
-    conversation_id: str | None = None,
-    run_id: str | None = None,
-    model_runtime_config: ModelRuntimeConfig | None = None,
-):
-    if adapter_key in {"hermes", "openclaw"}:
-        return adapter_key, _build_adapter(
-            adapter_key,
-            current_user,
-            conversation_id,
-            run_id=run_id,
-            model_runtime_config=model_runtime_config,
-        )
-    if model_id in {"hermes", "model_hermes"}:
-        return "hermes", _build_adapter(
-            "hermes",
-            current_user,
-            conversation_id,
-            run_id=run_id,
-            model_runtime_config=model_runtime_config,
-        )
-    if model_id in {"openclaw", "model_openclaw"}:
-        return "openclaw", _build_adapter(
-            "openclaw",
-            current_user,
-            conversation_id,
-            run_id=run_id,
-            model_runtime_config=model_runtime_config,
-        )
-    if settings.agent_runtime_default == "openclaw":
-        adapter = _build_adapter(
-            "openclaw",
-            current_user,
-            conversation_id,
-            run_id=run_id,
-            model_runtime_config=model_runtime_config,
-        )
-        if adapter is not None:
-            return "openclaw", adapter
-    adapter = _build_adapter(
-        "hermes",
-        current_user,
-        conversation_id,
-        run_id=run_id,
-        model_runtime_config=model_runtime_config,
-    )
-    if adapter is not None:
-        return "hermes", adapter
-    adapter = _build_adapter(
-        "openclaw",
-        current_user,
-        conversation_id,
-        run_id=run_id,
-        model_runtime_config=model_runtime_config,
-    )
-    if adapter is not None:
-        return "openclaw", adapter
-    return None, None
-
-
-def _resolve_adapter_compat(
-    current_user: User,
-    model_id: str | None = None,
-    adapter_key: str | None = None,
-    conversation_id: str | None = None,
-    run_id: str | None = None,
-    model_runtime_config: ModelRuntimeConfig | None = None,
-):
-    try:
-        return _resolve_adapter(
-            current_user,
-            model_id=model_id,
-            adapter_key=adapter_key,
-            conversation_id=conversation_id,
-            run_id=run_id,
-            model_runtime_config=model_runtime_config,
-        )
-    except TypeError as exc:
-        message = str(exc)
-        if (
-            "current_user" not in message
-            and "multiple values" not in message
-            and "conversation_id" not in message
-        ):
-            raise
-        return _resolve_adapter(model_id=model_id, adapter_key=adapter_key)
-
-
-def _infer_adapter_key_from_model(model: ModelConfig | None) -> str | None:
-    if model is None:
+    if HermesAdapter is None:
         return None
-
-    name = (model.name or "").lower()
-    provider = (model.provider or "").lower()
-    base_url = (model.base_url or "").lower()
-    if "openclaw" in name or "openclaw" in base_url or "18789" in base_url:
-        return "openclaw"
-    if "hermes" in name or "hermes" in base_url or "8642" in base_url:
-        return "hermes"
-    if provider == "sensenova":
-        return settings.agent_runtime_default
-    return None
-
-
-async def resolve_adapter_for_model(
-    db: AsyncSession,
-    current_user: User,
-    model_id: str | None = None,
-    adapter_key: str | None = None,
-    conversation_id: str | None = None,
-    run_id: str | None = None,
-    model_runtime_config: ModelRuntimeConfig | None = None,
-):
-    if adapter_key:
-        return _resolve_adapter_compat(
-            current_user,
-            adapter_key=adapter_key,
-            conversation_id=conversation_id,
-            run_id=run_id,
-            model_runtime_config=model_runtime_config,
-        )
-    if not model_id:
-        return _resolve_adapter_compat(
-            current_user,
-            model_id=model_id,
-            conversation_id=conversation_id,
-            run_id=run_id,
-            model_runtime_config=model_runtime_config,
-        )
-
-    if model_id in ADAPTER_MODEL_ALIASES:
-        return _resolve_adapter_compat(
-            current_user,
-            model_id=model_id,
-            conversation_id=conversation_id,
-            run_id=run_id,
-            model_runtime_config=model_runtime_config,
-        )
-
-    result = await db.execute(
-        select(ModelConfig).where(
-            ModelConfig.id == model_id,
-            ModelConfig.user_id == current_user.id,
-        )
-    )
-    inferred_adapter_key = _infer_adapter_key_from_model(result.scalar_one_or_none())
-    return _resolve_adapter_compat(
-        current_user,
-        adapter_key=inferred_adapter_key,
-        model_id=model_id,
-        conversation_id=conversation_id,
-        run_id=run_id,
-        model_runtime_config=model_runtime_config,
+    return HermesAdapter(
+        hermes_path=settings.hermes_cli_path,
+        hermes_home=runtime_context.hermes_home_for_shell(),
+        wsl_distribution=settings.hermes_wsl_distribution,
+        serper_configured=bool(settings.serper_api_key),
     )
 
 
 def _event_to_step(event: DBAgentRunEvent) -> schemas.AgentRunStep:
     payload = event.payload or {}
     step_payload = payload.get("step") if isinstance(payload.get("step"), dict) else {}
+    message_id = payload.get("messageId")
     label = (
         step_payload.get("label")
         or payload.get("content")
@@ -231,7 +59,7 @@ def _event_to_step(event: DBAgentRunEvent) -> schemas.AgentRunStep:
     if status not in {"pending", "running", "completed", "failed"}:
         status = "completed"
     return schemas.AgentRunStep(
-        id=event.id,
+        id=str(message_id) if isinstance(message_id, str) and message_id else event.id,
         label=str(label),
         status=status,
         timestamp=event.created_at.isoformat(),

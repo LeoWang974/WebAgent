@@ -16,8 +16,9 @@ if (-not (Test-Path -LiteralPath $python)) {
 }
 
 $unitTests = @(
-  "tests/test_agent_adapter_resolution.py",
   "tests/test_artifact_discovery.py",
+  "tests/test_agent_run_artifact_service.py",
+  "tests/test_agent_run_queue.py",
   "tests/test_artifact_slides.py",
   "tests/test_cleanup.py",
   "tests/test_hermes_adapter.py",
@@ -25,11 +26,9 @@ $unitTests = @(
   "tests/test_hermes_protocol.py",
   "tests/test_model_runtime_config.py",
   "tests/test_model_runtime_health.py",
-  "tests/test_openclaw_adapter.py",
   "tests/test_runtime_context_builder.py",
-  "tests/test_skill_detection.py",
-  "tests/test_skill_resolution.py",
-  "tests/test_skills_update.py"
+  "tests/test_skills_update.py",
+  "tests/test_source_encoding.py"
 )
 
 $integrationTests = @(

@@ -1,7 +1,6 @@
 import pytest
 
 from agent_runtime.adapters.hermes_adapter import HermesAdapter
-from agent_runtime.adapters.hermes_cli import HermesCliWrapper
 from agent_runtime.adapters.hermes_cli import HermesStreamEvent
 from agent_runtime.schemas import AgentRunCreate
 
@@ -15,7 +14,7 @@ def test_hermes_adapter_has_no_skill_mapping_helpers():
 
 
 @pytest.mark.asyncio
-async def test_hermes_create_run_forwards_prompt_verbatim():
+async def test_hermes_stream_forwards_prompt_verbatim():
     captured: dict[str, object] = {}
 
     class FakeCli:
@@ -31,23 +30,14 @@ async def test_hermes_create_run_forwards_prompt_verbatim():
     adapter.cli = FakeCli()
     content = "请使用 sn-deep-research 调研《主题乐园》并输出 Markdown 报告。"
 
-    run = await adapter.create_run(
-        AgentRunCreate(content=content, session_id="session_1", skill_key="deep_research")
-    )
+    events = [
+        event
+        async for event in adapter.stream_response_events(
+            AgentRunCreate(content=content, session_id="session_1")
+        )
+    ]
 
-    assert run.output == "ok"
+    assert events[0].step.label == "ok"
     assert captured["question"] == content
-    assert captured["skills"] is None
-    assert captured["toolsets"] is None
-
-
-def test_hermes_prompt_adds_serper_runtime_guidance(monkeypatch):
-    monkeypatch.setenv("SEARCH_PROVIDER", "serper")
-    monkeypatch.setenv("SERPER_API_KEY", "test-key")
-
-    prompt = HermesCliWrapper._with_runtime_search_guidance("请调研青年消费趋势")
-
-    assert "SEARCH_PROVIDER=serper" in prompt
-    assert "Do not use terminal/curl probes" in prompt
-    assert "use the configured Serper search tool directly" in prompt
-    assert HermesCliWrapper._with_runtime_search_guidance(prompt) == prompt
+    assert "skills" not in captured
+    assert "toolsets" not in captured

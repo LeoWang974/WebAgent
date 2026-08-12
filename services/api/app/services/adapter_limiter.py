@@ -72,8 +72,6 @@ class NoopAdapterCapacityLease:
 def adapter_concurrency_limit(adapter_key: str | None) -> int:
     if adapter_key == "hermes":
         return settings.hermes_adapter_concurrency
-    if adapter_key == "openclaw":
-        return settings.openclaw_adapter_concurrency
     return settings.agent_adapter_default_concurrency
 
 

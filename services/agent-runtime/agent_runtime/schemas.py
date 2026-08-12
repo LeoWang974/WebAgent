@@ -13,7 +13,6 @@ class AgentRunCreate:
         self,
         content: str,
         session_id: str,
-        skill_key: str | None = None,
         model_id: str | None = None,
         run_id: str | None = None,
         working_dir: str | None = None,
@@ -21,39 +20,10 @@ class AgentRunCreate:
     ):
         self.content = content
         self.session_id = session_id
-        self.skill_key = skill_key
         self.model_id = model_id
         self.run_id = run_id
         self.working_dir = working_dir
         self.artifacts_dir = artifacts_dir
-
-
-class AgentRun:
-    def __init__(
-        self,
-        id: str,
-        session_id: str,
-        status: str,
-        title: str,
-        progress: int,
-        steps: list[AgentRunStep],
-        started_at: str | None = None,
-        completed_at: str | None = None,
-        error: str | None = None,
-        output: str | None = None,
-        artifacts: list["AgentArtifactRef"] | None = None,
-    ):
-        self.id = id
-        self.session_id = session_id
-        self.status = status
-        self.title = title
-        self.progress = progress
-        self.steps = steps
-        self.started_at = started_at
-        self.completed_at = completed_at
-        self.error = error
-        self.output = output
-        self.artifacts = artifacts or []
 
 
 class AgentArtifactRef:

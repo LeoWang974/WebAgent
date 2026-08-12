@@ -9,14 +9,12 @@ import type {
   ConversationFolder,
   Session,
   Skill,
-  SkillKey,
   User,
 } from "@/types";
 import type { SessionVisibility } from "@/types/session";
 
 export interface CreateSessionInput {
   folderId?: string;
-  skillKey?: SkillKey;
   title?: string;
 }
 
@@ -47,12 +45,10 @@ export interface AuthResult {
 }
 
 export interface SendMessageInput {
-  adapterKey?: "hermes" | "openclaw";
   content: string;
   modelId?: string;
   signal?: AbortSignal;
   sessionId: string;
-  skillKey?: SkillKey;
 }
 
 export interface SendMessageResult {
@@ -108,14 +104,6 @@ export interface UpdateSessionInput {
   visibility?: SessionVisibility;
 }
 
-export interface CreateAgentRunInput {
-  adapterKey?: "hermes" | "openclaw";
-  content: string;
-  modelId?: string;
-  sessionId: string;
-  skillKey?: SkillKey;
-}
-
 export interface UploadFileInput {
   file: File;
   sessionId?: string;
@@ -128,7 +116,6 @@ export type AgentRunUnsubscribe = () => void;
 export interface WebAgentApiAdapter {
   cancelAgentRun(runId: string): Promise<AgentRun>;
   createConversationFolder(name: string): Promise<ConversationFolder>;
-  createAgentRun(input: CreateAgentRunInput): Promise<AgentRun>;
   createSession(input: CreateSessionInput): Promise<Session>;
   createUser(input: AdminUserCreateInput): Promise<User>;
   deleteArtifact(artifactId: string): Promise<void>;

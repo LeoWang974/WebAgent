@@ -8,14 +8,14 @@ SOURCE_ROOTS = (
 )
 SOURCE_SUFFIXES = {".js", ".mjs", ".py", ".ts", ".tsx"}
 MOJIBAKE_MARKERS = (
-    "Ã",
-    "Â",
-    "â€",
-    "ðŸ",
-    "璇蜂娇鐢",
-    "鎶ュ憡",
-    "缃戦〉",
-    "�",
+    "锛",
+    "鏂板",
+    "璇锋",
+    "姝ｅ",
+    "鐭",
+    "闀夸",
+    "锟",
+    "\ufffd",
 )
 
 
@@ -23,7 +23,11 @@ def test_production_source_contains_no_known_mojibake() -> None:
     matches: list[str] = []
     for root in SOURCE_ROOTS:
         for path in root.rglob("*"):
-            if not path.is_file() or path.suffix not in SOURCE_SUFFIXES:
+            if (
+                not path.is_file()
+                or path.suffix not in SOURCE_SUFFIXES
+                or ".test." in path.name
+            ):
                 continue
             content = path.read_text(encoding="utf-8")
             for marker in MOJIBAKE_MARKERS:

@@ -97,11 +97,7 @@ export const mockSettingsAdapter: SettingsApiAdapter = {
       ...model,
       isAvailable: true,
       runtimeStatus: {
-        adapterKey: model.name.toLowerCase().includes("openclaw")
-          ? "openclaw"
-          : model.name.toLowerCase().includes("hermes")
-            ? "hermes"
-            : undefined,
+        adapterKey: "hermes",
         message: "Mock runtime health check passed.",
         ok: true,
         status: "connected",

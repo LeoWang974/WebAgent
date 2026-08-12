@@ -10,6 +10,7 @@ from app.api.dependencies import CurrentUser, DbSession
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models import AgentRun, ModelConfig, SkillConfig, SkillVersion, User, UserSettings
 from app.services.model_secret_encryption import encrypt_model_secret, mask_model_secret
+from app.services.model_runtime_config import model_runtime_config_builder
 from app.services.persistence import (
     get_user_by_username,
     normalize_email,
@@ -35,22 +36,6 @@ DEFAULT_MODELS = [
         "name": "SenseNova default model",
         "provider": "sensenova",
         "base_url": None,
-        "encrypted_api_key": None,
-        "is_default": False,
-        "is_available": True,
-    },
-    {
-        "name": "OpenClaw Agent",
-        "provider": "openai_compatible",
-        "base_url": "ws://127.0.0.1:18789",
-        "encrypted_api_key": None,
-        "is_default": False,
-        "is_available": True,
-    },
-    {
-        "name": "Hermes Agent",
-        "provider": "openai_compatible",
-        "base_url": "http://localhost:8642",
         "encrypted_api_key": None,
         "is_default": True,
         "is_available": True,
@@ -115,7 +100,7 @@ def get_model_name_input(input_data: dict[str, Any], default: str) -> str:
     return str(value).strip() or default
 
 
-def is_runtime_adapter_model(model: ModelConfig) -> bool:
+def is_legacy_runtime_selector(model: ModelConfig) -> bool:
     marker = f"{model.name or ''} {model.base_url or ''}".lower()
     return not model.encrypted_api_key and (
         "openclaw" in marker or "hermes" in marker or "18789" in marker or "8642" in marker
@@ -154,9 +139,18 @@ async def check_runtime_model(
     current_user: User,
     model: ModelConfig,
 ) -> dict[str, Any]:
-    from app.services.agent_runs import resolve_adapter_for_model
+    from app.services.agent_runs import create_hermes_adapter
 
-    adapter_key, adapter = await resolve_adapter_for_model(db, current_user, model.id)
+    runtime_config = await model_runtime_config_builder.build_for_user(
+        db,
+        current_user,
+        model.id,
+    )
+    adapter_key = "hermes"
+    adapter = create_hermes_adapter(
+        current_user,
+        model_runtime_config=runtime_config,
+    )
     if adapter is None:
         return {
             "adapterKey": adapter_key,
@@ -223,13 +217,21 @@ async def user_developer_mode(db: AsyncSession, user: User) -> bool:
 async def ensure_default_models(db: AsyncSession, user: User) -> None:
     result = await db.execute(select(ModelConfig).where(ModelConfig.user_id == user.id))
     existing_models = list(result.scalars().all())
-    existing_by_name = {model.name: model for model in existing_models}
     changed = False
 
-    for model in existing_models:
-        if model.name == "OpenClaw Agent" and model.base_url == "http://localhost:8643":
-            model.base_url = "ws://127.0.0.1:18789"
-            changed = True
+    for model in list(existing_models):
+        if not is_legacy_runtime_selector(model):
+            continue
+        await db.execute(
+            update(AgentRun)
+            .where(AgentRun.model_config_id == model.id)
+            .values(model_config_id=None)
+        )
+        await db.delete(model)
+        existing_models.remove(model)
+        changed = True
+
+    existing_by_name = {model.name: model for model in existing_models}
 
     for item in DEFAULT_MODELS:
         model = existing_by_name.get(item["name"])
@@ -238,12 +240,9 @@ async def ensure_default_models(db: AsyncSession, user: User) -> None:
             changed = True
             continue
 
-        if is_runtime_adapter_model(model):
-            for key in ("provider", "base_url", "is_available"):
-                value = item.get(key)
-                if getattr(model, key) != value:
-                    setattr(model, key, value)
-                    changed = True
+    if existing_models and not any(model.is_default for model in existing_models):
+        existing_models[0].is_default = True
+        changed = True
 
     if changed:
         await db.commit()

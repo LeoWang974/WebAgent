@@ -11,7 +11,6 @@ AGENT_HOME_DIR="$ROOT_DIR/runtime/agent-home"
 HERMES_NODE_DIR="$ROOT_DIR/runtime/agent-home/.hermes/node/bin"
 WEB_PORT="${WEB_PORT:-3000}"
 API_PORT="${API_PORT:-8010}"
-OPENCLAW_GATEWAY_PORT="${OPENCLAW_GATEWAY_PORT:-18789}"
 
 print_process() {
   local name="$1"
@@ -43,7 +42,6 @@ else
   print_process "webagent-worker"
 fi
 print_process "webagent-web"
-print_process "openclaw-gateway"
 
 if command -v curl >/dev/null 2>&1; then
   if curl -fsS "http://127.0.0.1:$API_PORT/api/health" >/tmp/webagent-api-health.txt; then
@@ -94,34 +92,14 @@ else
 fi
 
 PATH="$AGENT_BIN_DIR:$HERMES_NODE_DIR:$ROOT_DIR/runtime/conda-webagent/bin:$PATH"
-for command_name in hermes openclaw; do
-  if command -v "$command_name" >/dev/null 2>&1; then
-    echo "$command_name: available ($(command -v "$command_name"))"
-  else
-    echo "$command_name: unavailable on PATH"
-  fi
-done
-
-if [ -x "$PYTHON_BIN" ]; then
-  if "$PYTHON_BIN" - "$OPENCLAW_GATEWAY_PORT" <<'PY' >/dev/null 2>&1
-import socket
-import sys
-
-port = int(sys.argv[1])
-sock = socket.socket()
-sock.settimeout(1)
-sock.connect(("127.0.0.1", port))
-sock.close()
-PY
-  then
-    echo "openclaw gateway: ready on ws://127.0.0.1:$OPENCLAW_GATEWAY_PORT"
-  else
-    echo "openclaw gateway: unavailable on ws://127.0.0.1:$OPENCLAW_GATEWAY_PORT"
-  fi
+if command -v hermes >/dev/null 2>&1; then
+  echo "hermes: available ($(command -v hermes))"
+else
+  echo "hermes: unavailable on PATH"
 fi
 
 echo "recent logs:"
-for log_name in webagent-api.log webagent-worker.log webagent-web.log openclaw-gateway.log; do
+for log_name in webagent-api.log webagent-worker.log webagent-web.log; do
   log_path="$LOG_DIR/$log_name"
   if [ -f "$log_path" ]; then
     echo "- $log_path"

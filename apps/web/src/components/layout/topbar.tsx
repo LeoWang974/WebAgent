@@ -24,25 +24,18 @@ export function Topbar() {
   const runtimeStatusCheckedAt = useChatStore((state) => state.runtimeStatusCheckedAt);
   const runtimeStatusRefreshing = useChatStore((state) => state.runtimeStatusRefreshing);
   const selectedModel = models.find((model) => model.id === selectedModelId);
-  const adapterKey = selectedModel?.runtimeStatus?.adapterKey;
-  const showRuntimeStatus = Boolean(adapterKey);
   const runtimeConnected = selectedModel?.isAvailable !== false;
 
   function focusSessionSearch() {
     const shouldOpenDrawer = window.matchMedia("(max-width: 767px)").matches;
-
     if (shouldOpenDrawer) {
       openSidebarDrawer();
     }
-
     window.setTimeout(() => {
       const inputs = Array.from(
         document.querySelectorAll<HTMLInputElement>("[data-session-search-input]"),
       );
-      const visibleInput =
-        inputs.find((input) => input.offsetParent !== null) ?? inputs[0];
-
-      visibleInput?.focus();
+      (inputs.find((input) => input.offsetParent !== null) ?? inputs[0])?.focus();
     }, shouldOpenDrawer ? 60 : 0);
   }
 
@@ -63,38 +56,34 @@ export function Topbar() {
         </span>
       </div>
       <div className="flex items-center gap-1.5">
-        {showRuntimeStatus ? (
-          <div
-            className="hidden items-center gap-1.5 rounded-full border bg-white px-2 py-1 text-[11px] text-muted-foreground md:flex"
-            title={`${selectedModel?.baseUrl ?? "未配置地址"} / ${
-              selectedModel?.runtimeStatus?.message ?? ""
+        <div
+          className="hidden items-center gap-1.5 rounded-full border bg-white px-2 py-1 text-[11px] text-muted-foreground md:flex"
+          title={`${selectedModel?.baseUrl ?? "未配置地址"} / ${
+            selectedModel?.runtimeStatus?.message ?? "Hermes 运行时"
+          }`}
+        >
+          <span
+            className={`size-1.5 rounded-full ${
+              runtimeConnected ? "bg-emerald-500" : "bg-amber-500"
             }`}
+          />
+          <span>Hermes</span>
+          <span>{runtimeConnected ? "已连接" : "未连接"}</span>
+          <span className="text-muted-foreground/70">
+            {formatCheckedAt(runtimeStatusCheckedAt)}
+          </span>
+          <button
+            className="ml-0.5 flex size-5 items-center justify-center rounded-full hover:bg-muted disabled:opacity-50"
+            disabled={runtimeStatusRefreshing}
+            onClick={() => void refreshRuntimeModelStatus()}
+            title="刷新 Hermes 状态"
+            type="button"
           >
-            <span
-              className={`size-1.5 rounded-full ${
-                runtimeConnected ? "bg-emerald-500" : "bg-amber-500"
-              }`}
+            <RefreshCw
+              className={`size-3 ${runtimeStatusRefreshing ? "animate-spin" : ""}`}
             />
-            <span className="max-w-[170px] truncate">
-              {adapterKey === "openclaw" ? "OpenClaw Gateway" : adapterKey}
-            </span>
-            <span>{runtimeConnected ? "已连接" : "未连接"}</span>
-            <span className="text-muted-foreground/70">
-              {formatCheckedAt(runtimeStatusCheckedAt)}
-            </span>
-            <button
-              className="ml-0.5 flex size-5 items-center justify-center rounded-full hover:bg-muted disabled:opacity-50"
-              disabled={runtimeStatusRefreshing}
-              onClick={() => void refreshRuntimeModelStatus()}
-              title="刷新运行时状态"
-              type="button"
-            >
-              <RefreshCw
-                className={`size-3 ${runtimeStatusRefreshing ? "animate-spin" : ""}`}
-              />
-            </button>
-          </div>
-        ) : null}
+          </button>
+        </div>
         <button
           className="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
           onClick={focusSessionSearch}

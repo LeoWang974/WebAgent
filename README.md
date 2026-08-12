@@ -1,272 +1,96 @@
 # WebAgent
 
-WebAgent is a full-stack agent workspace with a Next.js frontend, FastAPI backend, PostgreSQL persistence, and Hermes/OpenClaw runtime adapters. The current development focus is a Codex-style workspace with conversations, Agent Run status, artifacts, settings, users, permissions, and browser-rendered Markdown/PPT/image/table previews.
+WebAgent is a multi-user web interface for the Hermes CLI. It keeps the runtime
+boundary intentionally small:
 
-## Repository Layout
+1. Persist users, conversations, messages, runs, and artifacts.
+2. Send the user's message to Hermes without rewriting it or selecting a skill.
+3. Convert Hermes runtime feedback into SSE stage messages.
+4. Discover, persist, preview, and download files produced by Hermes.
+
+The application does not contain a second agent runtime and does not generate
+replacement reports, HTML pages, or PPTX files when Hermes does not produce one.
+
+## Structure
 
 ```text
-apps/web                Next.js frontend
-services/api            FastAPI backend, SQLAlchemy models, Alembic migrations
-services/agent-runtime  Hermes/OpenClaw adapter package
-packages/shared         Shared frontend package
-docs                    Product, architecture, and handoff notes
-scripts                 Local development launch scripts
-runtime                 Local runtime outputs, ignored by git
+apps/web                 Next.js workspace UI
+services/api             FastAPI, SQLAlchemy, Celery, PostgreSQL, Redis
+services/agent-runtime   Hermes CLI adapter
+scripts                  Local and CCI process scripts
+docs                     Operations and testing notes
 ```
 
-## Windows Development
+## Runtime Model
 
-Prerequisites:
+- Hermes is the only Agent runtime.
+- Users choose an API configuration for Hermes: provider, base URL, model name,
+  and encrypted API key.
+- Every Agent Run stores a model configuration snapshot.
+- Every run has a user/conversation/run-scoped workspace.
+- Short chats use the `short-chat` Celery queue; long jobs use `agent-runs`.
+- Queue classification changes scheduling priority only. It never changes the
+  prompt sent to Hermes.
+- Adapter capacity is scoped per conversation so different users and different
+  conversations can run concurrently.
 
-- Node.js and pnpm
-- Python 3.12 with `services/api/.venv`
-- PostgreSQL running locally
-- Hermes available through WSL2 if using the Hermes adapter
+## Local Development
 
-Install dependencies:
+Requirements: Python 3.12, Node.js, pnpm, PostgreSQL, Redis, and Hermes CLI.
 
 ```powershell
+Copy-Item .env.example .env
 pnpm install
-cd services\api
-.\.venv\Scripts\python.exe -m pip install -e .[dev]
-```
 
-Environment files:
+cd services/api
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -e ".[dev]"
+alembic upgrade head
+cd ../..
 
-- Root: copy `.env.example` if needed.
-- Backend: `services/api/.env` is created from `services/api/.env.example` by `scripts/dev-api.ps1` when missing.
-- Frontend: `apps/web/.env.local` is created from `apps/web/.env.local.example` by `scripts/dev-web.ps1` when missing.
-
-Start both dev services:
-
-```powershell
-.\scripts\dev-all.ps1
-```
-
-Start one service at a time:
-
-```powershell
-.\scripts\dev-api.ps1
-.\scripts\dev-web.ps1
+powershell -ExecutionPolicy Bypass -File scripts/dev-all.ps1
 ```
 
 Default URLs:
 
+- Web: `http://127.0.0.1:3000/app`
 - API health: `http://127.0.0.1:8010/api/health`
-- Web app: `http://localhost:3002/app`
 
-The dev scripts stop stale listeners on their fixed ports before starting. Close the spawned PowerShell window or press `Ctrl+C` to stop a service.
-`scripts/dev-api.ps1` also creates a persistent ignored key at
-`runtime/secrets/model-config.key`; direct `uvicorn` startup must provide
-`MODEL_CONFIG_ENCRYPTION_KEY` explicitly.
+## Configuration
 
-## Tests And Build
+Use [.env.example](.env.example) for local development and
+[.env.production.example](.env.production.example) for deployment. Required
+production secrets include:
 
-Backend:
+- `DATABASE_URL`
+- `REDIS_URL`
+- `JWT_SECRET_KEY`
+- `MODEL_CONFIG_ENCRYPTION_KEY`
+- a default model API key, unless every user supplies one
 
-```powershell
-cd services\api
-.\.venv\Scripts\python.exe -m pytest
-.\.venv\Scripts\python.exe -m compileall -q app ..\agent-runtime\agent_runtime
-```
+Hermes-specific paths:
 
-Frontend:
+- `HERMES_CLI_PATH`
+- `HERMES_HOME`
+- `HERMES_SKILLS_DIR`
+- `HERMES_WSL_DISTRIBUTION` on Windows/WSL2
 
-```powershell
-pnpm --filter web test
-pnpm --filter web build
-```
+## Skills
 
-## Next.js Build Directories
+The optional scheduler synchronizes
+[SenseNova-Skills](https://github.com/OpenSenseNova/SenseNova-Skills) into the
+Hermes skills directory. WebAgent does not select a skill for a user message;
+Hermes receives the original message and makes that decision itself.
 
-The frontend intentionally isolates dev and production output:
-
-- Development server: `.next`
-- Production build: `.next-build`
-
-Both directories are ignored by git. Do not manually copy files into them or delete them while a dev server is running. If the dev build cache is corrupt, stop the dev server first, then run:
+## Verification
 
 ```powershell
-pnpm --filter web run clean
+powershell -ExecutionPolicy Bypass -File scripts/test-api.ps1
+pnpm --dir apps/web test
+pnpm --dir apps/web build
 ```
 
-`scripts/dev-web.ps1` performs this clean only before starting Next.js.
-
-## Linux / CCI Server Notes
-
-The CCI environment does not provide Docker. Treat bare Linux processes as the
-primary deployment path:
-
-1. Install and validate agent_pack, Hermes, OpenClaw, SenseNova credentials, and
-   Serper credentials in an isolated host directory.
-2. Clone or pull this repository inside the isolated CCI workspace.
-3. Run FastAPI, Celery workers, and Next.js through `scripts/cci-start.sh`.
-4. Keep PostgreSQL and Redis as host services or platform-managed services.
-5. Verify login, conversations, Agent Run SSE, artifacts, sharing permissions,
-   and long Hermes/OpenClaw tasks.
-
-CCI web port convention:
-
-- Web app: `http://<cci-host>:3000/app`
-- API health: `http://<cci-host>:8010/api/health`
-- `scripts/cci-start.sh` defaults to `WEB_PORT=3000` for bare Linux runs.
-- `scripts/cci-start.sh` starts one `short-chat` worker plus four `agent-runs`
-  workers by default. Short chat requests are routed to the priority queue, while
-  Markdown/HTML/PPT/image/report-style tasks remain on the long-task queue.
-- `scripts/cci-status.sh` checks API/web readiness, Redis, PostgreSQL, and
-  Hermes/OpenClaw command availability, then tails recent logs.
-- `scripts/cci-stop.sh` stops pid-file managed API, worker, and web processes,
-  then logs conservative orphan cleanup for run-scoped Hermes/OpenClaw/PPT
-  helper processes.
-
-Useful CCI queue settings:
-
-- `SHORT_CHAT_QUEUE_NAME=short-chat`
-- `AGENT_RUN_QUEUE_NAME=agent-runs`
-- `WORKER_INSTANCES=4`
-- `WORKER_POOL=solo`
-- `WORKER_CONCURRENCY=1`
-
-For routine CCI operations:
-
-```bash
-WEB_PORT=3000 API_PORT=8010 bash scripts/cci-start.sh
-bash scripts/cci-status.sh
-bash scripts/cci-stop.sh
-```
-
-Detailed CCI bare-metal runtime, environment, log, and troubleshooting notes live in
-[`docs/CCI_BARE_METAL.md`](docs/CCI_BARE_METAL.md).
-
-User model API keys and Agent Run model snapshots are encrypted at rest. Read
-[`docs/MODEL_SECRET_MANAGEMENT.md`](docs/MODEL_SECRET_MANAGEMENT.md) before
-migrating legacy credentials or rotating encryption keys.
-
-The Windows PowerShell scripts remain local development helpers, not Linux
-service runners:
-
-- `scripts/dev-api.ps1`: starts FastAPI on `127.0.0.1:8010`.
-- `scripts/dev-web.ps1`: starts Next.js on `localhost:3002`.
-- `scripts/dev-openclaw-gateway.ps1`: starts OpenClaw Gateway on
-  `ws://127.0.0.1:18789`.
-- `scripts/stop-dev.ps1`: stops `3002`, `8010`, and `18789`.
-
-On Linux/CCI, use `scripts/cci-start.sh` or an equivalent process manager such
-as systemd, supervisord, or tmux.
-
-## Agent Runtime And Search Configuration
-
-WebAgent currently supports two runtime adapters:
-
-- Hermes: stable path for long research, PPT, image, and artifact workflows.
-- OpenClaw: integrated through the adapter pattern and gateway mode; long-task
-  protocol work is ongoing.
-
-The OpenClaw event contract expected by WebAgent is documented in:
-
-```text
-docs/OPENCLAW_EVENT_PROTOCOL.md
-```
-
-When deploying to CCI or another Linux server, use a Hermes/OpenClaw
-installation that follows the same runtime contract. For OpenClaw, either keep
-the current fallback behavior or deploy a protocol-capable fork/branch that
-emits `openclaw.event.v1` events from `openclaw tasks list --json`.
-
-Search configuration:
-
-- Hermes should use `web.backend: serper` in its config.
-- Hermes should have `SERPER_API_KEY` available in its runtime environment.
-- OpenClaw should use `tools.web.search.provider = "serper"`.
-- OpenClaw Gateway must be restarted after search provider changes.
-- Tavily may remain configured for local experiments, but do not leave it as the
-  default backend when validating Serper behavior.
-
-Before testing long research on a new machine, verify Serper directly from the
-same user account that runs the agent runtime:
-
-```bash
-python - <<'PY'
-import json
-import os
-import urllib.request
-
-key = os.environ["SERPER_API_KEY"]
-req = urllib.request.Request(
-    "https://google.serper.dev/search",
-    data=json.dumps({"q": "WebAgent Serper connectivity test", "num": 1}).encode(),
-    headers={"X-API-KEY": key, "Content-Type": "application/json"},
-    method="POST",
-)
-with urllib.request.urlopen(req, timeout=20) as response:
-    print(response.status)
-PY
-```
-
-Expected output:
-
-```text
-200
-```
-
-## Production Configuration
-
-Production templates are provided but contain placeholders:
-
-- `.env.production.example`
-- `apps/web/.env.production.example`
-- `services/api/.env.production.example`
-
-Required production settings:
-
-- `NEXT_PUBLIC_API_ADAPTER=fastapi`
-- `ENVIRONMENT=production`
-- `ALLOW_DEV_AUTH_FALLBACK=false`
-- `JWT_SECRET_KEY` must be a strong non-placeholder secret with at least 32 characters.
-- `BACKEND_CORS_ORIGINS` must match the public web origin.
-
-The frontend now rejects production builds unless the API adapter is explicitly
-set to `fastapi`. The backend refuses to start in production when dev auth
-fallback or an insecure JWT secret is configured.
-
-The API also starts a lightweight cleanup loop when `CLEANUP_ENABLED=true`.
-Admins can run it on demand through `POST /api/admin/cleanup`.
-
-The API can also keep open-source SenseNova skills current for both Hermes and
-OpenClaw. When `SKILLS_UPDATE_ENABLED=true`, FastAPI schedules a weekly update
-from `https://github.com/OpenSenseNova/SenseNova-Skills.git`; the default
-schedule is Friday 17:00 in `Asia/Shanghai`.
-
-Relevant backend settings:
-
-- `SKILLS_UPDATE_REPO_URL`
-- `SKILLS_UPDATE_CACHE_DIR`
-- `SKILLS_UPDATE_SOURCE_SUBDIR`
-- `SKILLS_UPDATE_WEEKDAY`, `SKILLS_UPDATE_HOUR`, `SKILLS_UPDATE_MINUTE`
-- `HERMES_SKILLS_DIR`, defaulting to `${HERMES_HOME}/skills`
-- `OPENCLAW_SKILLS_DIR`, defaulting to `runtime/openclaw-skills`
-
-On Windows development machines, Hermes paths such as `/home/.../.hermes/skills`
-are synced through WSL using `HERMES_WSL_DISTRIBUTION`. On Linux/CCI, set
-`HERMES_SKILLS_DIR` and `OPENCLAW_SKILLS_DIR` to normal Linux filesystem paths.
-
-Local development may use `python services/api/scripts/seed_local_users.py` to
-create `test/test` and `admin/admin`. These accounts are local-only fixtures:
-do not seed or keep them in production.
-
-See `docs/PRODUCTION.md` for the deployment checklist.
-
-## Next Development Focus
-
-After migration, the next planned development areas are:
-
-- User multi-threading: allow users to run and observe multiple Agent Runs without
-  blocking unrelated conversations.
-- Linux/CCI deployment: continue validating the bare-process runtime, environment
-  variables, process supervision, and SSH tunnel access.
-- OpenClaw protocolization: move from fallback text/directory discovery toward
-  explicit `openclaw.event.v1` events.
-- Permission hardening: continue validating private, shared, and public session
-  behavior across users.
-- Artifact stability: keep run-scoped artifact selection deterministic when a
-  run generates Markdown, HTML, PPTX, images, tables, and debug JSON.
+See [docs/TESTING.md](docs/TESTING.md) and
+[docs/CCI_BARE_METAL.md](docs/CCI_BARE_METAL.md) for detailed checks and CCI
+operations.

@@ -45,7 +45,6 @@ class Session(ApiModel):
 
 class SessionCreate(ApiModel):
     folder_id: str | None = None
-    skill_key: SkillKey | None = None
     title: str | None = None
     visibility: SessionVisibility | None = None
 

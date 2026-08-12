@@ -15,7 +15,7 @@ from app.services.agent_runs import (
     list_agent_runs_for_user,
     list_run_events,
     record_db_agent_run_event,
-    resolve_adapter_for_model,
+    create_hermes_adapter,
     to_agent_run_event_schema,
     to_agent_run_schema,
 )
@@ -56,20 +56,13 @@ async def create_agent_run(
         current_user,
         input_data.model_id,
     )
-    adapter_key, _ = await resolve_adapter_for_model(
-        db,
-        current_user,
-        input_data.model_id,
-        adapter_key=input_data.adapter_key,
-        model_runtime_config=model_runtime_config,
-    )
     run = await create_db_agent_run(
         db,
         input_data.session_id,
-        title=input_data.skill_key or "Agent Run",
+        title="Hermes Agent Run",
         status="queued",
         progress=0,
-        adapter_key=adapter_key,
+        adapter_key="hermes",
         model_runtime_config=model_runtime_config,
     )
     event = await record_db_agent_run_event(
@@ -83,11 +76,9 @@ async def create_agent_run(
         payload={
             "content": input_data.content,
             "modelId": input_data.model_id,
-            "requestedAdapterKey": input_data.adapter_key,
             "modelConfigId": run.model_config_id,
             "modelProvider": run.model_provider,
             "modelName": run.model_name,
-            "skillKey": input_data.skill_key,
         },
     )
     return to_agent_run_schema(run, [event])
@@ -122,10 +113,8 @@ async def cancel_agent_run(
     model_runtime_config = model_runtime_config_builder.build_for_run(run)
     adapter = None
     try:
-        _, adapter = await resolve_adapter_for_model(
-            db,
+        adapter = create_hermes_adapter(
             current_user,
-            adapter_key=run.adapter_key,
             conversation_id=run.conversation_id,
             run_id=run.id,
             model_runtime_config=model_runtime_config,

@@ -31,7 +31,7 @@ On Linux/CCI:
 Current grouping:
 
 - `unit`: adapter parsing, artifact discovery, model runtime config, runtime
-  context, cleanup, skill resolution/update, and protocol helpers.
+  environment, cleanup, skill update, queue classification, and protocol helpers.
 - `integration`: ASGI API flows, Agent Run SSE persistence, permissions,
   sharing, cancellation, timeout, and runtime isolation.
 
@@ -46,10 +46,9 @@ Current backend coverage:
   - Windows and WSL path normalization.
   - Artifact creation from file paths.
   - Content-hash based dedupe.
-- `tests/test_artifact_context_builder.py`
-  - Runtime path normalization.
-  - `deep_research` receives only a small set of relevant artifacts.
-  - `ppt_generation` prioritizes final reports and limits injected paths.
+- `tests/test_hermes_adapter.py`
+  - User prompts are passed to Hermes verbatim.
+  - WebAgent does not inject skill mapping or runtime prompt guidance.
 
 Compile check:
 

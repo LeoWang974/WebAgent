@@ -13,13 +13,13 @@ test("chat helper does not auto-route skills from prompt text", () => {
 });
 
 test("chat helper labels stay readable Chinese", () => {
-  for (const text of ["数据分析", "深度调研", "HTML生成", "PPT生成", "图像生成", "新任务"]) {
+  for (const text of ["新对话", "新任务", "正在工作", "等待运行状态"]) {
     assert.equal(source.includes(text), true, `Missing readable text: ${text}`);
   }
 });
 
 test("chat helper does not contain known mojibake fragments", () => {
-  for (const fragment of ["閺", "濞", "閻", "鐢", "鏂", "鈧", "锛"]) {
+  for (const fragment of ["锛", "鏂", "璇", "姝", "鐭", "闀", "锟"]) {
     assert.equal(source.includes(fragment), false, `Unexpected mojibake: ${fragment}`);
   }
 });

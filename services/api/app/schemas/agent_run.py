@@ -1,8 +1,6 @@
 from typing import Any, Literal
 
 from app.schemas.base import ApiModel
-from app.schemas.session import SkillKey
-
 AgentRunStatus = Literal[
     "queued",
     "running",
@@ -45,11 +43,9 @@ class AgentRun(ApiModel):
 
 
 class AgentRunCreate(ApiModel):
-    adapter_key: str | None = None
     content: str
     model_id: str | None = None
     session_id: str
-    skill_key: SkillKey | None = None
 
 
 class AgentRunEvent(ApiModel):

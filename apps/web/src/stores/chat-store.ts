@@ -2,7 +2,6 @@
 
 import { create } from "zustand";
 import { selectPreferredArtifact } from "@/lib/artifact-selection";
-import { isRuntimeAdapterModel, type AgentKey } from "@/lib/runtime-models";
 import { settingsApi, webAgentApi } from "@/services";
 import { ApiError } from "@/services/api-client";
 import type { AgentRunUnsubscribe } from "@/services/adapters/types";
@@ -41,7 +40,6 @@ interface ChatState {
   messages: Message[];
   models: ModelConfig[];
   selectedArtifactId?: string;
-  selectedAgentKey: AgentKey;
   selectedModelId?: string;
   sharingSessionId?: string;
   sessions: Session[];
@@ -54,7 +52,7 @@ interface ChatState {
   addModel: (input: Omit<ModelConfig, "id" | "isDefault" | "isAvailable">) => Promise<void>;
   applyAgentRunEvent: (event: AgentRunEvent) => void;
   createConversationFolder: (name: string) => Promise<void>;
-  createSession: (skillKey?: SkillKey) => Promise<Session | undefined>;
+  createSession: () => Promise<Session | undefined>;
   deleteArtifact: (artifactId: string) => Promise<void>;
   deleteConversationFolder: (folderId: string) => Promise<void>;
   deleteModel: (modelId: string) => Promise<void>;
@@ -69,12 +67,11 @@ interface ChatState {
   moveSessionToFolder: (sessionId: string, folderId?: string) => Promise<void>;
   renameSession: (sessionId: string, title: string) => Promise<void>;
   selectArtifact: (artifactId: string) => void;
-  selectAgent: (agentKey: AgentKey) => void;
   selectModel: (modelId: string) => void;
   selectSession: (sessionId: string) => void;
   setSessionVisibility: (sessionId: string, visibility: Session["visibility"]) => Promise<void>;
   shareSession: (sessionId: string, email: string) => Promise<void>;
-  sendMessage: (content: string, skillKey?: SkillKey) => Promise<void>;
+  sendMessage: (content: string) => Promise<void>;
   setDefaultModel: (modelId: string) => Promise<void>;
   setDefaultSkill: (skillKey: SkillKey) => Promise<void>;
   stopActiveRun: (runId?: string) => void;
@@ -220,11 +217,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
   runtimeStatusCheckedAt: undefined,
   runtimeStatusRefreshing: false,
   selectedArtifactId: undefined,
-  selectedAgentKey:
-    typeof window !== "undefined" &&
-    window.localStorage.getItem("webagent_selected_agent") === "openclaw"
-      ? "openclaw"
-      : "hermes",
   selectedModelId: undefined,
   sharingSessionId: undefined,
   sessions: [],
@@ -247,10 +239,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set({ error: error instanceof Error ? error.message : "Failed to add model." });
     }
   },
-  createSession: async (skillKey) => {
+  createSession: async () => {
     set({ error: undefined });
     try {
-      const session = await webAgentApi.createSession({ skillKey });
+      const session = await webAgentApi.createSession({});
       set((state) => ({
         currentSessionId: session.id,
         selectedArtifactId: undefined,
@@ -388,7 +380,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         (run) => run.sessionId === currentSessionId && !isTerminalRunStatus(run.status),
       );
       const selectedArtifactId = selectPreferredArtifact(artifacts, currentSessionId)?.id;
-      const modelConfigs = models.filter((model) => !isRuntimeAdapterModel(model));
+      const modelConfigs = models;
       const selectedModelId =
         modelConfigs.find((model) => model.isDefault)?.id ??
         modelConfigs[0]?.id ??
@@ -464,7 +456,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
       runtimeStatusCheckedAt: undefined,
       runtimeStatusRefreshing: false,
       selectedArtifactId: undefined,
-      selectedAgentKey: "hermes",
       selectedModelId: undefined,
       sharingSessionId: undefined,
       sessions: [],
@@ -606,12 +597,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
   selectArtifact: (artifactId) => set({ selectedArtifactId: artifactId }),
-  selectAgent: (agentKey) => {
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem("webagent_selected_agent", agentKey);
-    }
-    set({ selectedAgentKey: agentKey });
-  },
   selectModel: (modelId) => set({ selectedModelId: modelId }),
   selectSession: (sessionId) => {
     const artifact = selectPreferredArtifact(get().artifacts, sessionId);
@@ -674,20 +659,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
     }
   },
-  sendMessage: async (content, skillKey) => {
+  sendMessage: async (content) => {
     const trimmed = content.trim();
     if (!trimmed) {
       return;
     }
 
-    const adapterKey = get().selectedAgentKey;
     const modelId = get().selectedModelId;
     const modelName = get().models.find((model) => model.id === modelId)?.name ?? "Agent";
-    const requestedSkill = skillKey;
-    const isRuntimeAdapterRun = adapterKey === "hermes" || adapterKey === "openclaw";
     let sessionId = get().currentSessionId;
     if (!sessionId) {
-      const session = await get().createSession(requestedSkill);
+      const session = await get().createSession();
       if (!session) {
         return;
       }
@@ -696,7 +678,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     const currentSession = get().sessions.find((session) => session.id === sessionId);
     const shouldAutoRename = isDefaultSessionTitle(currentSession?.title);
-    const autoTitle = generateSessionTitle(trimmed, requestedSkill);
+    const autoTitle = generateSessionTitle(trimmed);
 
     const now = new Date().toISOString();
     const runId = createId("run");
@@ -711,18 +693,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const pendingAssistantMessage = createPendingAssistantMessage(
       sessionId,
       modelName,
-      requestedSkill,
+      undefined,
     );
     const run: AgentRun = {
       id: runId,
       hasAssistantResponse: false,
-      isPlainChat: !requestedSkill && !isRuntimeAdapterRun,
+      isPlainChat: false,
       progress: 0,
       sessionId,
       startedAt: now,
       status: "running",
       steps: [],
-      title: skillKey ? "Selected skill request" : "Agent request",
+      title: "Hermes request",
     };
 
     activeRequestAbortController?.abort();
@@ -733,8 +715,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       agentRuns: [run, ...state.agentRuns],
       error: undefined,
       messages: [...state.messages, optimisticUserMessage, pendingAssistantMessage],
-      selectedArtifactId:
-        isRuntimeAdapterRun || requestedSkill ? state.selectedArtifactId : undefined,
+      selectedArtifactId: state.selectedArtifactId,
       sessions: state.sessions.map((session) =>
         session.id === sessionId
           ? {
@@ -765,7 +746,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     };
 
-    if (isRuntimeAdapterRun || requestedSkill) {
+    {
       const startedAtMs = Date.parse(now);
       backendRunDiscoveryTimer = window.setInterval(() => {
         void webAgentApi.listAgentRuns(sessionId).then((runs) => {
@@ -830,12 +811,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       await webAgentApi.sendMessageStream(
         {
           content: trimmed,
-          adapterKey,
           modelId,
           signal: activeRequestAbortController.signal,
-        sessionId,
-        skillKey: requestedSkill,
-      },
+          sessionId,
+        },
       (event) => {
           const previousRunId = currentRunId;
           currentRunId = bindBackendRunId(
@@ -853,9 +832,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             };
             return applySendMessageStreamEventState(boundState, event, {
                 currentRunId,
-                isRuntimeAdapterRun,
                 modelName,
-                requestedSkill,
                 sessionId,
             });
           });
@@ -978,7 +955,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
   refreshRuntimeModelStatus: async () => {
     set({ runtimeStatusRefreshing: true });
-    const runtimeModels = get().models.filter(isRuntimeAdapterModel);
+    const runtimeModels = get().models;
 
     await Promise.all(
       runtimeModels.map(async (model) => {
@@ -999,11 +976,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     ...item,
                     isAvailable: false,
                     runtimeStatus: {
-                      adapterKey: item.name.toLowerCase().includes("openclaw")
-                        ? "openclaw"
-                        : item.name.toLowerCase().includes("hermes")
-                          ? "hermes"
-                          : undefined,
+                      adapterKey: "hermes",
                       message,
                       ok: false,
                       status: "unavailable",

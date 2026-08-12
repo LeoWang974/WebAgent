@@ -1,4 +1,5 @@
 import asyncio
+import codecs
 import json
 import logging
 import os
@@ -11,8 +12,8 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from .process_registry import (
     register_run_process,
-    terminate_registered_run_process,
     terminate_processes_by_marker,
+    terminate_registered_run_process,
     unregister_run_process,
 )
 
@@ -47,17 +48,6 @@ BOX_CODEPOINTS = {
     0x2570,
 }
 MOJIBAKE_BOX_PREFIXES = ("\u923a", "\u9239", "\u923a\ue75b", "\u923a\ue75b\u6522")
-MOJIBAKE_MARKERS = (
-    "\u923a",
-    "\u9239",
-    "\u9396",
-    "\u5b80",
-    "\u830c",
-    "\u6573",
-    "\u93b4",
-    "\u611b",
-    "\u9365",
-)
 
 
 @dataclass(frozen=True)
@@ -91,9 +81,15 @@ class HermesCliWrapper:
         hermes_path: str = "hermes",
         hermes_home: str = "~/.hermes",
         wsl_distribution: str = "Ubuntu",
+        serper_configured: bool = False,
     ):
         self.hermes_path = hermes_path
-        self.hermes_home = str(Path(hermes_home).expanduser())
+        normalized_home = hermes_home.replace("\\", "/")
+        self.hermes_home = (
+            normalized_home
+            if normalized_home.startswith("/")
+            else Path(hermes_home).expanduser().as_posix()
+        )
         self.wsl_distribution = wsl_distribution
         self._env = {
             "HERMES_HOME": self.hermes_home,
@@ -101,7 +97,9 @@ class HermesCliWrapper:
             "HOME": self.hermes_home,
             "SEARCH_PROVIDER": os.getenv("SEARCH_PROVIDER", "serper"),
             "WEBAGENT_SEARCH_PROVIDER": os.getenv("SEARCH_PROVIDER", "serper"),
-            "WEBAGENT_SERPER_CONFIGURED": "1" if os.getenv("SERPER_API_KEY") else "0",
+            "WEBAGENT_SERPER_CONFIGURED": (
+                "1" if serper_configured or os.getenv("SERPER_API_KEY") else "0"
+            ),
         }
         self.auto_approve_commands = os.getenv("WEBAGENT_HERMES_YOLO", "1").lower() not in {
             "0",
@@ -167,7 +165,7 @@ class HermesCliWrapper:
         prompt_dir.mkdir(parents=True, exist_ok=True)
         prompt_name = run_id or datetime.now().strftime("%Y%m%d-%H%M%S-%f")
         prompt_path = prompt_dir / f"{prompt_name}.txt"
-        prompt_path.write_text(self._with_runtime_search_guidance(question), encoding="utf-8")
+        prompt_path.write_text(question, encoding="utf-8")
         drive = prompt_path.drive.rstrip(":").lower()
         if drive:
             rest = prompt_path.as_posix().split(":", 1)[1].lstrip("/")
@@ -175,25 +173,6 @@ class HermesCliWrapper:
         else:
             wsl_path = prompt_path.as_posix()
         return prompt_path, wsl_path
-
-    @staticmethod
-    def _with_runtime_search_guidance(question: str) -> str:
-        search_provider = os.getenv("SEARCH_PROVIDER", "serper").strip().lower()
-        if search_provider != "serper" and not os.getenv("SERPER_API_KEY"):
-            return question
-        guidance = (
-            "\n\n[WebAgent runtime context]\n"
-            "- SEARCH_PROVIDER=serper. Serper is configured in the WebAgent runtime.\n"
-            "- If web search is needed, use the configured Serper search tool directly.\n"
-            "- Do not use terminal/curl probes against Google or arbitrary HTTPS sites to decide "
-            "whether search is available.\n"
-            "- If a Serper tool call fails, report the Serper tool error briefly and continue with "
-            "the best available evidence.\n"
-            "[/WebAgent runtime context]\n"
-        )
-        if "[WebAgent runtime context]" in question:
-            return question
-        return f"{question.rstrip()}{guidance}"
 
     @staticmethod
     def _shell_visible_path(path_value: str) -> str:
@@ -209,9 +188,6 @@ class HermesCliWrapper:
         question: str,
         *,
         session_id: str | None = None,
-        toolsets: str | None = None,
-        skills: str | None = None,
-        model: str | None = None,
         quiet: bool = True,
         quiet_query: bool = False,
         use_pty: bool = False,
@@ -220,9 +196,6 @@ class HermesCliWrapper:
         command = self._build_chat_bash_command(
             question,
             session_id=session_id,
-            toolsets=toolsets,
-            skills=skills,
-            model=model,
             quiet=quiet,
             quiet_query=quiet_query,
             use_pty=use_pty,
@@ -247,9 +220,6 @@ class HermesCliWrapper:
         question: str,
         *,
         session_id: str | None = None,
-        toolsets: str | None = None,
-        skills: str | None = None,
-        model: str | None = None,
         quiet: bool = True,
         quiet_query: bool = False,
         use_pty: bool = False,
@@ -266,12 +236,6 @@ class HermesCliWrapper:
 
         if session_id:
             post_prompt_args.extend(["--resume", session_id])
-        if toolsets:
-            post_prompt_args.extend(["-t", toolsets])
-        if skills:
-            post_prompt_args.extend(["-s", skills])
-        if model:
-            post_prompt_args.extend(["-m", model])
         if quiet_query:
             post_prompt_args.append("-Q")
 
@@ -299,22 +263,29 @@ class HermesCliWrapper:
 
     @staticmethod
     def _clean_line(line: str) -> str:
-        return ANSI_RE.sub("", line).replace("\r", "").strip()
+        cleaned = ANSI_RE.sub("", line).replace("\r", "").strip()
+        return HermesCliWrapper._repair_mojibake_text(cleaned)
+
+    @staticmethod
+    def _repair_mojibake_text(text: str) -> str:
+        if not text or text.isascii():
+            return text
+        try:
+            repaired = text.encode("gb18030").decode("utf-8")
+        except (UnicodeDecodeError, UnicodeEncodeError):
+            return text
+        has_visible_unicode = any(
+            "\u3400" <= char <= "\u9fff" or ord(char) in BOX_CODEPOINTS
+            for char in repaired
+        )
+        return repaired if repaired != text and has_visible_unicode else text
 
     @staticmethod
     def _decode_stream_chunk(chunk: bytes) -> str:
-        candidates = [
-            chunk.decode("utf-8", errors="replace"),
-            chunk.decode("gb18030", errors="replace"),
-        ]
-
-        def score(text: str) -> int:
-            replacement_penalty = text.count("\ufffd") * 20
-            mojibake_penalty = sum(text.count(marker) * 4 for marker in MOJIBAKE_MARKERS)
-            box_reward = sum(1 for char in text if ord(char) in BOX_CODEPOINTS) * 3
-            return box_reward - replacement_penalty - mojibake_penalty
-
-        return max(candidates, key=score)
+        try:
+            return chunk.decode("utf-8")
+        except UnicodeDecodeError:
+            return chunk.decode("gb18030", errors="replace")
 
     @staticmethod
     def _is_box_line(line: str) -> bool:
@@ -576,6 +547,12 @@ class HermesCliWrapper:
         if not normalized:
             return False
 
+        # Hermes may return a concise answer without punctuation (for example,
+        # when the user asks it to reply with an exact phrase). Content inside
+        # an explicit Hermes box is still user-visible output in that case.
+        if sum("\u3400" <= char <= "\u9fff" for char in normalized) >= 2:
+            return True
+
         lower = normalized.lower()
         content_markers = [
             "\u3002",
@@ -688,34 +665,10 @@ class HermesCliWrapper:
 
         return False, None
 
-    async def ask_stream(
-        self,
-        question: str,
-        session_id: str | None = None,
-        toolsets: str | None = None,
-        skills: str | None = None,
-        model: str | None = None,
-        run_id: str | None = None,
-    ) -> AsyncGenerator[str, None]:
-        async for event in self.ask_stream_events(
-            question=question,
-            session_id=session_id,
-            toolsets=toolsets,
-            skills=skills,
-            model=model,
-            run_id=run_id,
-        ):
-            content = event.content.strip()
-            if content:
-                yield content
-
     async def ask_stream_events(
         self,
         question: str,
         session_id: str | None = None,
-        toolsets: str | None = None,
-        skills: str | None = None,
-        model: str | None = None,
         run_id: str | None = None,
         working_dir: str | None = None,
         artifacts_dir: str | None = None,
@@ -750,13 +703,9 @@ class HermesCliWrapper:
         }
 
         logger.info(
-            "Starting Hermes stream: question_chars=%s session_id=%s "
-            "toolsets=%s skills=%s model=%s",
+            "Starting Hermes stream: question_chars=%s session_id=%s",
             len(question),
             session_id or "",
-            toolsets or "",
-            skills or "",
-            model or "",
         )
         raw_log_path = self._raw_log_path()
         self.last_diagnostics["raw_log_path"] = str(raw_log_path)
@@ -764,8 +713,7 @@ class HermesCliWrapper:
             (
                 "Hermes raw stream log\n"
                 f"started_at={datetime.now().isoformat()}\n"
-                f"question_chars={len(question)} session_id={session_id or ''} "
-                f"toolsets={toolsets or ''} skills={skills or ''} model={model or ''}\n\n"
+                f"question_chars={len(question)} session_id={session_id or ''}\n\n"
             ),
             encoding="utf-8",
         )
@@ -775,9 +723,6 @@ class HermesCliWrapper:
             *self._build_chat_exec_args(
                 question,
                 session_id=session_id,
-                toolsets=toolsets,
-                skills=skills,
-                model=model,
                 quiet=False,
                 use_pty=True,
                 run_id=run_id,
@@ -805,7 +750,7 @@ class HermesCliWrapper:
         last_raw_summary = ""
         last_raw_summary_emit = datetime.min
         raw_activity_interval_seconds = 60
-        should_stop_on_completion_signal = skills not in {"sn-ppt-entry", "sn-ppt-workbench"}
+        should_stop_on_completion_signal = True
 
         async def stop_after_completion() -> None:
             if process.returncode is not None:
@@ -869,12 +814,12 @@ class HermesCliWrapper:
                 return
 
             stream_pending = ""
-            while True:
-                chunk = await stream.read(1024)
-                if not chunk:
-                    break
+            decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
 
-                decoded = self._decode_stream_chunk(chunk)
+            async def consume_decoded(decoded: str) -> None:
+                nonlocal completion_detected, stderr_tail, stdout_tail, stream_pending
+                if not decoded:
+                    return
                 with raw_log_path.open("a", encoding="utf-8", errors="replace") as raw_log:
                     raw_log.write(("STDERR " if is_stderr else "STDOUT ") + decoded)
                 self._remember_artifact_paths(decoded)
@@ -882,17 +827,28 @@ class HermesCliWrapper:
                     completion_detected = True
                 if is_stderr:
                     stderr_tail = (stderr_tail + decoded)[-4000:]
+                    stderr_chunks.append(decoded)
                 else:
                     stdout_tail = (stdout_tail + decoded)[-4000:]
-                if is_stderr:
-                    stderr_chunks.append(decoded)
 
                 stream_pending += decoded.replace("\r", "\n")
                 lines = stream_pending.split("\n")
                 stream_pending = lines.pop() if lines else ""
-
                 for raw_line in lines:
-                    await line_queue.put(raw_line)
+                    repaired_line = self._repair_mojibake_text(raw_line)
+                    self._remember_artifact_paths(repaired_line)
+                    if self._is_completion_signal(repaired_line):
+                        completion_detected = True
+                    await line_queue.put(repaired_line)
+
+            while True:
+                chunk = await stream.read(1024)
+                if not chunk:
+                    break
+
+                await consume_decoded(decoder.decode(chunk))
+
+            await consume_decoded(decoder.decode(b"", final=True))
 
             if stream_pending.strip():
                 await line_queue.put(stream_pending)
@@ -1124,26 +1080,3 @@ class HermesCliWrapper:
                 or f"Hermes exited with code {process.returncode}"
             )
             raise RuntimeError(f"Hermes CLI error: {error_msg}")
-
-    async def list_skills(self) -> list[str]:
-        process = await asyncio.create_subprocess_shell(
-            self._build_wsl_command([self.hermes_path, "skills", "list"]),
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-
-        stdout, _ = await process.communicate()
-        if process.returncode != 0:
-            return []
-
-        output = stdout.decode("utf-8", errors="replace")
-        skills = []
-        for line in output.split("\n"):
-            cleaned = self._clean_line(line)
-            if not cleaned.startswith("|") and "|" not in cleaned:
-                continue
-            parts = [part.strip() for part in cleaned.strip("|").split("|")]
-            if parts and parts[0] and parts[0] != "Name":
-                skills.append(parts[0])
-        return skills

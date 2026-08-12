@@ -1,6 +1,5 @@
 import type {
   AdminUserCreateInput,
-  CreateAgentRunInput,
   CreateSessionInput,
   LoginInput,
   RegisterInput,
@@ -19,8 +18,6 @@ import type {
   FileAsset,
   Message,
   Session,
-  Skill,
-  SkillKey,
   User,
 } from "@/types";
 import {
@@ -46,14 +43,6 @@ function createId(prefix: string) {
   return `${prefix}_${Date.now()}`;
 }
 
-function getSkillName(skills: Skill[], skillKey?: SkillKey) {
-  if (!skillKey) {
-    return "Auto";
-  }
-
-  return skills.find((skill) => skill.key === skillKey)?.name ?? "Skill";
-}
-
 export const mockAdapter: WebAgentApiAdapter = {
   async cancelAgentRun(runId: string) {
     const run = runs.find((item) => item.id === runId);
@@ -73,33 +62,13 @@ export const mockAdapter: WebAgentApiAdapter = {
 
     return updatedRun;
   },
-  async createAgentRun(input: CreateAgentRunInput) {
-    const now = new Date().toISOString();
-    const skillName = getSkillName(mockSkills, input.skillKey);
-    const run: AgentRun = {
-      id: createId("run"),
-      progress: 0,
-      sessionId: input.sessionId,
-      startedAt: now,
-      status: "queued",
-      steps: [],
-      title: input.skillKey ? `${skillName} run` : "Agent run",
-    };
-
-    runs = [run, ...runs];
-
-    return run;
-  },
   async createSession(input: CreateSessionInput) {
     const now = new Date().toISOString();
-    const skillName = getSkillName(mockSkills, input.skillKey);
     const session: Session = {
       id: createId("session"),
       folderId: input.folderId,
-      title:
-        input.title ??
-        (input.skillKey ? `${skillName} session` : "New conversation"),
-      type: input.skillKey ?? "chat",
+      title: input.title ?? "New conversation",
+      type: "chat",
       pinned: false,
       status: "active",
       updatedAt: now,
@@ -255,7 +224,6 @@ export const mockAdapter: WebAgentApiAdapter = {
   },
   async sendMessage(input: SendMessageInput): Promise<SendMessageResult> {
     const now = new Date().toISOString();
-    const skillName = getSkillName(mockSkills, input.skillKey);
     const userMessage: Message = {
       id: createId("message_user"),
       sessionId: input.sessionId,
@@ -267,9 +235,7 @@ export const mockAdapter: WebAgentApiAdapter = {
       id: createId("message_assistant"),
       sessionId: input.sessionId,
       role: "assistant",
-      content: input.skillKey
-        ? `Entered ${skillName} mode. A real Agent run will be connected in the next backend phase.`
-        : "This is a mock response. FastAPI, SSE, and the Agent runtime will be connected later.",
+      content: "This is a mock Hermes response. Set NEXT_PUBLIC_API_ADAPTER=fastapi to use the backend.",
       createdAt: now,
     };
 

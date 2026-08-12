@@ -9,13 +9,16 @@ interface RouteSessionSyncProps {
 
 export function RouteSessionSync({ sessionId }: RouteSessionSyncProps) {
   const currentSessionId = useChatStore((state) => state.currentSessionId);
+  const switchingSessionId = useChatStore((state) => state.switchingSessionId);
   const selectSession = useChatStore((state) => state.selectSession);
 
   useLayoutEffect(() => {
-    if (sessionId && currentSessionId !== sessionId) {
+    const isNavigatingToAnotherSession =
+      Boolean(switchingSessionId) && switchingSessionId === currentSessionId;
+    if (sessionId && currentSessionId !== sessionId && !isNavigatingToAnotherSession) {
       selectSession(sessionId);
     }
-  }, [currentSessionId, selectSession, sessionId]);
+  }, [currentSessionId, selectSession, sessionId, switchingSessionId]);
 
   return null;
 }

@@ -6,6 +6,8 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Queue classification controls scheduling priority only. It never selects a skill
+# or changes the prompt delivered to Hermes.
 LONG_TASK_MARKERS = (
     ".html",
     ".md",
@@ -32,9 +34,7 @@ LONG_TASK_MARKERS = (
 )
 
 
-def is_short_chat_request(content: str, resolved_skill_key: str | None) -> bool:
-    if resolved_skill_key:
-        return False
+def is_short_chat_request(content: str) -> bool:
     normalized = " ".join(content.strip().split())
     if not normalized or len(normalized) > 80:
         return False
@@ -42,8 +42,8 @@ def is_short_chat_request(content: str, resolved_skill_key: str | None) -> bool:
     return not any(marker in lowered for marker in LONG_TASK_MARKERS)
 
 
-def queue_for_message(content: str, resolved_skill_key: str | None) -> tuple[str, str]:
-    if is_short_chat_request(content, resolved_skill_key):
+def queue_for_message(content: str) -> tuple[str, str]:
+    if is_short_chat_request(content):
         return settings.short_chat_queue_name, "短对话优先队列"
     return settings.agent_run_queue_name, "长任务队列"
 

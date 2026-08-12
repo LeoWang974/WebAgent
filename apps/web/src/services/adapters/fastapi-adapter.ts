@@ -16,7 +16,6 @@ import type {
 import type {
   AdminUserCreateInput,
   AuthResult,
-  CreateAgentRunInput,
   CreateSessionInput,
   LoginInput,
   RegisterInput,
@@ -46,7 +45,6 @@ export const fastApiAdapter: WebAgentApiAdapter = {
     return apiClient<Session>("/api/sessions", {
       body: JSON.stringify({
         folder_id: input.folderId,
-        skill_key: input.skillKey,
         title: input.title,
       }),
       method: "POST",
@@ -55,18 +53,6 @@ export const fastApiAdapter: WebAgentApiAdapter = {
   createConversationFolder(name: string) {
     return apiClient<ConversationFolder>("/api/sessions/folders", {
       body: JSON.stringify({ name }),
-      method: "POST",
-    });
-  },
-  createAgentRun(input: CreateAgentRunInput) {
-    return apiClient<AgentRun>("/api/agent-runs", {
-      body: JSON.stringify({
-        adapter_key: input.adapterKey,
-        content: input.content,
-        model_id: input.modelId,
-        session_id: input.sessionId,
-        skill_key: input.skillKey,
-      }),
       method: "POST",
     });
   },
@@ -184,10 +170,8 @@ export const fastApiAdapter: WebAgentApiAdapter = {
       `/api/sessions/${input.sessionId}/messages`,
       {
         body: JSON.stringify({
-          adapter_key: input.adapterKey,
           content: input.content,
           model_id: input.modelId,
-          skill_key: input.skillKey,
         }),
         method: "POST",
         signal: input.signal,
@@ -202,10 +186,8 @@ export const fastApiAdapter: WebAgentApiAdapter = {
       `${API_BASE_URL}/api/sessions/${input.sessionId}/messages/stream`,
       {
         body: JSON.stringify({
-          adapter_key: input.adapterKey,
           content: input.content,
           model_id: input.modelId,
-          skill_key: input.skillKey,
         }),
         headers: {
           "Content-Type": "application/json",

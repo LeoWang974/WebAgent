@@ -1,7 +1,7 @@
 from typing import Literal
 
 from app.schemas.base import ApiModel
-from app.schemas.session import Session, SkillKey
+from app.schemas.session import Session
 
 MessageRole = Literal["user", "assistant", "system", "tool"]
 
@@ -16,10 +16,8 @@ class Message(ApiModel):
 
 
 class MessageCreate(ApiModel):
-    adapter_key: str | None = None
     content: str
     model_id: str | None = None
-    skill_key: SkillKey | None = None
 
 
 class SendMessageResult(ApiModel):

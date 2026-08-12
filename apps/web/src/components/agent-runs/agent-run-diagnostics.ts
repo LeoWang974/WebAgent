@@ -12,7 +12,6 @@ export interface RunDiagnosticViewModel {
 
 const adapterLabels: Record<string, string> = {
   hermes: "Hermes",
-  openclaw: "OpenClaw",
 };
 
 export function asRecord(value: unknown): Record<string, unknown> {

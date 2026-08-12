@@ -3,16 +3,13 @@
 import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import { FileUploadButton } from "./file-upload-button";
 import { ModelSelector } from "./model-selector";
-import { SkillSelector } from "./skill-selector";
-import type { SkillKey } from "@/types";
 import { useChatStore, useUiStore } from "@/stores";
-import { ArrowUp, Sparkles, Square } from "lucide-react";
+import { ArrowUp, Square } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 
 export function ChatComposer() {
   const { t } = useI18n();
   const [content, setContent] = useState("");
-  const [skillKey, setSkillKey] = useState<SkillKey | undefined>();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const activeAgentRunId = useChatStore((state) => state.activeAgentRunId);
   const agentRuns = useChatStore((state) => state.agentRuns);
@@ -44,7 +41,7 @@ export function ChatComposer() {
       return;
     }
 
-    sendMessage(content, skillKey);
+    sendMessage(content);
     setContent("");
   }
 
@@ -78,12 +75,7 @@ export function ChatComposer() {
         />
         <div className="flex items-center justify-between gap-2 border-t px-1.5 pt-2">
           <div className="flex min-w-0 items-center gap-1.5">
-            <span className="hidden items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground sm:flex">
-              <Sparkles className="size-3.5" />
-              {t("autoRoute")}
-            </span>
             <FileUploadButton />
-            <SkillSelector value={skillKey} onChange={setSkillKey} />
             <ModelSelector />
           </div>
           <div className="flex shrink-0 items-center gap-1.5">

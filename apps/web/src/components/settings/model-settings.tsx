@@ -48,16 +48,6 @@ function runtimeHealthSummary(value: unknown) {
   return parts.join(" / ") || undefined;
 }
 
-function isRuntimeModel(model: { baseUrl?: string; name: string }) {
-  const marker = `${model.name} ${model.baseUrl ?? ""}`.toLowerCase();
-  return (
-    marker.includes("openclaw") ||
-    marker.includes("hermes") ||
-    marker.includes("18789") ||
-    marker.includes("8642")
-  );
-}
-
 function formatCheckedAt(value?: string) {
   if (!value) {
     return "尚未检查";
@@ -87,7 +77,7 @@ export function ModelSettings() {
   const [editProvider, setEditProvider] = useState<ModelProvider>("openai_compatible");
   const [name, setName] = useState("");
   const [provider, setProvider] = useState<ModelProvider>("openai_compatible");
-  const runtimeModels = models.filter(isRuntimeModel);
+  const runtimeModels = models;
 
   function handleAddModel() {
     const trimmedName = name.trim();

@@ -7,7 +7,6 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from app.core.config import settings
 from app.services.skills_updater import (
     SkillsUpdateResult,
-    default_openclaw_skills_dir,
     update_sensenova_skills,
 )
 
@@ -46,14 +45,12 @@ def next_weekly_run_at(
 
 async def run_configured_skills_update() -> SkillsUpdateResult:
     hermes_skills_dir = settings.hermes_skills_dir or f"{settings.hermes_home.rstrip('/')}/skills"
-    openclaw_skills_dir = settings.openclaw_skills_dir or str(default_openclaw_skills_dir())
     return await update_sensenova_skills(
         repo_url=settings.skills_update_repo_url,
         cache_dir=settings.skills_update_cache_dir,
         source_subdir=settings.skills_update_source_subdir,
         branch=settings.skills_update_branch,
         hermes_skills_dir=hermes_skills_dir,
-        openclaw_skills_dir=openclaw_skills_dir,
         wsl_distribution=settings.hermes_wsl_distribution,
     )
 

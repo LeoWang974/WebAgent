@@ -70,12 +70,18 @@ export function MessageList() {
         {messages.length === 0 ? (
           <EmptyConversation />
         ) : null}
-        {messages.map((message) => {
-          const messageIndex = messages.findIndex((item) => item.id === message.id);
+        {messages.map((message, messageIndex) => {
           const previousMessage = messageIndex > 0 ? messages[messageIndex - 1] : undefined;
           const waitStartedAt = message.waitStartedAt ?? previousMessage?.createdAt;
+          const deliveredAt =
+            message.role === "assistant"
+              ? agentRuns
+                  .filter((run) => run.sessionId === message.sessionId)
+                  .flatMap((run) => run.steps)
+                  .find((step) => step.id === message.id)?.timestamp ?? message.createdAt
+              : message.createdAt;
           const waitDurationMs = waitStartedAt
-            ? new Date(message.createdAt).getTime() - new Date(waitStartedAt).getTime()
+            ? new Date(deliveredAt).getTime() - new Date(waitStartedAt).getTime()
             : undefined;
           const messageArtifacts = artifacts.filter((artifact) =>
             message.artifactIds?.includes(artifact.id),
@@ -91,7 +97,7 @@ export function MessageList() {
               ) : (
                 <AssistantMessage
                   content={message.content}
-                  createdAt={message.createdAt}
+                  createdAt={deliveredAt}
                   isPending={message.isPending}
                   pendingLabel={message.pendingLabel}
                   waitDurationMs={waitDurationMs}

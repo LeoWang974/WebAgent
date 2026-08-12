@@ -9,7 +9,7 @@ Current source of truth:
 - `README.md`: project overview, local startup, CCI bare-metal startup.
 - `docs/TESTING.md`: backend and frontend verification commands.
 - `docs/CCI_BARE_METAL.md`: CCI non-Docker runtime notes.
-- `docs/OPENCLAW_EVENT_PROTOCOL.md`: expected OpenClaw event and artifact protocol.
+- WebAgent now uses Hermes as its only runtime adapter.
 - `services/api/README.md`: backend service scope and startup.
 
 Current backend storage state:

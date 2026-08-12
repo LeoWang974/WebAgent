@@ -17,7 +17,6 @@ async def stream_queued_agent_run(
     session_id: str,
     input_data: schemas.MessageCreate,
     current_user,
-    resolved_skill_key: str | None,
 ):
     from app.services.agent_runs import TERMINAL_RUN_STATUSES
 
@@ -26,7 +25,6 @@ async def stream_queued_agent_run(
         session_id,
         input_data,
         current_user,
-        resolved_skill_key,
     )
     yield f": {' ' * 2048}\n\n"
     yield sse("user_message", to_message(user_message).model_dump(by_alias=True))

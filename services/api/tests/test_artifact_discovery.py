@@ -6,13 +6,36 @@ from app.services.artifact_discovery import (
     _candidate_roots,
     _normalized_path_key,
     _repo_root,
+    _windows_path_to_wsl,
+    _wsl_artifact_mtime,
     create_artifacts_from_paths,
     create_artifacts_from_refs,
-    create_html_artifact_from_content,
-    create_markdown_artifact_from_content,
     discover_related_artifact_paths,
     extract_artifact_path_strings,
 )
+
+
+def test_windows_path_to_wsl_normalizes_backslashes(monkeypatch):
+    monkeypatch.setattr("app.services.artifact_discovery.os.name", "nt")
+
+    assert _windows_path_to_wsl(Path(r"D:\WebAgent\reports\deck.pptx")) == (
+        "/mnt/d/WebAgent/reports/deck.pptx"
+    )
+
+
+def test_wsl_artifact_mtime_rejects_directories(monkeypatch):
+    class Result:
+        returncode = 0
+        stdout = "directory:1786268343"
+
+    monkeypatch.setattr("app.services.artifact_discovery.os.name", "nt")
+    monkeypatch.setattr("app.services.artifact_discovery.shutil.which", lambda _: "wsl.exe")
+    monkeypatch.setattr(
+        "app.services.artifact_discovery.subprocess.run",
+        lambda *args, **kwargs: Result(),
+    )
+
+    assert _wsl_artifact_mtime(Path(r"D:\WebAgent\reports")) is None
 
 
 def test_normalized_path_key_unifies_windows_and_wsl_paths():
@@ -51,9 +74,9 @@ def test_create_artifacts_from_paths_resolves_bare_filename_from_candidate_roots
     monkeypatch,
     tmp_path: Path,
 ):
-    workspace = tmp_path / ".openclaw" / "workspace"
+    workspace = tmp_path / ".hermes" / "workspace"
     workspace.mkdir(parents=True)
-    deck = workspace / "OpenClaw回归测试_社区商业新机会.pptx"
+    deck = workspace / "Hermes回归测试_社区商业新机会.pptx"
     deck.write_bytes(b"pptx")
     monkeypatch.setattr(
         "app.services.artifact_discovery._candidate_roots",
@@ -66,34 +89,6 @@ def test_create_artifacts_from_paths_resolves_bare_filename_from_candidate_roots
     assert artifacts[0].type == "ppt_deck"
     assert artifacts[0].metadata
     assert artifacts[0].metadata["path"] == str(deck)
-
-
-def test_create_markdown_artifact_from_short_saved_report_summary():
-    artifact = create_markdown_artifact_from_content(
-        "session_1",
-        "Done. Saved as `openclaw-regression-report.md`.\n\nThe Markdown report is ready.",
-        "run_1",
-        title="openclaw-regression-report",
-    )
-
-    assert artifact is not None
-    assert artifact.type == "markdown_report"
-    assert artifact.metadata
-    assert artifact.metadata["source"] == "assistant_output_fallback"
-
-
-def test_create_html_artifact_from_short_saved_page_summary():
-    artifact = create_html_artifact_from_content(
-        "session_1",
-        "HTML file generated: `openclaw-regression-report.html`.\n\nOpen it in a browser.",
-        "run_1",
-        title="openclaw-regression-report",
-    )
-
-    assert artifact is not None
-    assert artifact.type == "html_page"
-    assert artifact.content
-    assert "<html" in artifact.content.lower()
 
 
 def test_create_artifacts_from_paths_supports_debug_json(tmp_path: Path):
@@ -110,7 +105,7 @@ def test_create_artifacts_from_paths_supports_debug_json(tmp_path: Path):
 
 
 def test_create_artifacts_from_paths_ignores_runtime_temp_json():
-    runtime_file = _repo_root() / "runtime" / "openclaw_smoke_snapshot.json"
+    runtime_file = _repo_root() / "runtime" / "hermes_smoke_snapshot.json"
     try:
         runtime_file.parent.mkdir(parents=True, exist_ok=True)
         runtime_file.write_text('{"status":"running"}', encoding="utf-8")
@@ -120,6 +115,40 @@ def test_create_artifacts_from_paths_ignores_runtime_temp_json():
         assert artifacts == []
     finally:
         runtime_file.unlink(missing_ok=True)
+
+
+def test_create_artifacts_from_paths_accepts_run_scoped_runtime_report(
+    monkeypatch,
+    tmp_path: Path,
+):
+    report = (
+        tmp_path
+        / "runtime"
+        / "users"
+        / "user_1"
+        / "conversations"
+        / "conversation_1"
+        / "runs"
+        / "run_1"
+        / "hermes-home"
+        / "reports"
+        / "topic"
+        / "report.md"
+    )
+    report.parent.mkdir(parents=True)
+    report.write_text("# Current run report\n", encoding="utf-8")
+    monkeypatch.setattr("app.services.artifact_discovery._repo_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        "app.services.artifact_discovery._archive_artifact_path",
+        lambda path, run_id: path,
+    )
+
+    artifacts = create_artifacts_from_paths("session_1", [str(report)], "run_1")
+
+    assert len(artifacts) == 1
+    assert artifacts[0].content == "# Current run report\n"
+    assert artifacts[0].metadata
+    assert artifacts[0].metadata["path"] == str(report)
 
 
 def test_create_artifacts_from_paths_ignores_runtime_skill_docs(tmp_path: Path):
@@ -132,9 +161,9 @@ def test_create_artifacts_from_paths_ignores_runtime_skill_docs(tmp_path: Path):
     assert artifacts == []
 
 
-def test_create_artifacts_from_refs_preserves_openclaw_protocol_metadata(tmp_path: Path):
-    report = tmp_path / "openclaw-report.md"
-    report.write_text("# OpenClaw Report\n", encoding="utf-8")
+def test_create_artifacts_from_refs_preserves_hermes_protocol_metadata(tmp_path: Path):
+    report = tmp_path / "hermes-report.md"
+    report.write_text("# Hermes Report\n", encoding="utf-8")
 
     artifacts = create_artifacts_from_refs(
         "session_1",
@@ -142,9 +171,9 @@ def test_create_artifacts_from_refs_preserves_openclaw_protocol_metadata(tmp_pat
             AgentArtifactRef(
                 path=str(report),
                 artifact_type="markdown_report",
-                run_id="openclaw_run_1",
+                run_id="hermes_run_1",
                 source_dir=str(tmp_path),
-                title="OpenClaw 标准报告",
+                title="Hermes 标准报告",
             )
         ],
         run_id="webagent_run_1",
@@ -153,13 +182,13 @@ def test_create_artifacts_from_refs_preserves_openclaw_protocol_metadata(tmp_pat
     assert len(artifacts) == 1
     artifact = artifacts[0]
     assert artifact.type == "markdown_report"
-    assert artifact.title == "OpenClaw 标准报告"
-    assert artifact.content == "# OpenClaw Report\n"
+    assert artifact.title == "Hermes 标准报告"
+    assert artifact.content == "# Hermes Report\n"
     assert artifact.metadata
-    assert artifact.metadata["adapterProtocol"] == "openclaw.artifact.v1"
-    assert artifact.metadata["adapterRunId"] == "openclaw_run_1"
+    assert artifact.metadata["adapterProtocol"] == "hermes.artifact.v1"
+    assert artifact.metadata["adapterRunId"] == "hermes_run_1"
     assert artifact.metadata["adapterSourceDir"] == str(tmp_path)
-    assert artifact.metadata["adapterTitle"] == "OpenClaw 标准报告"
+    assert artifact.metadata["adapterTitle"] == "Hermes 标准报告"
     assert artifact.metadata["adapterType"] == "markdown_report"
 
 

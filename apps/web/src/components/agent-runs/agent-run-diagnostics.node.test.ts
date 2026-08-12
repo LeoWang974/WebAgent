@@ -5,14 +5,14 @@ import { buildRunDiagnosticViewModel } from "./agent-run-diagnostics.ts";
 
 function run(): AgentRun {
   return {
-    adapterKey: "openclaw",
+    adapterKey: "hermes",
     id: "run_1",
     progress: 80,
     sessionId: "session_1",
     startedAt: "2026-07-21T10:00:00.000Z",
     status: "failed",
     steps: [],
-    title: "OpenClaw run",
+    title: "Hermes run",
   };
 }
 
@@ -32,14 +32,14 @@ function event(eventType: string, label: string, payload?: Record<string, unknow
   };
 }
 
-test("OpenClaw diagnostic view model exposes exit code, stderr tail, and last stage", () => {
+test("Hermes diagnostic view model exposes exit code, stderr tail, and last stage", () => {
   const stage = event("stage_started", "Writing final report");
   const diagnosticEvent = event("diagnostic", "Agent run failed", {
     artifactDiscovery: { discovered_count: 0 },
     runtimeDiagnostics: {
       exitCode: 134,
       lastStage: "Exporting PPTX",
-      stderrTail: "OpenClaw gateway failed while exporting deck",
+      stderrTail: "Hermes failed while exporting deck",
       stdoutTail: "last stdout line",
     },
   });
@@ -49,10 +49,10 @@ test("OpenClaw diagnostic view model exposes exit code, stderr tail, and last st
     diagnosticEvent,
   ]);
 
-  assert.equal(result.adapterLabel, "OpenClaw");
+  assert.equal(result.adapterLabel, "Hermes");
   assert.equal(result.exitCode, 134);
   assert.equal(result.lastStage, "Exporting PPTX");
-  assert.equal(result.stderrTail, "OpenClaw gateway failed while exporting deck");
+  assert.equal(result.stderrTail, "Hermes failed while exporting deck");
   assert.equal(result.stdoutTail, "last stdout line");
   assert.deepEqual(result.artifactDiscovery, { discovered_count: 0 });
 });

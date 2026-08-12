@@ -6,11 +6,6 @@ from app.services.agent_run_dispatcher import enqueue_agent_run_message
 from app.services.persistence import persist_message, to_message, to_session
 from app.services.session_artifacts import refresh_conversation
 
-
-def get_explicit_skill_key(explicit_skill_key: str | None) -> str | None:
-    return explicit_skill_key
-
-
 async def send_message_core(
     db: AsyncSession,
     conversation: Conversation,
@@ -18,14 +13,11 @@ async def send_message_core(
     current_user: User,
 ) -> schemas.SendMessageResult:
     session_id = conversation.id
-    resolved_skill_key = get_explicit_skill_key(input_data.skill_key)
-
     user_message, run = await enqueue_agent_run_message(
         db,
         session_id,
         input_data,
         current_user,
-        resolved_skill_key,
     )
     assistant_message = await persist_message(
         db,

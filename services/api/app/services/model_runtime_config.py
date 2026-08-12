@@ -9,7 +9,7 @@ from app.core.config import settings
 from app.models import AgentRun, ModelConfig, User
 from app.services.model_secret_encryption import decrypt_model_secret, encrypt_model_secret
 
-ADAPTER_MODEL_ALIASES = {"hermes", "openclaw", "sensenova", "model_hermes", "model_openclaw"}
+ADAPTER_MODEL_ALIASES = {"hermes", "sensenova", "model_hermes"}
 
 OPENAI_COMPATIBLE_PROVIDERS = {
     "custom",
@@ -105,14 +105,12 @@ class ModelRuntimeConfig:
             f'  default: "{_yaml_scalar(self.model_name)}"',
             f'  provider: "{_yaml_scalar(hermes_provider)}"',
         ]
+        if self.api_key:
+            lines.append(f'  api_key: "{_yaml_scalar(self.api_key)}"')
         if self.base_url:
             lines.append(f'  base_url: "{_yaml_scalar(self.base_url)}"')
         lines.append("")
         return "\n".join(lines)
-
-    def supports_openai_chat_completions(self) -> bool:
-        return bool(self.api_key and self.base_url and self.provider.lower() != "gemini")
-
 
 def _yaml_scalar(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
@@ -164,10 +162,7 @@ def model_runtime_config_from_model(model: ModelConfig) -> ModelRuntimeConfig:
     base_url = (model.base_url or "").lower()
     has_explicit_model_runtime = bool(model.encrypted_api_key and model.base_url)
     is_runtime_selector = not has_explicit_model_runtime and (
-        "hermes" in name.lower()
-        or "openclaw" in name.lower()
-        or "8642" in base_url
-        or "18789" in base_url
+        "hermes" in name.lower() or "8642" in base_url
     )
     if is_runtime_selector:
         return default_model_runtime_config(model.id)

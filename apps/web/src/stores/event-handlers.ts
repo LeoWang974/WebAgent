@@ -22,9 +22,7 @@ export interface SendMessageStreamEventState extends AgentRunEventState {
 
 export interface SendMessageStreamEventContext {
   currentRunId: string;
-  isRuntimeAdapterRun: boolean;
   modelName: string;
-  requestedSkill?: string;
   sessionId: string;
 }
 
@@ -122,8 +120,10 @@ function applyRunningAgentRunEventMessages(
     const nextPending = shouldKeepPending
       ? createPendingAssistantMessage(
           run.sessionId,
-          run.adapterKey ?? "Agent",
-          run.title === "Agent request" ? undefined : run.title,
+          "Hermes",
+          run.title === "Hermes request" || run.title === "Hermes Agent Run"
+            ? undefined
+            : run.title,
           createdAt,
         )
       : undefined;
@@ -243,28 +243,25 @@ function applyStreamAssistantDelta(
     createdAt: now,
     waitStartedAt: pendingIndex >= 0 ? state.messages[pendingIndex].waitStartedAt : undefined,
   };
-  const shouldCreateNextPending = Boolean(context.isRuntimeAdapterRun || context.requestedSkill);
-  const nextPendingMessage = shouldCreateNextPending
-    ? createPendingAssistantMessage(
-        context.sessionId,
-        context.modelName,
-        context.requestedSkill,
-        now,
-      )
-    : undefined;
+  const nextPendingMessage = createPendingAssistantMessage(
+    context.sessionId,
+    context.modelName,
+    undefined,
+    now,
+  );
 
   const nextMessages =
     pendingIndex >= 0
       ? [
           ...state.messages.slice(0, pendingIndex),
           completedMessage,
-          ...(nextPendingMessage ? [nextPendingMessage] : []),
+          nextPendingMessage,
           ...state.messages.slice(pendingIndex + 1),
         ]
       : [
           ...state.messages,
           completedMessage,
-          ...(nextPendingMessage ? [nextPendingMessage] : []),
+          nextPendingMessage,
         ];
 
   return {

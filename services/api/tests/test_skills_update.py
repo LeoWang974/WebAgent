@@ -70,7 +70,6 @@ async def test_update_sensenova_skills_syncs_local_repo_to_runtime_targets(tmp_p
 
     cache_dir = tmp_path / "cache"
     hermes_dir = tmp_path / "hermes" / "skills"
-    openclaw_dir = tmp_path / "openclaw" / "skills"
 
     result = await update_sensenova_skills(
         repo_url=str(repo),
@@ -78,16 +77,11 @@ async def test_update_sensenova_skills_syncs_local_repo_to_runtime_targets(tmp_p
         source_subdir=".",
         branch=None,
         hermes_skills_dir=str(hermes_dir),
-        openclaw_skills_dir=str(openclaw_dir),
         wsl_distribution="Ubuntu",
     )
 
     assert result.commit
     assert result.hermes_updated is True
-    assert result.openclaw_updated is True
     assert (hermes_dir / "sn-deep-research" / "SKILL.md").read_text(
-        encoding="utf-8"
-    ) == "research skill"
-    assert (openclaw_dir / "sn-deep-research" / "SKILL.md").read_text(
         encoding="utf-8"
     ) == "research skill"

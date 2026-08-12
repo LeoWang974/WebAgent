@@ -2,10 +2,12 @@ import asyncio
 import base64
 import csv
 import hashlib
-import html
 import json
+import os
 import re
 import shutil
+import subprocess
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -14,7 +16,6 @@ from app import schemas
 from app.schemas.artifact import ArtifactType
 from app.services.agent_run_workspace import run_artifacts_dir
 from app.services.artifact_dedupe import dedupe_discovered_artifacts
-from app.services.artifact_ppt_export import create_pptx_from_html_artifacts as _create_pptx
 
 SUPPORTED_SUFFIXES = {
     ".csv",
@@ -162,10 +163,8 @@ def _candidate_roots() -> list[Path]:
         user_home / "Downloads" / "WebAgent",
         user_home / "deep-research-reports",
         user_home / "ppt_decks",
-        user_home / ".openclaw" / "workspace",
         user_home / ".hermes" / "images",
         user_home / ".hermes" / "deep-research-reports",
-        repo_root.parent.parent / "runtime" / "agent-home" / ".openclaw" / "workspace",
         Path(r"\\wsl.localhost\Ubuntu\home\zhuchangbiaozhu_xyl\.hermes\reports"),
         Path(r"\\wsl.localhost\Ubuntu\home\zhuchangbiaozhu_xyl\.hermes\deep-research-reports"),
         Path(r"\\wsl.localhost\Ubuntu\home\zhuchangbiaozhu_xyl\.hermes\images"),
@@ -238,9 +237,82 @@ def _is_ignored(path: Path) -> bool:
 
 def _is_regular_artifact_candidate(path: Path) -> bool:
     try:
-        return path.is_file() and not _is_ignored(path)
+        if path.is_file() and not _is_ignored(path):
+            return True
     except OSError:
-        return False
+        pass
+    return _wsl_artifact_mtime(path) is not None and not _is_ignored(path)
+
+
+def _windows_path_to_wsl(path: Path) -> str | None:
+    if os.name != "nt":
+        return None
+    match = re.match(r"^([A-Za-z]):[\\/](.*)$", str(path))
+    if not match:
+        return None
+    relative_path = match.group(2).replace("\\", "/")
+    return f"/mnt/{match.group(1).lower()}/{relative_path}"
+
+
+def _wsl_artifact_mtime(path: Path) -> float | None:
+    """Read WSL-backed files when Windows cannot stat a newly-created binary."""
+    wsl_path = _windows_path_to_wsl(path)
+    if not wsl_path or shutil.which("wsl.exe") is None:
+        return None
+    try:
+        result = subprocess.run(
+            ["wsl.exe", "-d", "Ubuntu", "--", "stat", "-c", "%F:%Y", wsl_path],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    file_type, separator, timestamp = result.stdout.strip().partition(":")
+    if file_type != "regular file" or not separator:
+        return None
+    try:
+        return float(timestamp)
+    except ValueError:
+        return None
+
+
+def _artifact_mtime(path: Path) -> float | None:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return _wsl_artifact_mtime(path)
+
+
+def _materialize_wsl_artifact(path: Path) -> tuple[Path, Path | None]:
+    """Materialize a WSL-only artifact into a temporary Windows-readable file."""
+    if path.is_file():
+        return path, None
+    wsl_path = _windows_path_to_wsl(path)
+    if not wsl_path or shutil.which("wsl.exe") is None:
+        return path, None
+
+    temp_dir = Path(tempfile.mkdtemp(prefix="webagent-artifact-"))
+    temp_path = temp_dir / path.name
+    try:
+        with temp_path.open("wb") as output:
+            result = subprocess.run(
+                ["wsl.exe", "-d", "Ubuntu", "--", "cat", wsl_path],
+                stdout=output,
+                stderr=subprocess.PIPE,
+                timeout=60,
+                check=False,
+            )
+        if result.returncode != 0 or not temp_path.is_file() or temp_path.stat().st_size == 0:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            return path, None
+        return temp_path, temp_dir
+    except (OSError, subprocess.SubprocessError):
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        return path, None
 
 
 def _is_non_artifact_path(path: str | Path) -> bool:
@@ -255,8 +327,21 @@ def _is_repo_runtime_temp_path(path: Path) -> bool:
         return False
 
     parts = relative_path.parts
-    if len(parts) >= 3 and parts[0] in {"hermes-runs", "openclaw-runs"}:
+    if len(parts) >= 3 and parts[0] == "hermes-runs":
         return "artifacts" not in parts
+    if parts and parts[0] == "users":
+        normalized_parts = {part.lower() for part in parts}
+        run_output_dirs = {
+            "artifacts",
+            "deep-research-reports",
+            "images",
+            "output",
+            "outputs",
+            "ppt_decks",
+            "reports",
+        }
+        if "runs" in normalized_parts and normalized_parts.intersection(run_output_dirs):
+            return False
     return True
 
 
@@ -596,10 +681,10 @@ def discover_artifact_paths_from_hermes_sessions(since: datetime) -> list[str]:
                     continue
                 if normalized_path.name.lower() in IGNORED_FILENAMES:
                     continue
-                try:
-                    file_updated_at = datetime.fromtimestamp(normalized_path.stat().st_mtime)
-                except OSError:
+                file_mtime = _artifact_mtime(normalized_path)
+                if file_mtime is None:
                     continue
+                file_updated_at = datetime.fromtimestamp(file_mtime)
                 if file_updated_at < since:
                     continue
                 if normalized in seen:
@@ -626,12 +711,17 @@ def create_artifacts_from_paths(
             continue
         if _is_repo_runtime_temp_path(path):
             continue
-        archived_path = _archive_artifact_path(path, run_id)
-        artifact = _artifact_from_path(
-            session_id,
-            archived_path,
-            original_path=str(path),
-        )
+        readable_path, temp_dir = _materialize_wsl_artifact(path)
+        try:
+            archived_path = _archive_artifact_path(readable_path, run_id)
+            artifact = _artifact_from_path(
+                session_id,
+                archived_path,
+                original_path=str(path),
+            )
+        finally:
+            if temp_dir is not None:
+                shutil.rmtree(temp_dir, ignore_errors=True)
         if artifact is None:
             continue
         metadata = artifact.metadata or {}
@@ -660,106 +750,6 @@ def create_artifacts_from_paths(
         reverse=True,
     )
     return artifacts
-
-
-def create_markdown_artifact_from_content(
-    session_id: str,
-    content: str,
-    run_id: str | None = None,
-    *,
-    title: str = "agent-generated-report",
-) -> schemas.Artifact | None:
-    normalized = content.strip()
-    has_markdown_signal = "#" in normalized or "\n\n" in normalized
-    has_saved_report_signal = bool(
-        re.search(
-            r"(?i)(saved as|report saved|generated|created|\.md|markdown|"
-            r"报告已生成|报告已经完成|报告已完成)",
-            normalized,
-        )
-    )
-    if len(normalized) < 40:
-        return None
-    if len(normalized) < 500 and not has_saved_report_signal:
-        return None
-    if not has_markdown_signal and not has_saved_report_signal:
-        return None
-
-    artifact_dir = _runtime_artifacts_dir(run_id)
-    safe_title = re.sub(r"[^\w\u4e00-\u9fff.-]+", "-", title, flags=re.UNICODE).strip("-")
-    if not safe_title:
-        safe_title = "agent-generated-report"
-    digest = hashlib.sha1(normalized.encode("utf-8", errors="ignore")).hexdigest()[:10]
-    path = artifact_dir / f"{safe_title}-{digest}.md"
-    path.write_text(normalized, encoding="utf-8")
-    return _artifact_from_path(
-        session_id,
-        path,
-        artifact_type_override="markdown_report",
-        metadata_extra={"source": "assistant_output_fallback"},
-        original_path="assistant_output",
-        title_override=safe_title,
-    )
-
-
-def create_html_artifact_from_content(
-    session_id: str,
-    content: str,
-    run_id: str | None = None,
-    *,
-    title: str = "agent-generated-page",
-) -> schemas.Artifact | None:
-    normalized = content.strip()
-    has_html_signal = bool(
-        re.search(
-            r"(?i)(\.html|html file|html 文件|网页|浏览器|browser-ready|<html|<!doctype)",
-            normalized,
-        )
-    )
-    if len(normalized) < 40 or not has_html_signal:
-        return None
-
-    if re.search(r"(?is)<html[\s>].*</html>", normalized):
-        html_content = normalized
-    else:
-        escaped = html.escape(normalized)
-        html_content = (
-            "<!doctype html>\n"
-            '<html lang="zh-CN">\n'
-            "<head>\n"
-            '  <meta charset="utf-8" />\n'
-            '  <meta name="viewport" content="width=device-width, initial-scale=1" />\n'
-            f"  <title>{html.escape(title)}</title>\n"
-            "  <style>\n"
-            "    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; "
-            "line-height: 1.7; margin: 0; padding: 32px; color: #172033; background: #f7f8fb; }\n"
-            "    main { max-width: 920px; margin: 0 auto; background: #fff; "
-            "border: 1px solid #dfe5ef; "
-            "border-radius: 8px; padding: 28px; }\n"
-            "    pre { white-space: pre-wrap; word-break: break-word; font: inherit; margin: 0; }\n"
-            "  </style>\n"
-            "</head>\n"
-            "<body><main><pre>"
-            f"{escaped}"
-            "</pre></main></body>\n"
-            "</html>\n"
-        )
-
-    artifact_dir = _runtime_artifacts_dir(run_id)
-    safe_title = re.sub(r"[^\w\u4e00-\u9fff.-]+", "-", title, flags=re.UNICODE).strip("-")
-    if not safe_title:
-        safe_title = "agent-generated-page"
-    digest = hashlib.sha1(html_content.encode("utf-8", errors="ignore")).hexdigest()[:10]
-    path = artifact_dir / f"{safe_title}-{digest}.html"
-    path.write_text(html_content, encoding="utf-8")
-    return _artifact_from_path(
-        session_id,
-        path,
-        artifact_type_override="html_page",
-        metadata_extra={"source": "assistant_output_fallback"},
-        original_path="assistant_output",
-        title_override=safe_title,
-    )
 
 
 def create_artifacts_from_refs(
@@ -809,21 +799,26 @@ def create_artifacts_from_refs(
             continue
         if _is_repo_runtime_temp_path(path):
             continue
-        archived_path = _archive_artifact_path(path, run_id)
-        artifact = _artifact_from_path(
-            session_id,
-            archived_path,
-            artifact_type_override=artifact_type,
-            metadata_extra={
-                "adapterProtocol": "openclaw.artifact.v1",
-                "adapterRunId": ref_run_id,
-                "adapterSourceDir": source_dir,
-                "adapterTitle": title,
-                "adapterType": artifact_type,
-            },
-            original_path=str(path),
-            title_override=title if isinstance(title, str) and title else None,
-        )
+        readable_path, temp_dir = _materialize_wsl_artifact(path)
+        try:
+            archived_path = _archive_artifact_path(readable_path, run_id)
+            artifact = _artifact_from_path(
+                session_id,
+                archived_path,
+                artifact_type_override=artifact_type,
+                metadata_extra={
+                    "adapterProtocol": "hermes.artifact.v1",
+                    "adapterRunId": ref_run_id,
+                    "adapterSourceDir": source_dir,
+                    "adapterTitle": title,
+                    "adapterType": artifact_type,
+                },
+                original_path=str(path),
+                title_override=title if isinstance(title, str) and title else None,
+            )
+        finally:
+            if temp_dir is not None:
+                shutil.rmtree(temp_dir, ignore_errors=True)
         if artifact is None:
             continue
 
@@ -894,18 +889,18 @@ def discover_related_artifact_paths(
         if not directory.exists() or not directory.is_dir():
             continue
         for path in directory.rglob("*"):
-            if not _is_regular_artifact_candidate(path):
-                continue
             if _is_repo_runtime_temp_path(path):
                 continue
             if path.name.lower() in IGNORED_FILENAMES:
                 continue
             if path.suffix.lower() not in SUPPORTED_SUFFIXES:
                 continue
-            try:
-                updated_at = datetime.fromtimestamp(path.stat().st_mtime)
-            except OSError:
+            if not _is_regular_artifact_candidate(path):
                 continue
+            file_mtime = _artifact_mtime(path)
+            if file_mtime is None:
+                continue
+            updated_at = datetime.fromtimestamp(file_mtime)
             if updated_at < since:
                 continue
             key = _normalized_path_key(path)
@@ -915,23 +910,6 @@ def discover_related_artifact_paths(
             related_paths.append(str(path))
 
     return related_paths
-
-
-def create_pptx_from_html_artifacts(
-    session_id: str,
-    html_artifacts: list[schemas.Artifact],
-    run_id: str | None,
-    timeout_seconds: int | None = None,
-) -> schemas.Artifact | None:
-    return _create_pptx(
-        session_id,
-        html_artifacts,
-        run_id,
-        timeout_seconds,
-        artifact_from_path=_artifact_from_path,
-        runtime_artifacts_dir=_runtime_artifacts_dir,
-        runtime_run_dir=_runtime_run_dir,
-    )
 
 
 def discover_artifacts_since(
@@ -950,29 +928,33 @@ def discover_artifacts_since(
             continue
 
         for path in root.rglob("*"):
-            if not _is_regular_artifact_candidate(path):
-                continue
             if _is_repo_runtime_temp_path(path):
                 continue
             if path.suffix.lower() not in SUPPORTED_SUFFIXES:
                 continue
-
-            try:
-                updated_at = datetime.fromtimestamp(path.stat().st_mtime)
-            except OSError:
+            if not _is_regular_artifact_candidate(path):
                 continue
+            file_mtime = _artifact_mtime(path)
+            if file_mtime is None:
+                continue
+            updated_at = datetime.fromtimestamp(file_mtime)
 
             if updated_at < since:
                 continue
             if str(path) in existing_paths:
                 continue
 
-            archived_path = _archive_artifact_path(path, run_id)
-            artifact = _artifact_from_path(
-                session_id,
-                archived_path,
-                original_path=str(path),
-            )
+            readable_path, temp_dir = _materialize_wsl_artifact(path)
+            try:
+                archived_path = _archive_artifact_path(readable_path, run_id)
+                artifact = _artifact_from_path(
+                    session_id,
+                    archived_path,
+                    original_path=str(path),
+                )
+            finally:
+                if temp_dir is not None:
+                    shutil.rmtree(temp_dir, ignore_errors=True)
             if artifact is None:
                 continue
             metadata = artifact.metadata or {}
