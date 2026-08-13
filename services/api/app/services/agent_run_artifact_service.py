@@ -1,9 +1,11 @@
+import re
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import AgentRun, AgentRunEvent, Message, UserSettings
+from app import schemas
+from app.models import AgentRun, AgentRunEvent, Artifact, Message, UserSettings
 from app.services.artifact_discovery import (
     discover_artifacts_with_retry,
     discover_related_artifact_paths,
@@ -13,6 +15,7 @@ from app.services.persistence import persist_message
 from app.services.session_artifacts import (
     artifact_display_priority,
     is_debug_artifact,
+    metadata_path_key,
     persist_discovered_artifacts,
 )
 from app.services.settings_service import DEFAULT_INTERFACE
@@ -31,6 +34,33 @@ FATAL_RUNTIME_MARKERS = (
     "output length limit",
     "401",
 )
+
+PRIMARY_ARTIFACT_REQUEST_PATTERNS = {
+    "markdown_report": (
+        re.compile(
+            r"(?:输出|生成|撰写|创建|保存).{0,48}(?:markdown|\.md\b)",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"(?:create|generate|produce|write|save).{0,48}(?:markdown|\.md\b)",
+            re.IGNORECASE,
+        ),
+    ),
+    "html_page": (
+        re.compile(r"(?:输出|生成|创建|保存).{0,48}(?:html|\.html?\b)", re.IGNORECASE),
+        re.compile(
+            r"(?:create|generate|produce|write|save).{0,48}(?:html|\.html?\b)",
+            re.IGNORECASE,
+        ),
+    ),
+    "ppt_deck": (
+        re.compile(r"(?:输出|生成|创建|保存).{0,48}(?:pptx?|幻灯片)", re.IGNORECASE),
+        re.compile(
+            r"(?:create|generate|produce|build|save).{0,48}(?:pptx?|presentation|slide deck)",
+            re.IGNORECASE,
+        ),
+    ),
+}
 
 
 def _diagnostic_text(adapter: object, assistant_output: str) -> str:
@@ -61,6 +91,96 @@ def _adapter_artifact_paths(adapter: object) -> tuple[list[str], list[object]]:
             if getattr(artifact, "path", "")
         ]
     return list(dict.fromkeys(paths)), list(artifacts)
+
+
+def requested_primary_artifact_types(content: str) -> set[str]:
+    return {
+        artifact_type
+        for artifact_type, patterns in PRIMARY_ARTIFACT_REQUEST_PATTERNS.items()
+        if any(pattern.search(content) for pattern in patterns)
+    }
+
+
+def filter_preexisting_artifact_schemas(
+    discovered: list[schemas.Artifact],
+    *,
+    existing_hashes: set[str],
+    existing_paths: set[str],
+) -> tuple[list[schemas.Artifact], list[str]]:
+    filtered: list[schemas.Artifact] = []
+    excluded_paths: list[str] = []
+    for artifact in discovered:
+        metadata = artifact.metadata or {}
+        content_hash = str(metadata.get("contentHash") or "")
+        candidate_paths = {
+            metadata_path_key(value)
+            for value in (
+                metadata.get("path"),
+                metadata.get("originalPath"),
+                metadata.get("normalizedPath"),
+                metadata.get("originalNormalizedPath"),
+            )
+            if isinstance(value, str) and value
+        }
+        if (content_hash and content_hash in existing_hashes) or candidate_paths.intersection(
+            existing_paths
+        ):
+            excluded_paths.append(
+                str(metadata.get("originalPath") or metadata.get("path") or artifact.title)
+            )
+            continue
+        filtered.append(artifact)
+    return filtered, excluded_paths
+
+
+async def _existing_conversation_artifact_fingerprints(
+    db: AsyncSession,
+    conversation_id: str,
+    run_id: str,
+) -> tuple[set[str], set[str]]:
+    result = await db.execute(
+        select(Artifact).where(
+            Artifact.conversation_id == conversation_id,
+            or_(Artifact.run_id.is_(None), Artifact.run_id != run_id),
+        )
+    )
+    hashes: set[str] = set()
+    paths: set[str] = set()
+    for artifact in result.scalars().all():
+        metadata = artifact.artifact_metadata or {}
+        content_hash = metadata.get("contentHash")
+        if isinstance(content_hash, str) and content_hash:
+            hashes.add(content_hash)
+        for value in (
+            metadata.get("path"),
+            metadata.get("originalPath"),
+            metadata.get("normalizedPath"),
+            metadata.get("originalNormalizedPath"),
+        ):
+            if isinstance(value, str) and value:
+                paths.add(metadata_path_key(value))
+    return hashes, paths
+
+
+def validate_requested_primary_artifacts(
+    content: str,
+    artifacts: list[Artifact],
+) -> None:
+    requested_types = requested_primary_artifact_types(content)
+    if not requested_types:
+        return
+    produced_types = {
+        artifact.type
+        for artifact in artifacts
+        if artifact.is_primary and not is_debug_artifact(artifact)
+    }
+    missing_types = sorted(requested_types - produced_types)
+    if missing_types:
+        readable_types = ", ".join(missing_types)
+        raise RuntimeError(
+            "Hermes completed without producing the requested primary artifact type(s): "
+            f"{readable_types}."
+        )
 
 
 async def _event_artifact_paths(db: AsyncSession, run_id: str) -> list[str]:
@@ -127,10 +247,47 @@ async def discover_and_persist_run_artifacts(
     else:
         discovered = []
 
+    existing_hashes, existing_paths = await _existing_conversation_artifact_fingerprints(
+        db,
+        conversation_id,
+        run_id,
+    )
+    discovered, excluded_context_paths = filter_preexisting_artifact_schemas(
+        discovered,
+        existing_hashes=existing_hashes,
+        existing_paths=existing_paths,
+    )
+    artifact_discovery_summary["excluded_context_artifact_paths"] = excluded_context_paths
+
     stored = await persist_discovered_artifacts(db, conversation_id, discovered, run_id)
     current_run_artifacts = [artifact for artifact in stored if artifact.run_id == run_id]
+    external_artifacts = [
+        artifact
+        for artifact in current_run_artifacts
+        if (artifact.artifact_metadata or {}).get("outputPathCompliant") is False
+    ]
+    artifact_discovery_summary["path_compliance"] = {
+        "compliant_count": len(current_run_artifacts) - len(external_artifacts),
+        "external_count": len(external_artifacts),
+        "external_paths": [
+            str((artifact.artifact_metadata or {}).get("originalPath") or "")
+            for artifact in external_artifacts
+        ],
+        "runtime_instruction_injected": False,
+    }
     if not current_run_artifacts:
         raise_for_fatal_runtime_diagnostics(adapter, assistant_output)
+
+    primary_artifacts = [
+        artifact
+        for artifact in current_run_artifacts
+        if artifact.is_primary and not is_debug_artifact(artifact)
+    ]
+    artifact_discovery_summary["primary_artifact_count"] = len(primary_artifacts)
+    artifact_discovery_summary["primary_artifact_types"] = sorted(
+        {artifact.type for artifact in primary_artifacts}
+    )
+    validate_requested_primary_artifacts(content, current_run_artifacts)
 
     developer_mode = await user_developer_mode_by_id(db, user_id)
     visible = [

@@ -1,6 +1,5 @@
 ﻿import hashlib
 import re
-import shutil
 from datetime import datetime
 from pathlib import Path
 
@@ -11,6 +10,13 @@ from sqlalchemy.orm import selectinload
 from app import schemas
 from app.core.config import settings
 from app.models import Artifact, Conversation, ConversationShare
+from app.services.agent_run_workspace import run_workspace_dir
+from app.services.artifact_storage import (
+    artifact_storage_root,
+    store_artifact_file,
+    update_artifact_manifest,
+)
+from app.services.runtime_environment import runtime_run_dir_for_ids
 
 
 def is_primary_report_artifact(artifact: Artifact) -> bool:
@@ -137,9 +143,31 @@ def metadata_path_key(path: str | Path) -> str:
     return lower_value
 
 
-def safe_storage_name(value: str, fallback: str) -> str:
-    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "-", value).strip(" .-")
-    return cleaned[:80] or fallback
+def _path_is_within(path: Path, parent: Path) -> bool:
+    try:
+        path.resolve().relative_to(parent.resolve())
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def artifact_source_location(
+    source: Path,
+    conversation: Conversation,
+    run_id: str,
+) -> tuple[str, bool]:
+    managed_locations = {
+        "run_workspace": run_workspace_dir(run_id, conversation.id, conversation.user_id),
+        "runtime_home": runtime_run_dir_for_ids(
+            conversation.user_id,
+            conversation.id,
+            run_id,
+        ),
+    }
+    for location, root in managed_locations.items():
+        if _path_is_within(source, root):
+            return location, True
+    return "external", False
 
 
 def organize_artifact_schema(
@@ -159,35 +187,66 @@ def organize_artifact_schema(
     if not source.exists() or not source.is_file():
         return artifact_schema
 
-    storage_root = Path(settings.artifact_storage_root)
-    folder_label = safe_storage_name(conversation.title or "conversation", "conversation")
-    conversation_dir = storage_root / f"{folder_label}-{conversation.id[:8]}"
-    target_dir = conversation_dir / f"run-{run_id[:8]}" if run_id else conversation_dir
-    target_dir.mkdir(parents=True, exist_ok=True)
+    if not run_id:
+        return artifact_schema
 
-    digest = hashlib.sha1(str(source).encode("utf-8", errors="ignore")).hexdigest()[:10]
-    destination = target_dir / f"{source.stem}-{digest}{source.suffix.lower()}"
-    if destination.exists() and destination.stat().st_mtime >= source.stat().st_mtime:
-        stored_path = destination
-    else:
-        runtime_root = Path(__file__).resolve().parents[4] / "runtime"
-        try:
-            source.relative_to(runtime_root)
-            shutil.move(str(source), destination)
-        except ValueError:
-            shutil.copy2(source, destination)
-        stored_path = destination
+    is_primary = is_primary_artifact_schema(artifact_schema)
+    original_path = metadata.get("originalPath")
+    compliance_source = (
+        Path(original_path)
+        if isinstance(original_path, str) and original_path
+        else source
+    )
+    source_location, output_path_compliant = artifact_source_location(
+        compliance_source,
+        conversation,
+        run_id,
+    )
+    stored = store_artifact_file(
+        source,
+        user_id=conversation.user_id,
+        conversation_id=conversation.id,
+        run_id=run_id,
+        is_primary=is_primary,
+    )
+    organized_at = datetime.now().astimezone().isoformat()
 
-    if not metadata.get("originalPath"):
+    if not original_path:
         metadata["originalPath"] = str(source)
         metadata["originalNormalizedPath"] = metadata_path_key(source)
-    metadata["path"] = str(stored_path)
-    metadata["normalizedPath"] = metadata_path_key(stored_path)
-    metadata["storageRoot"] = str(storage_root)
-    metadata["storageConversationDir"] = str(conversation_dir)
-    metadata["storageRunDir"] = str(target_dir)
-    metadata["organizedAt"] = datetime.now().isoformat()
+    metadata["path"] = str(stored.path)
+    metadata["normalizedPath"] = metadata_path_key(stored.path)
+    metadata["contentHash"] = stored.content_hash
+    metadata["storageRoot"] = str(artifact_storage_root())
+    metadata["storageRunDir"] = str(stored.run_dir)
+    metadata["storageCategory"] = stored.category
+    metadata["sourceLocation"] = source_location
+    metadata["outputPathCompliant"] = output_path_compliant
+    metadata["runtimeInstructionInjected"] = False
+    metadata["organizedAt"] = organized_at
+    manifest_path = update_artifact_manifest(
+        stored.run_dir,
+        {
+            "artifactId": artifact_schema.id,
+            "conversationId": conversation.id,
+            "runId": run_id,
+            "type": artifact_schema.type,
+            "title": artifact_schema.title,
+            "status": artifact_schema.status,
+            "isPrimary": is_primary,
+            "storageCategory": stored.category,
+            "contentHash": stored.content_hash,
+            "originalPath": str(metadata["originalPath"]),
+            "storedPath": str(stored.path),
+            "sourceLocation": source_location,
+            "outputPathCompliant": output_path_compliant,
+            "runtimeInstructionInjected": False,
+            "organizedAt": organized_at,
+        },
+    )
+    metadata["manifestPath"] = str(manifest_path)
     artifact_schema.metadata = metadata
+    artifact_schema.is_primary = is_primary
     return artifact_schema
 
 
@@ -276,7 +335,12 @@ async def persist_discovered_artifacts(
             run_id,
         )
         if existing_artifact is not None:
-            existing_artifact.is_primary = is_primary_artifact_schema(artifact_schema)
+            existing_artifact.type = artifact_schema.type
+            existing_artifact.title = artifact_schema.title
+            existing_artifact.status = artifact_schema.status
+            existing_artifact.content = artifact_schema.content
+            existing_artifact.artifact_metadata = metadata
+            existing_artifact.is_primary = artifact_schema.is_primary
             stored_artifacts.append(existing_artifact)
             continue
 

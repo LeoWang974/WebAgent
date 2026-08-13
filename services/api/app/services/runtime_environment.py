@@ -39,7 +39,14 @@ def runtime_root() -> Path:
 
 
 def runtime_conversation_dir(user: User, conversation_id: str | None = None) -> Path:
-    user_segment = safe_runtime_segment(user.id, "user")
+    return runtime_conversation_dir_for_ids(user.id, conversation_id)
+
+
+def runtime_conversation_dir_for_ids(
+    user_id: str,
+    conversation_id: str | None = None,
+) -> Path:
+    user_segment = safe_runtime_segment(user_id, "user")
     conversation_segment = safe_runtime_segment(conversation_id or "default", "conversation")
     path = runtime_root() / user_segment / "conversations" / conversation_segment
     path.mkdir(parents=True, exist_ok=True)
@@ -51,7 +58,15 @@ def runtime_run_dir(
     conversation_id: str | None = None,
     run_id: str | None = None,
 ) -> Path:
-    conversation_dir = runtime_conversation_dir(user, conversation_id)
+    return runtime_run_dir_for_ids(user.id, conversation_id, run_id)
+
+
+def runtime_run_dir_for_ids(
+    user_id: str,
+    conversation_id: str | None = None,
+    run_id: str | None = None,
+) -> Path:
+    conversation_dir = runtime_conversation_dir_for_ids(user_id, conversation_id)
     if not run_id:
         return conversation_dir
     path = conversation_dir / "runs" / safe_runtime_segment(run_id, "run")

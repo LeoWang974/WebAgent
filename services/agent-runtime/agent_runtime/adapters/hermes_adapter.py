@@ -36,6 +36,7 @@ class HermesAdapter:
         async for event in self.cli.ask_stream_events(
             question=input_data.content,
             run_id=input_data.run_id,
+            conversation_id=input_data.session_id,
             working_dir=input_data.working_dir,
             artifacts_dir=input_data.artifacts_dir,
         ):

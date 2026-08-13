@@ -281,6 +281,53 @@ def test_create_artifacts_from_refs_marks_source_cache_as_intermediate(tmp_path:
     assert artifact.metadata["originalPath"] == str(cache_file)
 
 
+def test_explicit_run_ref_accepts_primary_output_from_hermes_context(
+    monkeypatch,
+    tmp_path: Path,
+):
+    output = (
+        tmp_path
+        / "runtime"
+        / "users"
+        / "user_1"
+        / "conversations"
+        / "conversation_1"
+        / "runs"
+        / "run_1"
+        / "hermes-home"
+        / "context"
+        / "report.html"
+    )
+    output.parent.mkdir(parents=True)
+    output.write_text("<html lang='zh-CN'><body>final report</body></html>", encoding="utf-8")
+    archive_dir = tmp_path / "archive" / "run_1"
+    archive_dir.mkdir(parents=True)
+    monkeypatch.setattr("app.services.artifact_discovery._repo_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        "app.services.artifact_discovery._runtime_artifacts_dir",
+        lambda run_id: archive_dir,
+    )
+
+    artifacts = create_artifacts_from_refs(
+        "session_1",
+        [
+            AgentArtifactRef(
+                path=str(output),
+                artifact_type="html_page",
+                run_id="run_1",
+                source_dir=str(output.parent),
+                title="Final report",
+            )
+        ],
+        run_id="run_1",
+    )
+
+    assert len(artifacts) == 1
+    assert artifacts[0].type == "html_page"
+    assert artifacts[0].metadata
+    assert artifacts[0].metadata["originalPath"] == str(output)
+
+
 def test_discover_related_artifact_paths_finds_html_slides_for_pptx(tmp_path: Path):
     deck_dir = tmp_path / "ppt_decks"
     deck_dir.mkdir()

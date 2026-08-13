@@ -48,5 +48,6 @@ async def test_hermes_stream_forwards_prompt_verbatim():
 
     assert events[0].step.label == "ok"
     assert captured["question"] == content
+    assert captured["conversation_id"] == "session_1"
     assert "skills" not in captured
     assert "toolsets" not in captured

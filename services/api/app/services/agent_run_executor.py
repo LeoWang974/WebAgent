@@ -434,6 +434,7 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
             conversation_id,
             assistant_message_content,
             assistant_message_payload,
+            artifact_discovery_summary,
         )
     except AgentRunCancelled:
         await db.rollback()
@@ -532,6 +533,7 @@ async def _complete_run(
     conversation_id: str,
     assistant_message_content: str,
     assistant_message_payload: dict,
+    artifact_discovery_summary: dict[str, object],
 ) -> None:
     run_id_value = run.id
     conversation = await refresh_conversation(db, conversation_id)
@@ -557,6 +559,7 @@ async def _complete_run(
             "session": to_session(conversation).model_dump(by_alias=True),
             "runId": run_id_value,
             "status": "completed",
+            "artifactDiscovery": artifact_discovery_summary,
         },
     )
 

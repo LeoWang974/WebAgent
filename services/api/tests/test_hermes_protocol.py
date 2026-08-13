@@ -1,10 +1,55 @@
 import asyncio
+import json
+import os
 from datetime import datetime
 from pathlib import Path
 
 import pytest
 
 from agent_runtime.adapters.hermes_cli import HermesCliWrapper
+
+
+def test_hermes_recovers_latest_assistant_message_from_session(tmp_path: Path):
+    hermes_home = tmp_path / "hermes-home"
+    sessions_dir = hermes_home / "sessions"
+    sessions_dir.mkdir(parents=True)
+    started_at = datetime.now()
+    (sessions_dir / "session_test.json").write_text(
+        json.dumps(
+            {
+                "messages": [
+                    {"role": "user", "content": "Reply exactly"},
+                    {"role": "assistant", "content": "EN_SHORT_OK"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    wrapper = HermesCliWrapper(hermes_home=str(hermes_home))
+
+    assert (
+        wrapper._recover_latest_session_assistant_content(started_at=started_at)
+        == "EN_SHORT_OK"
+    )
+
+
+def test_hermes_session_recovery_ignores_sessions_from_before_run(tmp_path: Path):
+    hermes_home = tmp_path / "hermes-home"
+    sessions_dir = hermes_home / "sessions"
+    sessions_dir.mkdir(parents=True)
+    stale_session = sessions_dir / "session_stale.json"
+    stale_session.write_text(
+        json.dumps({"messages": [{"role": "assistant", "content": "STALE"}]}),
+        encoding="utf-8",
+    )
+    stale_timestamp = datetime.now().timestamp() - 60
+    stale_session.touch()
+    os.utime(stale_session, (stale_timestamp, stale_timestamp))
+    wrapper = HermesCliWrapper(hermes_home=str(hermes_home))
+
+    assert wrapper._recover_latest_session_assistant_content(
+        started_at=datetime.now()
+    ) is None
 
 
 def test_hermes_completion_signal_accepts_chinese_and_mojibake():
@@ -166,13 +211,82 @@ async def test_hermes_emits_artifact_found_after_final_output_discovery(
         event
         async for event in wrapper.ask_stream_events(
             "create a deck",
+            conversation_id="conversation-1",
+            run_id="run-1",
             working_dir=str(tmp_path),
+            artifacts_dir=str(tmp_path / "artifacts"),
         )
     ]
 
     artifact_event = next(event for event in events if event.event_type == "artifact_found")
     assert artifact_event.artifact_paths == [str(pptx_path.resolve())]
     assert artifact_event.payload["finalDiscovery"] is True
+    assert wrapper._env["WEBAGENT_CONVERSATION_ID"] == "conversation-1"
+    assert wrapper._env["WEBAGENT_RUN_ID"] == "run-1"
+    assert wrapper._env["WEBAGENT_RUNTIME_POLICY"] == "managed-artifacts-v1"
+    assert wrapper._env["WEBAGENT_OUTPUT_DIR"] == wrapper._env["WEBAGENT_ARTIFACTS_DIR"]
+    assert wrapper.last_diagnostics["runtime_instruction_injected"] is False
+
+
+@pytest.mark.asyncio
+async def test_hermes_session_recovery_does_not_duplicate_visible_completion(
+    tmp_path: Path,
+    monkeypatch,
+):
+    hermes_home = tmp_path / "hermes-home"
+    sessions_dir = hermes_home / "sessions"
+    sessions_dir.mkdir(parents=True)
+    (sessions_dir / "session_test.json").write_text(
+        json.dumps(
+            {
+                "messages": [
+                    {"role": "user", "content": "create report"},
+                    {"role": "assistant", "content": "Report completed with details."},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    wrapper = HermesCliWrapper(hermes_home=str(hermes_home))
+    stdout = asyncio.StreamReader()
+    stdout.feed_data(
+        "╭─ ⚕ Hermes ─╮\n│ Report completed.\n╰────────────╯\n".encode()
+    )
+    stdout.feed_eof()
+    stderr = asyncio.StreamReader()
+    stderr.feed_eof()
+
+    class FakeProcess:
+        pid = 12346
+        returncode = 0
+
+        def __init__(self):
+            self.stdout = stdout
+            self.stderr = stderr
+
+        async def wait(self):
+            return self.returncode
+
+    async def fake_create_subprocess_exec(*args, **kwargs):
+        return FakeProcess()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+    monkeypatch.setattr(wrapper, "_build_chat_exec_args", lambda *args, **kwargs: ["hermes"])
+    monkeypatch.setattr(wrapper, "_raw_log_path", lambda: tmp_path / "hermes-raw.log")
+
+    events = [
+        event
+        async for event in wrapper.ask_stream_events(
+            "create report",
+            run_id="run-1",
+            working_dir=str(tmp_path),
+        )
+    ]
+
+    completed = [event for event in events if event.event_type == "completed"]
+    assert len(completed) == 1
+    assert completed[0].content == "Report completed."
+    assert completed[0].payload.get("sessionRecovery") is None
 
 
 def test_hermes_stream_event_classification():

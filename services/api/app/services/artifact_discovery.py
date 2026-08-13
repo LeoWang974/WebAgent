@@ -717,7 +717,12 @@ def create_artifacts_from_paths(
         path = _normalize_path(raw_path)
         if _is_non_artifact_path(raw_path) or _is_non_artifact_path(path):
             continue
-        if _is_repo_runtime_temp_path(path):
+        # Explicit adapter/event paths are authoritative. Hermes may write a
+        # requested final artifact under its run-scoped home/context directory;
+        # broad scans still exclude that directory, but an explicit path must
+        # remain discoverable. Conversation input artifacts are removed later
+        # by content-hash/path deduplication.
+        if run_id is None and _is_repo_runtime_temp_path(path):
             continue
         readable_path, temp_dir = _materialize_wsl_artifact(path)
         try:
@@ -805,7 +810,10 @@ def create_artifacts_from_refs(
         path = _normalize_path(path_value)
         if _is_non_artifact_path(path_value) or _is_non_artifact_path(path):
             continue
-        if _is_repo_runtime_temp_path(path):
+        # Adapter refs are an explicit artifact protocol response. Do not drop
+        # them solely because Hermes placed the output in a run-scoped runtime
+        # directory; generic filesystem scans retain the stricter exclusion.
+        if run_id is None and _is_repo_runtime_temp_path(path):
             continue
         readable_path, temp_dir = _materialize_wsl_artifact(path)
         try:

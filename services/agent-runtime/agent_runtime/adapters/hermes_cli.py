@@ -199,6 +199,51 @@ class HermesCliWrapper:
             return f"/mnt/{drive}/{rest}"
         return path.as_posix()
 
+    @staticmethod
+    def _host_visible_path(path_value: str) -> Path:
+        normalized = path_value.replace("\\", "/")
+        match = re.match(r"^/mnt/([a-zA-Z])/(.*)$", normalized)
+        if os.name == "nt" and match:
+            drive, remainder = match.groups()
+            return Path(f"{drive.upper()}:/{remainder}")
+        return Path(path_value).expanduser()
+
+    def _recover_latest_session_assistant_content(
+        self,
+        *,
+        started_at: datetime,
+    ) -> str | None:
+        sessions_dir = self._host_visible_path(self.hermes_home) / "sessions"
+        if not sessions_dir.is_dir():
+            return None
+
+        started_timestamp = started_at.timestamp() - 5
+        candidates = sorted(
+            (
+                path
+                for path in sessions_dir.glob("session_*.json")
+                if path.is_file() and path.stat().st_mtime >= started_timestamp
+            ),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+        for path in candidates:
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                logger.debug("Unable to read Hermes session output: %s", path, exc_info=True)
+                continue
+            messages = payload.get("messages")
+            if not isinstance(messages, list):
+                continue
+            for message in reversed(messages):
+                if not isinstance(message, dict) or message.get("role") != "assistant":
+                    continue
+                content = message.get("content")
+                if isinstance(content, str) and content.strip():
+                    return content.strip()
+        return None
+
     def _build_chat_exec_args(
         self,
         question: str,
@@ -772,6 +817,7 @@ class HermesCliWrapper:
         question: str,
         session_id: str | None = None,
         run_id: str | None = None,
+        conversation_id: str | None = None,
         working_dir: str | None = None,
         artifacts_dir: str | None = None,
     ) -> AsyncGenerator[HermesStreamEvent, None]:
@@ -779,6 +825,20 @@ class HermesCliWrapper:
         self.last_artifacts = []
         stream_started_at = datetime.now()
         process_cwd: str | None = None
+        managed_environment_keys = (
+            "WEBAGENT_RUN_WORKSPACE",
+            "HERMES_WORKSPACE",
+            "WORKSPACE",
+            "WEBAGENT_ARTIFACTS_DIR",
+            "WEBAGENT_OUTPUT_DIR",
+            "HERMES_ARTIFACTS_DIR",
+            "WEBAGENT_CONVERSATION_ID",
+            "WEBAGENT_RUN_ID",
+            "WEBAGENT_RUNTIME_POLICY",
+        )
+        for key in managed_environment_keys:
+            self._env.pop(key, None)
+
         if working_dir:
             shell_working_dir = self._shell_visible_path(working_dir)
             self._env.update(
@@ -792,7 +852,19 @@ class HermesCliWrapper:
             if os.name != "nt" and cwd_path.exists():
                 process_cwd = str(cwd_path)
         if artifacts_dir:
-            self._env["WEBAGENT_ARTIFACTS_DIR"] = self._shell_visible_path(artifacts_dir)
+            shell_artifacts_dir = self._shell_visible_path(artifacts_dir)
+            self._env.update(
+                {
+                    "WEBAGENT_ARTIFACTS_DIR": shell_artifacts_dir,
+                    "WEBAGENT_OUTPUT_DIR": shell_artifacts_dir,
+                    "HERMES_ARTIFACTS_DIR": shell_artifacts_dir,
+                }
+            )
+        if conversation_id:
+            self._env["WEBAGENT_CONVERSATION_ID"] = conversation_id
+        if run_id:
+            self._env["WEBAGENT_RUN_ID"] = run_id
+        self._env["WEBAGENT_RUNTIME_POLICY"] = "managed-artifacts-v1"
         self.last_diagnostics = {
             "artifact_paths": [],
             "artifacts": [],
@@ -803,6 +875,9 @@ class HermesCliWrapper:
             "stdout_tail": "",
             "working_dir": working_dir,
             "artifacts_dir": artifacts_dir,
+            "conversation_id": conversation_id,
+            "runtime_policy": "managed-artifacts-v1",
+            "runtime_instruction_injected": False,
         }
 
         logger.info(
@@ -850,6 +925,7 @@ class HermesCliWrapper:
         stderr_chunks: list[str] = []
         line_queue: asyncio.Queue[str | None] = asyncio.Queue()
         completion_detected = False
+        completion_message_emitted = False
         last_raw_activity_emit = datetime.now()
         last_raw_summary = ""
         last_raw_summary_emit = datetime.min
@@ -1007,6 +1083,9 @@ class HermesCliWrapper:
                             last_emitted = flushed
                             self.last_diagnostics["last_stage"] = flushed
                             completion_detected = self._is_completion_signal(flushed)
+                            completion_message_emitted = (
+                                completion_message_emitted or completion_detected
+                            )
                             artifact_found = len(self.last_artifact_paths) > emitted_artifact_count
                             emitted_artifact_count = len(self.last_artifact_paths)
                             logger.info("Hermes stage emitted: %s", flushed[:500])
@@ -1031,6 +1110,9 @@ class HermesCliWrapper:
                         last_emitted = flushed
                         self.last_diagnostics["last_stage"] = flushed
                         completion_detected = self._is_completion_signal(flushed)
+                        completion_message_emitted = (
+                            completion_message_emitted or completion_detected
+                        )
                         artifact_found = len(self.last_artifact_paths) > emitted_artifact_count
                         emitted_artifact_count = len(self.last_artifact_paths)
                         logger.info("Hermes stage emitted: %s", flushed[:500])
@@ -1049,21 +1131,7 @@ class HermesCliWrapper:
 
                 if not in_hermes_box and text:
                     if self._is_completion_signal(text):
-                        fallback_content = "Hermes completed. Discovering generated artifacts."
-                        emitted_output = True
-                        last_emitted = fallback_content
-                        self.last_diagnostics["last_stage"] = fallback_content
                         completion_detected = True
-                        artifact_found = len(self.last_artifact_paths) > emitted_artifact_count
-                        emitted_artifact_count = len(self.last_artifact_paths)
-                        yield self._build_stream_event(
-                            content=fallback_content,
-                            raw_log_path=raw_log_path,
-                            run_id=run_id,
-                            completion_detected=True,
-                            artifact_found=artifact_found,
-                            payload={"fallbackCompletion": True, "rawFooter": text[:500]},
-                        )
                         if should_stop_on_completion_signal:
                             await stop_after_completion()
                             break
@@ -1115,6 +1183,9 @@ class HermesCliWrapper:
                 emitted_output = True
                 self.last_diagnostics["last_stage"] = flushed
                 completion_detected = self._is_completion_signal(flushed)
+                completion_message_emitted = (
+                    completion_message_emitted or completion_detected
+                )
                 artifact_found = len(self.last_artifact_paths) > emitted_artifact_count
                 emitted_artifact_count = len(self.last_artifact_paths)
                 logger.info("Hermes stage emitted: %s", flushed[:500])
@@ -1132,6 +1203,16 @@ class HermesCliWrapper:
         try:
             await process.wait()
             await asyncio.gather(*stream_tasks)
+            recovered_assistant_content = self._recover_latest_session_assistant_content(
+                started_at=stream_started_at
+            )
+            if recovered_assistant_content:
+                self._remember_artifact_paths(recovered_assistant_content)
+                self._remember_final_output_artifact_paths(
+                    recovered_assistant_content,
+                    working_dir=working_dir,
+                    artifacts_dir=artifacts_dir,
+                )
             artifacts_before_final_discovery = emitted_artifact_count
             self._remember_final_output_artifact_paths(
                 final_output_tail,
@@ -1176,7 +1257,25 @@ class HermesCliWrapper:
                 payload={"finalDiscovery": True},
             )
 
-        if process.returncode == 0 and not emitted_output:
+        if (
+            recovered_assistant_content
+            and not completion_message_emitted
+            and recovered_assistant_content != last_emitted
+        ):
+            emitted_output = True
+            completion_message_emitted = True
+            last_emitted = recovered_assistant_content
+            self.last_diagnostics["last_stage"] = recovered_assistant_content
+            yield self._build_stream_event(
+                content=recovered_assistant_content,
+                raw_log_path=raw_log_path,
+                run_id=run_id,
+                completion_detected=True,
+                artifact_found=bool(self.last_artifact_paths),
+                payload={"sessionRecovery": True},
+            )
+
+        if (process.returncode == 0 or completion_detected) and not emitted_output:
             fallback_content = "Hermes completed. Discovering generated artifacts."
             self.last_diagnostics["last_stage"] = fallback_content
             yield self._build_stream_event(
