@@ -221,6 +221,30 @@ def test_create_artifacts_from_paths_ignores_runtime_skill_docs(tmp_path: Path):
     assert artifacts == []
 
 
+def test_explicit_run_skill_doc_is_developer_only(tmp_path: Path):
+    skill_doc = tmp_path / "hermes-home" / "skills" / "sn-ppt-standard" / "SKILL.md"
+    skill_doc.parent.mkdir(parents=True)
+    skill_doc.write_text("# Runtime skill instructions\n", encoding="utf-8")
+
+    artifacts = create_artifacts_from_paths("session_1", [str(skill_doc)], "run_1")
+
+    assert len(artifacts) == 1
+    assert artifacts[0].metadata
+    assert artifacts[0].metadata["artifactRole"] == "intermediate"
+    assert artifacts[0].metadata["developerOnly"] is True
+    assert artifacts[0].is_primary is False
+
+
+def test_hermes_runtime_soul_is_not_an_artifact(tmp_path: Path):
+    soul = tmp_path / "hermes-home" / "SOUL.md"
+    soul.parent.mkdir(parents=True)
+    soul.write_text("# Runtime persona\n", encoding="utf-8")
+
+    artifacts = create_artifacts_from_paths("session_1", [str(soul)], "run_1")
+
+    assert artifacts == []
+
+
 def test_create_artifacts_from_refs_preserves_hermes_protocol_metadata(tmp_path: Path):
     report = tmp_path / "hermes-report.md"
     report.write_text("# Hermes Report\n", encoding="utf-8")

@@ -3,10 +3,8 @@ import asyncio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import schemas
 from app.core.config import settings
 from app.models import AgentRun, AgentRunEvent, Message
-from app.services.agent_run_dispatcher import enqueue_agent_run_message
 from app.services.persistence import to_message, to_session
 from app.services.session_artifacts import refresh_conversation
 from app.services.stream_protocol import sse
@@ -15,17 +13,11 @@ from app.services.stream_protocol import sse
 async def stream_queued_agent_run(
     db: AsyncSession,
     session_id: str,
-    input_data: schemas.MessageCreate,
-    current_user,
+    user_message: Message,
+    run: AgentRun,
 ):
     from app.services.agent_runs import TERMINAL_RUN_STATUSES
 
-    user_message, run = await enqueue_agent_run_message(
-        db,
-        session_id,
-        input_data,
-        current_user,
-    )
     yield f": {' ' * 2048}\n\n"
     yield sse("user_message", to_message(user_message).model_dump(by_alias=True))
     queued_payload = await _queued_event_payload(db, run.id)

@@ -239,7 +239,8 @@ async def stream_session_message(
     db: DbSession,
     current_user: CurrentUser,
 ) -> StreamingResponse:
-    stream = stream_session_message_response(db, session_id, input_data, current_user)
+    await get_conversation_or_404(db, session_id, current_user, require_write=True)
+    stream = await stream_session_message_response(db, session_id, input_data, current_user)
     return StreamingResponse(
         stream,
         media_type="text/event-stream",
@@ -265,7 +266,7 @@ async def list_session_artifacts(
     )
     developer_mode = await user_developer_mode(db, current_user)
     return [
-        to_artifact(item)
+        to_artifact(item, include_payload=False)
         for item in result.scalars().all()
         if developer_mode or not is_debug_artifact(item)
     ]

@@ -489,7 +489,14 @@ async def test_debug_json_artifacts_require_developer_mode(
     artifacts = visible_response.json()
     assert len(artifacts) == 1
     assert artifacts[0]["type"] == "debug_json"
-    assert artifacts[0]["content"] == '{"topic":"future food"}'
+    assert artifacts[0]["content"] is None
+
+    detail_response = await api_client.get(
+        f"/api/artifacts/{artifacts[0]['id']}",
+        headers=auth_headers["owner"],
+    )
+    assert detail_response.status_code == 200
+    assert detail_response.json()["content"] == '{"topic":"future food"}'
 
 
 @pytest.mark.asyncio
@@ -1052,3 +1059,10 @@ async def test_public_session_read_access_but_not_owner_actions(
         headers=auth_headers["stranger"],
     )
     assert write_response.status_code == 403
+
+    stream_write_response = await api_client.post(
+        f"/api/sessions/{session_id}/messages/stream",
+        json={"content": "尝试流式写入"},
+        headers=auth_headers["stranger"],
+    )
+    assert stream_write_response.status_code == 403

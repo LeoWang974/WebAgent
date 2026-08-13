@@ -30,7 +30,7 @@ SUPPORTED_SUFFIXES = {
     ".xlsx",
 }
 IGNORED_PARTS = {".git", ".next", ".venv", "__pycache__", "node_modules"}
-IGNORED_FILENAMES = {"request.md"}
+IGNORED_FILENAMES = {"request.md", "soul.md"}
 OUTPUT_PATH_MARKERS = {
     "/deep-research-reports/",
     "/reports/",
@@ -454,8 +454,14 @@ def _artifact_role(path: Path, artifact_type: ArtifactType) -> str:
         "/cache/",
         "/tmp/",
     }
+    runtime_skill_markers = {
+        "/.hermes/skills/",
+        "/hermes-home/skills/",
+    }
 
     if artifact_type == "debug_json" or filename in intermediate_names:
+        return "intermediate"
+    if filename == "skill.md" and any(marker in normalized for marker in runtime_skill_markers):
         return "intermediate"
     if any(marker in normalized for marker in intermediate_markers):
         return "intermediate"
@@ -575,7 +581,8 @@ def _artifact_from_path(
 ) -> schemas.Artifact | None:
     if not _is_regular_artifact_candidate(path):
         return None
-    if path.name.lower() in IGNORED_FILENAMES:
+    original_name = Path(original_path).name.lower() if original_path else ""
+    if path.name.lower() in IGNORED_FILENAMES or original_name in IGNORED_FILENAMES:
         return None
     if path.suffix.lower() not in SUPPORTED_SUFFIXES:
         return None
@@ -592,6 +599,7 @@ def _artifact_from_path(
         status="ready",
         content=_content(path, artifact_type),
         metadata=metadata,
+        is_primary=metadata.get("artifactRole") == "primary",
     )
 
 

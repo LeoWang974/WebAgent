@@ -47,6 +47,12 @@ def test_requested_primary_artifact_types_only_match_explicit_output_requests():
         "输出中文 Markdown 报告，然后生成 HTML 文件。"
     ) == {"markdown_report", "html_page"}
     assert requested_primary_artifact_types("Summarize the source.md file in chat.") == set()
+    assert requested_primary_artifact_types(
+        "请基于本对话刚生成的 Markdown 报告，生成一份中文 HTML 报告并保存为 .html 文件。"
+    ) == {"html_page"}
+    assert requested_primary_artifact_types(
+        "Based on the generated Markdown report, create an English HTML report."
+    ) == {"html_page"}
 
 
 def test_filter_preexisting_artifacts_excludes_staged_input_by_hash(tmp_path):

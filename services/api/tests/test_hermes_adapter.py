@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta
+
 import pytest
 
 from agent_runtime.adapters.hermes_adapter import HermesAdapter
@@ -51,3 +53,22 @@ async def test_hermes_stream_forwards_prompt_verbatim():
     assert captured["conversation_id"] == "session_1"
     assert "skills" not in captured
     assert "toolsets" not in captured
+
+
+def test_final_discovery_scans_the_run_runtime_root(tmp_path):
+    runtime_root = tmp_path / "runtime-run"
+    hermes_home = runtime_root / "hermes-home"
+    hermes_home.mkdir(parents=True)
+    generated = runtime_root / "ppt_decks" / "deck" / "report.pptx"
+    generated.parent.mkdir(parents=True)
+    generated.write_bytes(b"pptx")
+
+    cli = HermesCliWrapper(hermes_home=str(hermes_home))
+    cli._discover_run_directory_artifacts(
+        working_dir=str(tmp_path / "other-workspace"),
+        artifacts_dir=None,
+        started_at=datetime.now() - timedelta(seconds=5),
+    )
+
+    assert cli.last_artifact_paths == [str(generated.resolve())]
+    assert cli.last_artifacts[0]["artifact_type"] == "ppt_deck"

@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import schemas
 from app.models import User
+from app.services.agent_run_dispatcher import enqueue_agent_run_message
 from app.services.queued_stream_service import stream_queued_agent_run
 
 
@@ -20,10 +21,10 @@ async def stream_session_message_response(
     content delivered to Hermes remains ``input_data.content``.
     """
 
-    async for event in stream_queued_agent_run(
+    user_message, run = await enqueue_agent_run_message(
         db,
         session_id,
         input_data,
         current_user,
-    ):
-        yield event
+    )
+    return stream_queued_agent_run(db, session_id, user_message, run)

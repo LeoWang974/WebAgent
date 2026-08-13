@@ -83,7 +83,7 @@ interface ChatState {
   updateSkillVersion: (skillKey: SkillKey, direction: "update" | "rollback") => Promise<void>;
 }
 
-let activeRequestAbortController: AbortController | undefined;
+const requestAbortControllers = new Map<string, AbortController>();
 const agentRunUnsubscribers = new Map<string, AgentRunUnsubscribe>();
 
 const agentRunPollers = new Map<string, number>();
@@ -201,6 +201,59 @@ function setSwitchingState(
       set({ switchingSessionId: undefined });
     }
   }, 260);
+}
+
+async function loadSessionWorkspace(get: () => ChatState, sessionId: string) {
+  try {
+    const [messages, artifacts, agentRuns] = await Promise.all([
+      webAgentApi.listMessages(sessionId),
+      webAgentApi.listArtifacts(sessionId),
+      webAgentApi.listAgentRuns(sessionId),
+    ]);
+    const activeRun = agentRuns.find((run) => !isTerminalRunStatus(run.status));
+    const hydratedMessages =
+      activeRun && !hasPendingAssistantMessage(messages, sessionId)
+        ? [...messages, pendingMessageForRun(activeRun)]
+        : messages;
+
+    useChatStore.setState((state) => ({
+      activeAgentRunId:
+        state.currentSessionId === sessionId ? activeRun?.id : state.activeAgentRunId,
+      agentRuns: [
+        ...state.agentRuns.filter((run) => run.sessionId !== sessionId),
+        ...agentRuns,
+      ],
+      artifacts: [
+        ...state.artifacts.filter((artifact) => artifact.sessionId !== sessionId),
+        ...artifacts,
+      ],
+      error: undefined,
+      messages: [
+        ...state.messages.filter((message) => message.sessionId !== sessionId),
+        ...hydratedMessages,
+      ],
+      selectedArtifactId:
+        state.currentSessionId === sessionId
+          ? selectPreferredArtifact(artifacts, sessionId)?.id
+          : state.selectedArtifactId,
+      switchingSessionId:
+        state.switchingSessionId === sessionId ? undefined : state.switchingSessionId,
+    }));
+    if (activeRun) {
+      subscribeAgentRunEvents(get, activeRun.id);
+    }
+  } catch (error) {
+    useChatStore.setState((state) => ({
+      error:
+        state.currentSessionId === sessionId
+          ? error instanceof Error
+            ? error.message
+            : "Failed to load conversation data."
+          : state.error,
+      switchingSessionId:
+        state.switchingSessionId === sessionId ? undefined : state.switchingSessionId,
+    }));
+  }
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -362,54 +415,41 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     set({ error: undefined, loading: true });
     try {
-      const [sessions, messages, skills, artifacts, models, folders, agentRuns] =
-        await Promise.all([
-          webAgentApi.listSessions(),
-          webAgentApi.listMessages(),
-          webAgentApi.listSkills(),
-          webAgentApi.listArtifacts(),
-          webAgentApi.listModels(),
-          webAgentApi.listConversationFolders(),
-          webAgentApi.listAgentRuns(),
-        ]);
+      const [sessions, skills, models, folders] = await Promise.all([
+        webAgentApi.listSessions(),
+        webAgentApi.listSkills(),
+        webAgentApi.listModels(),
+        webAgentApi.listConversationFolders(),
+      ]);
       const preferredSessionId = get().currentSessionId;
       const currentSessionId = sessions.some((session) => session.id === preferredSessionId)
         ? preferredSessionId
         : sessions[0]?.id ?? "";
-      const activeRun = agentRuns.find(
-        (run) => run.sessionId === currentSessionId && !isTerminalRunStatus(run.status),
-      );
-      const selectedArtifactId = selectPreferredArtifact(artifacts, currentSessionId)?.id;
       const modelConfigs = models;
       const selectedModelId =
         modelConfigs.find((model) => model.isDefault)?.id ??
         modelConfigs[0]?.id ??
         models.find((model) => model.isDefault)?.id ??
         models[0]?.id;
-      const hydratedMessages =
-        activeRun && !hasPendingAssistantMessage(messages, activeRun.sessionId)
-          ? [...messages, pendingMessageForRun(activeRun)]
-          : messages;
-
       set({
-        artifacts,
-        activeAgentRunId: activeRun?.id,
-        agentRuns,
+        artifacts: [],
+        activeAgentRunId: undefined,
+        agentRuns: [],
         currentSessionId,
         folders,
         hydrated: true,
         loading: false,
-        messages: hydratedMessages,
+        messages: [],
         models,
-        selectedArtifactId,
+        selectedArtifactId: undefined,
         selectedModelId,
         sessions,
         skills,
       });
+      if (currentSessionId) {
+        await loadSessionWorkspace(get, currentSessionId);
+      }
       void get().refreshRuntimeModelStatus();
-      agentRuns
-        .filter((run) => !isTerminalRunStatus(run.status))
-        .forEach((run) => subscribeAgentRunEvents(get, run.id));
     } catch (error) {
       set({
         error: error instanceof Error ? error.message : "Failed to load workspace data.",
@@ -423,19 +463,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
     await get().hydrate();
   },
   refreshArtifacts: async () => {
+    const sessionId = get().currentSessionId;
+    if (!sessionId) {
+      return;
+    }
     try {
-      const artifacts = await webAgentApi.listArtifacts();
+      const artifacts = await webAgentApi.listArtifacts(sessionId);
       const selectedArtifactId = artifacts.some((artifact) => artifact.id === get().selectedArtifactId)
         ? get().selectedArtifactId
-        : selectPreferredArtifact(artifacts, get().currentSessionId)?.id;
-      set({ artifacts, selectedArtifactId });
+        : selectPreferredArtifact(artifacts, sessionId)?.id;
+      set((state) => ({
+        artifacts: [
+          ...state.artifacts.filter((artifact) => artifact.sessionId !== sessionId),
+          ...artifacts,
+        ],
+        selectedArtifactId,
+      }));
     } catch (error) {
       set({ error: error instanceof Error ? error.message : "Failed to refresh artifacts." });
     }
   },
   resetWorkspace: () => {
-    activeRequestAbortController?.abort();
-    activeRequestAbortController = undefined;
+    requestAbortControllers.forEach((controller) => controller.abort());
+    requestAbortControllers.clear();
     agentRunUnsubscribers.forEach((unsubscribe) => unsubscribe());
     agentRunUnsubscribers.clear();
     agentRunPollers.forEach((poller) => window.clearInterval(poller));
@@ -616,6 +666,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       subscribeAgentRunEvents(get, activeRun.id);
     }
     setSwitchingState(set, get, sessionId);
+    void loadSessionWorkspace(get, sessionId);
   },
   setSessionVisibility: async (sessionId, visibility) => {
     if (!visibility) {
@@ -707,8 +758,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       title: "Hermes request",
     };
 
-    activeRequestAbortController?.abort();
-    activeRequestAbortController = new AbortController();
+    requestAbortControllers.get(sessionId)?.abort();
+    const requestAbortController = new AbortController();
+    requestAbortControllers.set(sessionId, requestAbortController);
 
     set((state) => ({
       activeAgentRunId: runId,
@@ -812,7 +864,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         {
           content: trimmed,
           modelId,
-          signal: activeRequestAbortController.signal,
+          signal: requestAbortController.signal,
           sessionId,
         },
       (event) => {
@@ -888,8 +940,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
     } finally {
       stopBackendRunDiscovery();
-      if (get().activeAgentRunId !== currentRunId) {
-        activeRequestAbortController = undefined;
+      if (requestAbortControllers.get(sessionId) === requestAbortController) {
+        requestAbortControllers.delete(sessionId);
       }
     }
   },
@@ -915,8 +967,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return;
     }
 
-    activeRequestAbortController?.abort();
-    activeRequestAbortController = undefined;
+    const runSessionId = get().agentRuns.find((run) => run.id === runId)?.sessionId;
+    if (runSessionId) {
+      requestAbortControllers.get(runSessionId)?.abort();
+      requestAbortControllers.delete(runSessionId);
+    }
 
     void webAgentApi
       .cancelAgentRun(runId)

@@ -442,15 +442,18 @@ class HermesCliWrapper:
             path = self._normalize_artifact_path(match.group("path"))
             self._remember_artifact_path(path)
 
-    @staticmethod
     def _final_artifact_search_roots(
+        self,
         working_dir: str | None,
         artifacts_dir: str | None,
     ) -> list[Path]:
         roots: list[Path] = []
+        hermes_home = self._host_visible_path(self.hermes_home)
+        run_runtime_root = hermes_home.parent if hermes_home.name == "hermes-home" else None
         candidates = [
             artifacts_dir,
             working_dir,
+            str(run_runtime_root) if run_runtime_root else None,
             str(Path.cwd()),
             str(Path(__file__).resolve().parents[4] / "services" / "api"),
         ]
@@ -500,7 +503,13 @@ class HermesCliWrapper:
         """Perform a final, run-scoped filesystem discovery after Hermes exits."""
 
         roots: list[Path] = []
-        for candidate in (artifacts_dir, working_dir):
+        hermes_home = self._host_visible_path(self.hermes_home)
+        run_runtime_root = hermes_home.parent if hermes_home.name == "hermes-home" else None
+        for candidate in (
+            artifacts_dir,
+            working_dir,
+            str(run_runtime_root) if run_runtime_root else None,
+        ):
             if not candidate:
                 continue
             root = Path(candidate).expanduser()

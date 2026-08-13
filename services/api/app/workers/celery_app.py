@@ -15,4 +15,8 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="UTC",
     task_default_queue=settings.agent_run_queue_name,
+    # Long-running agent jobs must remain visible to idle workers. Celery's
+    # default prefetch can otherwise let one solo worker reserve several runs
+    # while newly started workers sit idle.
+    worker_prefetch_multiplier=1,
 )

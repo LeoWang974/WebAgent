@@ -38,25 +38,32 @@ FATAL_RUNTIME_MARKERS = (
 PRIMARY_ARTIFACT_REQUEST_PATTERNS = {
     "markdown_report": (
         re.compile(
-            r"(?:输出|生成|撰写|创建|保存).{0,48}(?:markdown|\.md\b)",
+            r"(?:输出|生成(?!的)|撰写|创建|保存).{0,48}(?:markdown|\.md\b)",
             re.IGNORECASE,
         ),
         re.compile(
-            r"(?:create|generate|produce|write|save).{0,48}(?:markdown|\.md\b)",
+            r"\b(?:create|generate|produce|write|save)\b.{0,48}(?:markdown|\.md\b)",
             re.IGNORECASE,
         ),
     ),
     "html_page": (
-        re.compile(r"(?:输出|生成|创建|保存).{0,48}(?:html|\.html?\b)", re.IGNORECASE),
         re.compile(
-            r"(?:create|generate|produce|write|save).{0,48}(?:html|\.html?\b)",
+            r"(?:输出|生成(?!的)|创建|保存).{0,48}(?:html|\.html?\b)",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\b(?:create|generate|produce|write|save)\b.{0,48}(?:html|\.html?\b)",
             re.IGNORECASE,
         ),
     ),
     "ppt_deck": (
-        re.compile(r"(?:输出|生成|创建|保存).{0,48}(?:pptx?|幻灯片)", re.IGNORECASE),
         re.compile(
-            r"(?:create|generate|produce|build|save).{0,48}(?:pptx?|presentation|slide deck)",
+            r"(?:输出|生成(?!的)|创建|保存).{0,48}(?:pptx?|幻灯片)",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\b(?:create|generate|produce|build|save)\b.{0,48}"
+            r"(?:pptx?|presentation|slide deck)",
             re.IGNORECASE,
         ),
     ),
