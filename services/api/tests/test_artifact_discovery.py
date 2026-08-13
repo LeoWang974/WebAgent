@@ -2,8 +2,10 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from agent_runtime.schemas import AgentArtifactRef
+from app.core.config import settings
 from app.services.artifact_discovery import (
     _candidate_roots,
+    _configured_hermes_home_candidates,
     _normalized_path_key,
     _repo_root,
     _windows_path_to_wsl,
@@ -45,6 +47,17 @@ def test_normalized_path_key_unifies_windows_and_wsl_paths():
         == "/home/demo/report.md"
     )
     assert _normalized_path_key("/home/demo/report.md") == "/home/demo/report.md"
+    assert (
+        _normalized_path_key(r"\\wsl.localhost\Debian\home\demo\report.md")
+        == "/home/demo/report.md"
+    )
+
+
+def test_configured_hermes_home_candidates_use_settings(monkeypatch, tmp_path: Path):
+    hermes_home = tmp_path / "custom-hermes-home"
+    monkeypatch.setattr(settings, "hermes_home", str(hermes_home))
+
+    assert _configured_hermes_home_candidates() == [hermes_home]
 
 
 def test_candidate_roots_include_hermes_deep_research_reports():

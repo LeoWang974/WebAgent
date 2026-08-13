@@ -4,7 +4,6 @@ import { create } from "zustand";
 import { selectPreferredArtifact } from "@/lib/artifact-selection";
 import { settingsApi, webAgentApi } from "@/services";
 import { ApiError } from "@/services/api-client";
-import type { AgentRunUnsubscribe } from "@/services/adapters/types";
 import { applyBackendRunIdBinding, bindBackendRunId } from "./agent-run-binding";
 import { applyAgentRunEventState, applySendMessageStreamEventState } from "./event-handlers";
 import {
@@ -16,6 +15,16 @@ import {
   isTerminalRunStatus,
   pendingMessageForRun,
 } from "./chat-store-helpers";
+import {
+  abortSessionRequest,
+  createRequestAbortController,
+  loadSessionWorkspace,
+  releaseRequestAbortController,
+  resetChatRuntime,
+  setSwitchingState,
+  subscribeAgentRunEvents,
+  unsubscribeAgentRun,
+} from "./chat-runtime";
 import type {
   AgentRun,
   AgentRunEvent,
@@ -28,7 +37,7 @@ import type {
   SkillKey,
 } from "@/types";
 
-interface ChatState {
+export interface ChatState {
   activeAgentRunId?: string;
   agentRuns: AgentRun[];
   artifacts: Artifact[];
@@ -81,179 +90,6 @@ interface ChatState {
   unshareSession: (sessionId: string, userId: string) => Promise<void>;
   updateModel: (modelId: string, input: Partial<ModelConfig>) => Promise<void>;
   updateSkillVersion: (skillKey: SkillKey, direction: "update" | "rollback") => Promise<void>;
-}
-
-const requestAbortControllers = new Map<string, AbortController>();
-const agentRunUnsubscribers = new Map<string, AgentRunUnsubscribe>();
-
-const agentRunPollers = new Map<string, number>();
-const agentRunPollsInFlight = new Set<string>();
-
-function unsubscribeAgentRun(runId: string) {
-  agentRunUnsubscribers.get(runId)?.();
-  agentRunUnsubscribers.delete(runId);
-  const poller = agentRunPollers.get(runId);
-  if (poller !== undefined) {
-    window.clearInterval(poller);
-    agentRunPollers.delete(runId);
-  }
-}
-
-function startAgentRunPolling(
-  get: () => ChatState,
-  runId: string,
-) {
-  if (agentRunPollers.has(runId)) {
-    return;
-  }
-
-  const refresh = async () => {
-    const run = await get().refreshAgentRun(runId);
-    if (!run) {
-      return;
-    }
-    if (run.sessionId === get().currentSessionId) {
-      const backendMessages = await webAgentApi.listMessages(run.sessionId);
-      useChatStore.setState((state) => {
-        const existingById = new Map(state.messages.map((message) => [message.id, message]));
-        const currentPending = state.messages.filter(
-          (message) =>
-            message.sessionId === run.sessionId &&
-            message.role === "assistant" &&
-            message.isPending,
-        );
-        const pendingMessages = isTerminalRunStatus(run.status) ? [] : currentPending;
-        return {
-          messages: [
-            ...state.messages.filter((message) => message.sessionId !== run.sessionId),
-            ...backendMessages.map((message) => ({
-              ...message,
-              waitStartedAt: existingById.get(message.id)?.waitStartedAt,
-            })),
-            ...pendingMessages,
-          ],
-        };
-      });
-    }
-    if (isTerminalRunStatus(run.status)) {
-      setTimeout(() => unsubscribeAgentRun(run.id), 0);
-      return;
-    }
-    const currentSessionId = get().currentSessionId;
-    if (
-      run.sessionId === currentSessionId &&
-      !hasPendingAssistantMessage(get().messages, currentSessionId)
-    ) {
-      useChatStore.setState((state) => ({
-        messages: [...state.messages, pendingMessageForRun(run)],
-      }));
-    }
-  };
-
-  const poller = window.setInterval(() => {
-    if (agentRunPollsInFlight.has(runId)) {
-      return;
-    }
-    agentRunPollsInFlight.add(runId);
-    void refresh()
-      .catch((error) => {
-        useChatStore.setState({
-          error: error instanceof Error ? error.message : "Failed to refresh agent run.",
-        });
-      })
-      .finally(() => agentRunPollsInFlight.delete(runId));
-  }, 5000);
-  agentRunPollers.set(runId, poller);
-}
-
-function subscribeAgentRunEvents(
-  get: () => ChatState,
-  runId: string,
-) {
-  if (runId.startsWith("run_")) {
-    return;
-  }
-  if (agentRunUnsubscribers.has(runId)) {
-    startAgentRunPolling(get, runId);
-    return;
-  }
-
-  const unsubscribe = webAgentApi.subscribeAgentRun(runId, (event) => {
-    get().applyAgentRunEvent(event);
-    if (isTerminalRunStatus(event.status)) {
-      unsubscribeAgentRun(runId);
-      void get().refreshAgentRun(runId);
-    }
-  });
-  agentRunUnsubscribers.set(runId, unsubscribe);
-  startAgentRunPolling(get, runId);
-}
-
-function setSwitchingState(
-  set: (partial: Partial<ChatState>) => void,
-  get: () => ChatState,
-  sessionId: string,
-) {
-  set({ switchingSessionId: sessionId });
-
-  window.setTimeout(() => {
-    if (get().switchingSessionId === sessionId) {
-      set({ switchingSessionId: undefined });
-    }
-  }, 260);
-}
-
-async function loadSessionWorkspace(get: () => ChatState, sessionId: string) {
-  try {
-    const [messages, artifacts, agentRuns] = await Promise.all([
-      webAgentApi.listMessages(sessionId),
-      webAgentApi.listArtifacts(sessionId),
-      webAgentApi.listAgentRuns(sessionId),
-    ]);
-    const activeRun = agentRuns.find((run) => !isTerminalRunStatus(run.status));
-    const hydratedMessages =
-      activeRun && !hasPendingAssistantMessage(messages, sessionId)
-        ? [...messages, pendingMessageForRun(activeRun)]
-        : messages;
-
-    useChatStore.setState((state) => ({
-      activeAgentRunId:
-        state.currentSessionId === sessionId ? activeRun?.id : state.activeAgentRunId,
-      agentRuns: [
-        ...state.agentRuns.filter((run) => run.sessionId !== sessionId),
-        ...agentRuns,
-      ],
-      artifacts: [
-        ...state.artifacts.filter((artifact) => artifact.sessionId !== sessionId),
-        ...artifacts,
-      ],
-      error: undefined,
-      messages: [
-        ...state.messages.filter((message) => message.sessionId !== sessionId),
-        ...hydratedMessages,
-      ],
-      selectedArtifactId:
-        state.currentSessionId === sessionId
-          ? selectPreferredArtifact(artifacts, sessionId)?.id
-          : state.selectedArtifactId,
-      switchingSessionId:
-        state.switchingSessionId === sessionId ? undefined : state.switchingSessionId,
-    }));
-    if (activeRun) {
-      subscribeAgentRunEvents(get, activeRun.id);
-    }
-  } catch (error) {
-    useChatStore.setState((state) => ({
-      error:
-        state.currentSessionId === sessionId
-          ? error instanceof Error
-            ? error.message
-            : "Failed to load conversation data."
-          : state.error,
-      switchingSessionId:
-        state.switchingSessionId === sessionId ? undefined : state.switchingSessionId,
-    }));
-  }
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -447,7 +283,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         skills,
       });
       if (currentSessionId) {
-        await loadSessionWorkspace(get, currentSessionId);
+        await loadSessionWorkspace(get, set, currentSessionId);
       }
       void get().refreshRuntimeModelStatus();
     } catch (error) {
@@ -484,13 +320,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
   resetWorkspace: () => {
-    requestAbortControllers.forEach((controller) => controller.abort());
-    requestAbortControllers.clear();
-    agentRunUnsubscribers.forEach((unsubscribe) => unsubscribe());
-    agentRunUnsubscribers.clear();
-    agentRunPollers.forEach((poller) => window.clearInterval(poller));
-    agentRunPollers.clear();
-    agentRunPollsInFlight.clear();
+    resetChatRuntime();
 
     set({
       activeAgentRunId: undefined,
@@ -663,10 +493,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       selectedArtifactId: artifact?.id,
     });
     if (activeRun) {
-      subscribeAgentRunEvents(get, activeRun.id);
+      subscribeAgentRunEvents(get, set, activeRun.id);
     }
     setSwitchingState(set, get, sessionId);
-    void loadSessionWorkspace(get, sessionId);
+    void loadSessionWorkspace(get, set, sessionId);
   },
   setSessionVisibility: async (sessionId, visibility) => {
     if (!visibility) {
@@ -758,9 +588,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       title: "Hermes request",
     };
 
-    requestAbortControllers.get(sessionId)?.abort();
-    const requestAbortController = new AbortController();
-    requestAbortControllers.set(sessionId, requestAbortController);
+    const requestAbortController = createRequestAbortController(sessionId);
 
     set((state) => ({
       activeAgentRunId: runId,
@@ -851,7 +679,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               ),
             };
           });
-          subscribeAgentRunEvents(get, backendRun.id);
+          subscribeAgentRunEvents(get, set, backendRun.id);
           stopBackendRunDiscovery();
         }).catch(() => {
           // The streaming request still owns visible error reporting.
@@ -875,7 +703,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           );
 
           if (event.type === "run_started") {
-            subscribeAgentRunEvents(get, event.runId);
+            subscribeAgentRunEvents(get, set, event.runId);
           }
           set((state) => {
             const boundState = {
@@ -940,9 +768,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
     } finally {
       stopBackendRunDiscovery();
-      if (requestAbortControllers.get(sessionId) === requestAbortController) {
-        requestAbortControllers.delete(sessionId);
-      }
+      releaseRequestAbortController(sessionId, requestAbortController);
     }
   },
   setDefaultModel: async (modelId) => {
@@ -969,8 +795,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     const runSessionId = get().agentRuns.find((run) => run.id === runId)?.sessionId;
     if (runSessionId) {
-      requestAbortControllers.get(runSessionId)?.abort();
-      requestAbortControllers.delete(runSessionId);
+      abortSessionRequest(runSessionId);
     }
 
     void webAgentApi

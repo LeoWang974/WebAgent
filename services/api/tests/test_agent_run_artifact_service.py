@@ -39,6 +39,25 @@ def test_fatal_runtime_diagnostics_are_not_treated_as_success():
         raise_for_fatal_runtime_diagnostics(_TruncatedAdapter(), "")
 
 
+def test_fatal_runtime_diagnostics_do_not_match_unrelated_401_text():
+    adapter = type(
+        "Adapter",
+        (),
+        {"last_diagnostics": {"last_stage": "Reviewed 401 records successfully."}},
+    )()
+    raise_for_fatal_runtime_diagnostics(adapter, "The report contains 401 survey responses.")
+
+
+def test_fatal_runtime_diagnostics_match_explicit_http_401():
+    adapter = type(
+        "Adapter",
+        (),
+        {"last_diagnostics": {"stderr_tail": "HTTP status 401: Unauthorized"}},
+    )()
+    with pytest.raises(RuntimeError, match="model/API failure"):
+        raise_for_fatal_runtime_diagnostics(adapter, "")
+
+
 def test_requested_primary_artifact_types_only_match_explicit_output_requests():
     assert requested_primary_artifact_types(
         "Use the report at C:/input/source.md and generate a PPTX presentation."

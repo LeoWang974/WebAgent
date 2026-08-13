@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from app import schemas
+from app.core.config import settings
 from app.schemas.artifact import ArtifactType
 from app.services.agent_run_workspace import run_artifacts_dir
 from app.services.artifact_dedupe import dedupe_discovered_artifacts
@@ -146,15 +147,24 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[4]
 
 
+def _configured_hermes_home_candidates() -> list[Path]:
+    configured = settings.hermes_home.strip() or "~/.hermes"
+    if os.name != "nt" or not configured.startswith("/"):
+        return [Path(configured).expanduser()]
+
+    distro = settings.hermes_wsl_distribution.strip() or "Ubuntu"
+    relative = configured.lstrip("/").replace("/", "\\")
+    return [
+        Path(f"\\\\wsl.localhost\\{distro}\\{relative}"),
+        Path(f"\\\\wsl$\\{distro}\\{relative}"),
+    ]
+
+
 def _candidate_roots() -> list[Path]:
     repo_root = _repo_root()
     user_home = Path.home()
     roots = [
         repo_root / "deep-research-reports",
-        # Hermes can write a relative final filename from the API process cwd.
-        # Keep this root explicit so a completion line such as "report.md"
-        # is resolved before the broader fallback scans run.
-        repo_root / "services" / "api",
         repo_root / "services" / "api" / "deep-research-reports",
         repo_root / "ppt_decks",
         repo_root / "artifacts",
@@ -167,27 +177,23 @@ def _candidate_roots() -> list[Path]:
         user_home / "Downloads" / "WebAgent",
         user_home / "deep-research-reports",
         user_home / "ppt_decks",
-        user_home / ".hermes" / "images",
-        user_home / ".hermes" / "deep-research-reports",
-        Path(r"\\wsl.localhost\Ubuntu\home\zhuchangbiaozhu_xyl\.hermes\reports"),
-        Path(r"\\wsl.localhost\Ubuntu\home\zhuchangbiaozhu_xyl\.hermes\deep-research-reports"),
-        Path(r"\\wsl.localhost\Ubuntu\home\zhuchangbiaozhu_xyl\.hermes\images"),
-        Path(r"\\wsl$\Ubuntu\home\zhuchangbiaozhu_xyl\.hermes\reports"),
-        Path(r"\\wsl$\Ubuntu\home\zhuchangbiaozhu_xyl\.hermes\deep-research-reports"),
-        Path(r"\\wsl$\Ubuntu\home\zhuchangbiaozhu_xyl\.hermes\images"),
-        Path(
-            r"\\wsl.localhost\Ubuntu\home\zhuchangbiaozhu_xyl\hermes-aws-ai-agent\deep-research-reports"
-        ),
-        Path(r"\\wsl$\Ubuntu\home\zhuchangbiaozhu_xyl\hermes-aws-ai-agent\deep-research-reports"),
     ]
+    for hermes_home in _configured_hermes_home_candidates():
+        roots.extend(
+            [
+                hermes_home / "reports",
+                hermes_home / "deep-research-reports",
+                hermes_home / "images",
+                hermes_home / "plans",
+            ]
+        )
     deduped: list[Path] = []
-    seen_suffixes: set[str] = set()
+    seen_roots: set[str] = set()
     for root in roots:
-        suffix = str(root).replace("\\\\wsl$\\Ubuntu", "").replace("\\\\wsl.localhost\\Ubuntu", "")
-        if suffix in seen_suffixes:
+        key = _normalized_path_key(root)
+        if key in seen_roots:
             continue
-        if root.exists():
-            seen_suffixes.add(suffix)
+        seen_roots.add(key)
         deduped.append(root)
     return deduped
 
@@ -198,6 +204,12 @@ def _resolve_bare_artifact_filename(filename: str) -> Path | None:
         return None
 
     candidates: list[Path] = []
+    direct_roots = [Path.cwd(), _repo_root(), _repo_root() / "services" / "api"]
+    for root in direct_roots:
+        direct_candidate = root / name
+        if _is_regular_artifact_candidate(direct_candidate):
+            candidates.append(direct_candidate)
+
     for root in _candidate_roots():
         if not root.exists() or not root.is_dir():
             continue
@@ -217,10 +229,7 @@ def _resolve_bare_artifact_filename(filename: str) -> Path | None:
 
 
 def _hermes_session_roots() -> list[Path]:
-    return [
-        Path(r"\\wsl.localhost\Ubuntu\home\zhuchangbiaozhu_xyl\.hermes\sessions"),
-        Path(r"\\wsl$\Ubuntu\home\zhuchangbiaozhu_xyl\.hermes\sessions"),
-    ]
+    return [home / "sessions" for home in _configured_hermes_home_candidates()]
 
 
 def _runtime_artifacts_dir(run_id: str | None) -> Path:
@@ -229,10 +238,6 @@ def _runtime_artifacts_dir(run_id: str | None) -> Path:
     path = _repo_root() / "runtime" / "agent-runs" / "unbound" / "artifacts"
     path.mkdir(parents=True, exist_ok=True)
     return path
-
-
-def _runtime_run_dir(run_id: str | None) -> Path:
-    return _runtime_artifacts_dir(run_id).parent
 
 
 def _is_ignored(path: Path) -> bool:
@@ -265,7 +270,16 @@ def _wsl_artifact_mtime(path: Path) -> float | None:
         return None
     try:
         result = subprocess.run(
-            ["wsl.exe", "-d", "Ubuntu", "--", "stat", "-c", "%F:%Y", wsl_path],
+            [
+                "wsl.exe",
+                "-d",
+                settings.hermes_wsl_distribution,
+                "--",
+                "stat",
+                "-c",
+                "%F:%Y",
+                wsl_path,
+            ],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -306,7 +320,7 @@ def _materialize_wsl_artifact(path: Path) -> tuple[Path, Path | None]:
     try:
         with temp_path.open("wb") as output:
             result = subprocess.run(
-                ["wsl.exe", "-d", "Ubuntu", "--", "cat", wsl_path],
+                ["wsl.exe", "-d", settings.hermes_wsl_distribution, "--", "cat", wsl_path],
                 stdout=output,
                 stderr=subprocess.PIPE,
                 timeout=60,
@@ -401,10 +415,9 @@ def _file_sha256(path: Path) -> str | None:
 def _normalized_path_key(path: str | Path) -> str:
     value = str(path).strip().strip(".,;:)]}\"'").replace("\\", "/")
     lower_value = value.lower()
-    if lower_value.startswith("//wsl.localhost/ubuntu/"):
-        return "/" + value.split("/Ubuntu/", maxsplit=1)[1].lower()
-    if lower_value.startswith("//wsl$/ubuntu/"):
-        return "/" + value.split("/Ubuntu/", maxsplit=1)[1].lower()
+    wsl_match = re.match(r"^//(?:wsl\.localhost|wsl\$)/[^/]+/(.*)$", value, re.IGNORECASE)
+    if wsl_match:
+        return "/" + wsl_match.group(1).lower()
     match = re.match(r"^([a-zA-Z]):/(.*)$", value)
     if match:
         return f"/mnt/{match.group(1).lower()}/{match.group(2).lower()}"
@@ -623,7 +636,12 @@ def _normalize_path(raw_path: str) -> Path:
         rest = match[7:].replace("/", "\\")
         return Path(f"{drive}:\\{rest}")
     if match.startswith("/home/"):
-        return Path(r"\\wsl.localhost\Ubuntu") / match.lstrip("/").replace("/", "\\")
+        if os.name == "nt":
+            distro = settings.hermes_wsl_distribution.strip() or "Ubuntu"
+            return Path(f"\\\\wsl.localhost\\{distro}") / match.lstrip("/").replace(
+                "/", "\\"
+            )
+        return Path(match)
     return Path(raw_path.strip().strip(".,;:)]}\"'"))
 
 
@@ -716,9 +734,6 @@ def create_artifacts_from_paths(
     paths: list[str],
     run_id: str | None = None,
 ) -> list[schemas.Artifact]:
-    existing_paths: set[str] = set()
-    existing_ids: set[str] = set()
-    existing_hashes: set[str] = set()
     artifacts: list[schemas.Artifact] = []
 
     for raw_path in paths:
@@ -745,27 +760,8 @@ def create_artifacts_from_paths(
                 shutil.rmtree(temp_dir, ignore_errors=True)
         if artifact is None:
             continue
-        metadata = artifact.metadata or {}
-        content_hash = str(metadata.get("contentHash") or "")
-        normalized_path = str(
-            metadata.get("originalNormalizedPath") or metadata.get("normalizedPath") or ""
-        )
-        if (
-            artifact.id in existing_ids
-            or str(path) in existing_paths
-            or (normalized_path and normalized_path in existing_paths)
-            or (content_hash and content_hash in existing_hashes)
-        ):
-            continue
-
         artifacts.append(artifact)
-        existing_ids.add(artifact.id)
-        existing_paths.add(str(path))
-        if normalized_path:
-            existing_paths.add(normalized_path)
-        if content_hash:
-            existing_hashes.add(content_hash)
-
+    artifacts = dedupe_discovered_artifacts(artifacts)
     artifacts.sort(
         key=lambda artifact: str((artifact.metadata or {}).get("updatedAt", "")),
         reverse=True,
@@ -778,9 +774,6 @@ def create_artifacts_from_refs(
     artifact_refs: list[object],
     run_id: str | None = None,
 ) -> list[schemas.Artifact]:
-    existing_paths: set[str] = set()
-    existing_ids: set[str] = set()
-    existing_hashes: set[str] = set()
     artifacts: list[schemas.Artifact] = []
 
     for artifact_ref in artifact_refs:
@@ -846,27 +839,8 @@ def create_artifacts_from_refs(
         if artifact is None:
             continue
 
-        metadata = artifact.metadata or {}
-        content_hash = str(metadata.get("contentHash") or "")
-        normalized_path = str(
-            metadata.get("originalNormalizedPath") or metadata.get("normalizedPath") or ""
-        )
-        if (
-            artifact.id in existing_ids
-            or str(path) in existing_paths
-            or (normalized_path and normalized_path in existing_paths)
-            or (content_hash and content_hash in existing_hashes)
-        ):
-            continue
-
         artifacts.append(artifact)
-        existing_ids.add(artifact.id)
-        existing_paths.add(str(path))
-        if normalized_path:
-            existing_paths.add(normalized_path)
-        if content_hash:
-            existing_hashes.add(content_hash)
-
+    artifacts = dedupe_discovered_artifacts(artifacts)
     artifacts.sort(
         key=lambda artifact: str((artifact.metadata or {}).get("updatedAt", "")),
         reverse=True,
@@ -942,9 +916,6 @@ def discover_artifacts_since(
     run_id: str | None = None,
 ) -> list[schemas.Artifact]:
     since = _as_local_naive(since)
-    existing_paths: set[str] = set()
-    existing_ids: set[str] = set()
-    existing_hashes: set[str] = set()
     discovered: list[schemas.Artifact] = []
 
     for root in _candidate_roots():
@@ -965,9 +936,6 @@ def discover_artifacts_since(
 
             if updated_at < since:
                 continue
-            if str(path) in existing_paths:
-                continue
-
             readable_path, temp_dir = _materialize_wsl_artifact(path)
             try:
                 archived_path = _archive_artifact_path(readable_path, run_id)
@@ -981,25 +949,8 @@ def discover_artifacts_since(
                     shutil.rmtree(temp_dir, ignore_errors=True)
             if artifact is None:
                 continue
-            metadata = artifact.metadata or {}
-            content_hash = str(metadata.get("contentHash") or "")
-            normalized_path = str(
-                metadata.get("originalNormalizedPath") or metadata.get("normalizedPath") or ""
-            )
-            if (
-                artifact.id in existing_ids
-                or (normalized_path and normalized_path in existing_paths)
-                or (content_hash and content_hash in existing_hashes)
-            ):
-                continue
             discovered.append(artifact)
-            existing_ids.add(artifact.id)
-            existing_paths.add(str(path))
-            if normalized_path:
-                existing_paths.add(normalized_path)
-            if content_hash:
-                existing_hashes.add(content_hash)
-
+    discovered = dedupe_discovered_artifacts(discovered)
     discovered.sort(
         key=lambda artifact: str((artifact.metadata or {}).get("updatedAt", "")),
         reverse=True,

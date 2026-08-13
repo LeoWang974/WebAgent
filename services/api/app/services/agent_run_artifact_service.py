@@ -20,19 +20,18 @@ from app.services.session_artifacts import (
 )
 from app.services.settings_service import DEFAULT_INTERFACE
 
-FATAL_RUNTIME_MARKERS = (
-    "ratelimiterror",
-    "rate limit",
-    "http 429",
-    "rpm exhausted",
-    "api call failed",
-    "invalid token",
-    "missing authentication header",
-    "finish_reason='length'",
-    "response truncated",
-    "truncated tool call",
-    "output length limit",
-    "401",
+FATAL_RUNTIME_PATTERNS = (
+    re.compile(r"ratelimiterror|rate limit|http 429|rpm exhausted", re.IGNORECASE),
+    re.compile(r"api call failed|invalid token|missing authentication header", re.IGNORECASE),
+    re.compile(
+        r"finish_reason='length'|response truncated|truncated tool call|output length limit",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:http(?: status| error)?|status(?: code)?|error code|code)\s*[:=]?\s*401\b"
+        r"|\b401\s+(?:unauthorized|error)\b",
+        re.IGNORECASE,
+    ),
 )
 
 PRIMARY_ARTIFACT_REQUEST_PATTERNS = {
@@ -82,7 +81,7 @@ def _diagnostic_text(adapter: object, assistant_output: str) -> str:
 
 def raise_for_fatal_runtime_diagnostics(adapter: object, assistant_output: str) -> None:
     diagnostic_text = _diagnostic_text(adapter, assistant_output)
-    if not any(marker in diagnostic_text.lower() for marker in FATAL_RUNTIME_MARKERS):
+    if not any(pattern.search(diagnostic_text) for pattern in FATAL_RUNTIME_PATTERNS):
         return
     tail = diagnostic_text.strip()[-800:] or "Hermes reported a model/API failure."
     raise RuntimeError(f"Hermes reported a model/API failure: {tail}")

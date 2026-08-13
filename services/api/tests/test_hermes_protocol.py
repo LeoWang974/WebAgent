@@ -73,15 +73,6 @@ def test_hermes_box_parser_accepts_mojibake_box_prefixes():
     assert wrapper._strip_box_edges(mojibake_content_line) == mojibake_content
 
 
-def test_hermes_stream_decoder_accepts_gb18030_chunks():
-    content = "\u62a5\u544a\u5df2\u751f\u6210\uff0c\u4fdd\u5b58\u5728\uff1a"
-
-    decoded = HermesCliWrapper._decode_stream_chunk(content.encode("gb18030"))
-
-    assert content in decoded
-    assert HermesCliWrapper._is_completion_signal(decoded)
-
-
 def test_hermes_summarizes_long_box_to_visible_stage():
     content = "\n".join(
         [

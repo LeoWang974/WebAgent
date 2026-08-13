@@ -9,6 +9,7 @@ from app.services.runtime_environment import (
     path_from_runtime_setting,
     safe_runtime_segment,
     scrub_runtime_credentials,
+    shell_path,
 )
 
 
@@ -82,9 +83,12 @@ def test_build_user_runtime_context_uses_run_model_snapshot(monkeypatch, tmp_pat
     assert context.root_dir == (
         runtime_root / "user-one" / "conversations" / "conversation-one" / "runs" / "run-one"
     )
+    assert context.shared_dir == runtime_root / "user-one" / "shared"
     hermes_env = (context.hermes_home / ".env").read_text(encoding="utf-8")
     assert "OPENAI_API_KEY=user-deepseek-key" in hermes_env
     assert "OPENAI_BASE_URL=https://api.deepseek.com/v1" in hermes_env
+    expected_browser_cache = shell_path(context.shared_dir / "playwright-browsers")
+    assert f"PLAYWRIGHT_BROWSERS_PATH={expected_browser_cache}" in hermes_env
     hermes_config = (context.hermes_home / "config.yaml").read_text(encoding="utf-8")
     assert 'default: "deepseek-chat"' in hermes_config
     assert 'api_key: "user-deepseek-key"' in hermes_config

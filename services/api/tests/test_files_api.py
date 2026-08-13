@@ -9,7 +9,7 @@ from app.models import FileAsset
 
 @pytest.fixture(autouse=True)
 def isolated_upload_storage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr("app.api.routes.files.upload_storage_root", lambda: tmp_path)
+    monkeypatch.setattr("app.services.file_storage.upload_storage_root", lambda: tmp_path)
 
 
 @pytest.mark.asyncio

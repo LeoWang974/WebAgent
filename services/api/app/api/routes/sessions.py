@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 from fastapi import APIRouter, HTTPException
@@ -16,6 +17,7 @@ from app.models import (
     FileAsset,
     Message,
 )
+from app.services.agent_runs import ACTIVE_RUN_STATUSES
 from app.services.conversation_folders import (
     create_user_folder,
     delete_user_folder,
@@ -23,6 +25,7 @@ from app.services.conversation_folders import (
     list_user_folders,
     update_user_folder,
 )
+from app.services.file_storage import remove_conversation_storage
 from app.services.persistence import (
     get_conversation_or_404,
     get_user_by_email,
@@ -191,6 +194,19 @@ async def delete_session(
 ) -> None:
     conversation = await get_conversation_or_404(db, session_id, current_user)
     require_owner(conversation, current_user)
+    active_run_result = await db.execute(
+        select(AgentRun.id)
+        .where(
+            AgentRun.conversation_id == session_id,
+            AgentRun.status.in_(ACTIVE_RUN_STATUSES),
+        )
+        .limit(1)
+    )
+    if active_run_result.scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Stop the active Agent Run before deleting this conversation.",
+        )
     run_ids_result = await db.execute(
         select(AgentRun.id).where(AgentRun.conversation_id == session_id)
     )
@@ -203,6 +219,7 @@ async def delete_session(
     await db.execute(delete(AgentRun).where(AgentRun.conversation_id == session_id))
     await db.delete(conversation)
     await db.commit()
+    await asyncio.to_thread(remove_conversation_storage, current_user.id, session_id)
     return None
 
 

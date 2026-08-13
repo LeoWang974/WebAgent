@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 from typing import Annotated
 
@@ -8,6 +9,7 @@ from app import schemas
 from app.api.dependencies import CurrentUser, DbSession
 from app.core.config import settings
 from app.models import FileAsset
+from app.services.file_storage import conversation_upload_dir, user_global_upload_dir
 from app.services.persistence import get_conversation_or_404, to_file_asset
 
 router = APIRouter()
@@ -28,12 +30,6 @@ ALLOWED_EXTENSIONS_BY_CONTENT_TYPE = {
     "text/markdown": {".markdown", ".md"},
     "text/plain": {".csv", ".json", ".log", ".markdown", ".md", ".txt"},
 }
-
-
-def upload_storage_root() -> Path:
-    root = Path(__file__).resolve().parents[4] / "runtime" / "uploads"
-    root.mkdir(parents=True, exist_ok=True)
-    return root
 
 
 def safe_upload_filename(filename: str) -> str:
@@ -111,11 +107,15 @@ async def upload_file(
     db.add(file_asset)
     await db.flush()
 
-    storage_dir = upload_storage_root() / (session_id or "global")
+    storage_dir = (
+        conversation_upload_dir(current_user.id, session_id)
+        if session_id
+        else user_global_upload_dir(current_user.id)
+    )
     storage_dir.mkdir(parents=True, exist_ok=True)
     storage_path = storage_dir / f"{file_asset.id}-{filename}"
     try:
-        storage_path.write_bytes(content)
+        await asyncio.to_thread(storage_path.write_bytes, content)
         file_asset.storage_key = str(storage_path)
         file_asset.file_metadata = {"path": str(storage_path)}
         await db.commit()

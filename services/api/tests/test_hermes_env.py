@@ -3,31 +3,10 @@ from os import name as os_name
 from agent_runtime.adapters.hermes_cli import HermesCliWrapper
 
 
-def test_hermes_wsl_command_sources_runtime_env():
-    wrapper = HermesCliWrapper(hermes_home="/home/demo/.hermes", wsl_distribution="Ubuntu")
-
-    assert wrapper.hermes_home == "/home/demo/.hermes"
-
-    command = wrapper._build_wsl_command(["/home/demo/.local/bin/hermes", "tools", "list"])
-
-    assert "~/.hermes/.env" in command
-    assert ".hermes/.env" in command
-    assert "--noprofile --norc" in command
-    assert "while IFS= read -r __line" in command
-    assert "export \"$__line\"" in command
-    assert "\"$__key\" != PATH" in command
-
-
 def test_hermes_marks_serper_as_configured_from_runtime_settings():
     wrapper = HermesCliWrapper(serper_configured=True)
 
     assert wrapper._env["WEBAGENT_SERPER_CONFIGURED"] == "1"
-
-
-def test_hermes_decodes_utf8_chinese_without_mojibake():
-    text = "会话切换正常"
-
-    assert HermesCliWrapper._decode_stream_chunk(text.encode("utf-8")) == text
 
 
 def test_hermes_repairs_gb18030_mojibake_from_pty_output():

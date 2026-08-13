@@ -103,15 +103,6 @@ class ModelSecretCipher:
         plaintext = self.decrypt(value)
         return SecretRotationResult(value=self.encrypt(plaintext), changed=True)
 
-    def needs_rotation(self, value: str | None) -> bool:
-        if not value:
-            return False
-        self._reject_unknown_envelope(value)
-        if not self.is_encrypted(value):
-            return True
-        key_id, _token = self._parse_envelope(value)
-        return key_id != self._active_key_id
-
     def _active_fernet(self) -> Fernet:
         if not self._active_key_id:
             raise ModelSecretConfigurationError(

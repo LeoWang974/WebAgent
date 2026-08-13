@@ -7,6 +7,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import AgentRun, AgentRunEvent, Artifact, Conversation
+from app.services.runtime_environment import runtime_root as user_runtime_root
 
 
 @dataclass(frozen=True)
@@ -30,33 +31,58 @@ def _is_expired(path: Path, cutoff: datetime) -> bool:
     return timestamp < cutoff
 
 
+def _expired_runtime_targets(
+    root: Path,
+    user_root: Path,
+    cutoff: datetime,
+) -> list[Path]:
+    targets: list[Path] = []
+    for directory in (root / "hermes-prompts", root / "hermes-runs"):
+        if directory.is_dir():
+            targets.extend(child for child in directory.iterdir() if _is_expired(child, cutoff))
+
+    if user_root.is_dir():
+        for runs_dir in user_root.glob("*/conversations/*/runs"):
+            if runs_dir.is_dir():
+                targets.extend(
+                    child for child in runs_dir.iterdir() if _is_expired(child, cutoff)
+                )
+    return targets
+
+
+def _expired_raw_logs(repo_root: Path, cutoff: datetime) -> list[Path]:
+    logs_root = repo_root / "logs"
+    if not logs_root.is_dir():
+        return []
+    return [
+        path
+        for path in logs_root.glob("hermes-raw-*.log")
+        if path.is_file() and _is_expired(path, cutoff)
+    ]
+
+
 def cleanup_expired_runtime_files(
     *,
     max_age_days: int = 14,
     repo_root: Path | None = None,
 ) -> int:
     cutoff = datetime.now(UTC) - timedelta(days=max_age_days)
-    root = runtime_root(repo_root)
-    targets = [
-        root / "hermes-prompts",
-        root / "hermes-runs",
-    ]
+    repository = repo_root or Path(__file__).resolve().parents[4]
+    root = runtime_root(repository)
+    configured_user_root = root / "users" if repo_root is not None else user_runtime_root()
     deleted = 0
 
+    targets = _expired_runtime_targets(root, configured_user_root, cutoff)
+    targets.extend(_expired_raw_logs(repository, cutoff))
     for target in targets:
-        if not target.exists():
+        try:
+            if target.is_dir():
+                shutil.rmtree(target)
+            else:
+                target.unlink()
+            deleted += 1
+        except OSError:
             continue
-        for child in target.iterdir():
-            if not _is_expired(child, cutoff):
-                continue
-            try:
-                if child.is_dir():
-                    shutil.rmtree(child)
-                else:
-                    child.unlink()
-                deleted += 1
-            except OSError:
-                continue
 
     return deleted
 

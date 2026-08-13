@@ -128,26 +128,6 @@ class HermesCliWrapper:
         self.active_processes: dict[str, asyncio.subprocess.Process] = {}
         self.cancelled_run_ids: set[str] = set()
 
-    def _build_wsl_command(
-        self,
-        args: list[str],
-        quiet: bool = True,
-        use_pty: bool = False,
-    ) -> str:
-        env = dict(self._env)
-        if not quiet:
-            env.pop("HERMES_QUIET", None)
-
-        env_str = " ".join(f"{key}={shlex.quote(value)}" for key, value in env.items())
-        quoted_args = " ".join(shlex.quote(arg) for arg in args)
-        command = self._with_runtime_env(f"{env_str} {quoted_args}".strip())
-        if use_pty:
-            command = f"script -q -e -c {shlex.quote(command)} /dev/null"
-        return (
-            f"wsl -d {shlex.quote(self.wsl_distribution)} -- "
-            f"bash --noprofile --norc -c {shlex.quote(command)}"
-        )
-
     @staticmethod
     def _bash_exec_args(command: str) -> list[str]:
         return ["bash", "--noprofile", "--norc", "-c", command]
@@ -343,13 +323,6 @@ class HermesCliWrapper:
             for char in repaired
         )
         return repaired if repaired != text and has_visible_unicode else text
-
-    @staticmethod
-    def _decode_stream_chunk(chunk: bytes) -> str:
-        try:
-            return chunk.decode("utf-8")
-        except UnicodeDecodeError:
-            return chunk.decode("gb18030", errors="replace")
 
     @staticmethod
     def _is_box_line(line: str) -> bool:
@@ -799,27 +772,6 @@ class HermesCliWrapper:
         ]
         selected = important_lines[:max_lines] if important_lines else lines[:max_lines]
         return "\n".join(selected)
-
-    def _extract_hermes_box_text(self, line: str) -> tuple[bool, str | None]:
-        cleaned = self._clean_line(line)
-        if not cleaned:
-            return False, None
-
-        if self._is_footer_or_noise(cleaned):
-            return False, None
-
-        if self._is_box_line(cleaned) and "Hermes" in cleaned:
-            return True, None
-
-        if self._is_box_line(cleaned):
-            text = self._strip_box_edges(cleaned)
-            if not text or "Hermes" in text:
-                return False, None
-            if self._should_emit_box(text):
-                return False, text
-            return False, None
-
-        return False, None
 
     async def ask_stream_events(
         self,

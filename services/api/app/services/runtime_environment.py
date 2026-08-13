@@ -38,6 +38,12 @@ def runtime_root() -> Path:
     return root
 
 
+def runtime_user_shared_dir(user_id: str) -> Path:
+    path = runtime_root() / safe_runtime_segment(user_id, "user") / "shared"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def runtime_conversation_dir(user: User, conversation_id: str | None = None) -> Path:
     return runtime_conversation_dir_for_ids(user.id, conversation_id)
 
@@ -156,6 +162,7 @@ def _write_runtime_env_values(path: Path, values: dict[str, str | None]) -> None
 def _sync_runtime_env(
     hermes_env_path: Path,
     model_runtime_config: ModelRuntimeConfig | None,
+    shared_dir: Path,
 ) -> None:
     existing = _read_env_file(hermes_env_path)
     if model_runtime_config is not None:
@@ -178,6 +185,16 @@ def _sync_runtime_env(
         or existing.get("SERPER_API_KEY")
         or environ.get("SERPER_API_KEY")
     )
+    cache_dirs = {
+        "XDG_CACHE_HOME": shared_dir / "xdg-cache",
+        "PIP_CACHE_DIR": shared_dir / "pip-cache",
+        "npm_config_cache": shared_dir / "npm-cache",
+        "PLAYWRIGHT_BROWSERS_PATH": shared_dir / "playwright-browsers",
+        "PYTHONUSERBASE": shared_dir / "python-user-base",
+    }
+    for directory in cache_dirs.values():
+        directory.mkdir(parents=True, exist_ok=True)
+    values.update({key: shell_path(path) for key, path in cache_dirs.items()})
     _write_runtime_env_values(hermes_env_path, values)
 
 
@@ -212,6 +229,7 @@ class UserRuntimeContext:
     conversation_id: str
     run_id: str | None
     root_dir: Path
+    shared_dir: Path
     hermes_home: Path
     hermes_skills_dir: Path
 
@@ -222,10 +240,6 @@ class UserRuntimeContext:
 
     def hermes_home_for_shell(self) -> str:
         return shell_path(self.hermes_home)
-
-    def hermes_skills_dir_for_shell(self) -> str:
-        return shell_path(self.hermes_skills_dir)
-
 
 def scrub_runtime_credentials(context: UserRuntimeContext) -> None:
     for credential_path in (
@@ -249,12 +263,13 @@ def build_user_runtime_context(
     model_runtime_config: ModelRuntimeConfig | None = None,
 ) -> UserRuntimeContext:
     root = runtime_run_dir(user, conversation_id, run_id)
+    shared_dir = runtime_user_shared_dir(user.id)
     hermes_home = root / "hermes-home"
     hermes_home.mkdir(parents=True, exist_ok=True)
     base_hermes_home = Path(settings.hermes_home).expanduser()
     _copy_file(base_hermes_home / ".env", hermes_home / ".env")
     _ensure_hermes_config(base_hermes_home, hermes_home, model_runtime_config)
-    _sync_runtime_env(hermes_home / ".env", model_runtime_config)
+    _sync_runtime_env(hermes_home / ".env", model_runtime_config, shared_dir)
 
     source_skills = (
         Path(settings.hermes_skills_dir)
@@ -269,6 +284,7 @@ def build_user_runtime_context(
         conversation_id=conversation_id or "default",
         run_id=run_id,
         root_dir=root,
+        shared_dir=shared_dir,
         hermes_home=hermes_home,
         hermes_skills_dir=hermes_skills_dir,
     )
