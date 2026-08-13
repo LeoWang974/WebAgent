@@ -1,3 +1,4 @@
+import os
 import shutil
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -7,7 +8,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import AgentRun, AgentRunEvent, Artifact, Conversation
-from app.services.runtime_environment import runtime_root as user_runtime_root
+from app.services.runtime_environment import runtime_root as configured_user_runtime_dir
 
 
 @dataclass(frozen=True)
@@ -18,7 +19,7 @@ class CleanupResult:
     runtime_files_deleted: int = 0
 
 
-def runtime_root(repo_root: Path | None = None) -> Path:
+def _repo_runtime_dir(repo_root: Path | None = None) -> Path:
     root = repo_root or Path(__file__).resolve().parents[4]
     return root / "runtime"
 
@@ -31,13 +32,35 @@ def _is_expired(path: Path, cutoff: datetime) -> bool:
     return timestamp < cutoff
 
 
+def _deletion_path(path: Path) -> str:
+    resolved = str(path.resolve())
+    if os.name != "nt" or resolved.startswith("\\\\?\\"):
+        return resolved
+    if resolved.startswith("\\\\"):
+        trimmed = resolved.lstrip("\\")
+        return f"\\\\?\\UNC\\{trimmed}"
+    return f"\\\\?\\{resolved}"
+
+
+def _remove_runtime_target(target: Path) -> None:
+    deletion_path = _deletion_path(target)
+    if target.is_dir():
+        shutil.rmtree(deletion_path)
+    else:
+        Path(deletion_path).unlink()
+
+
 def _expired_runtime_targets(
     root: Path,
     user_root: Path,
     cutoff: datetime,
 ) -> list[Path]:
     targets: list[Path] = []
-    for directory in (root / "hermes-prompts", root / "hermes-runs"):
+    for directory in (
+        root / "agent-runs",
+        root / "hermes-prompts",
+        root / "hermes-runs",
+    ):
         if directory.is_dir():
             targets.extend(child for child in directory.iterdir() if _is_expired(child, cutoff))
 
@@ -56,9 +79,32 @@ def _expired_raw_logs(repo_root: Path, cutoff: datetime) -> list[Path]:
         return []
     return [
         path
-        for path in logs_root.glob("hermes-raw-*.log")
+        for path in logs_root.glob("*.log")
         if path.is_file() and _is_expired(path, cutoff)
     ]
+
+
+def _obsolete_runtime_targets(root: Path) -> list[Path]:
+    names = (
+        "openclaw-skills.tmp",
+        "openclaw-gateway.log",
+        "openclaw-gateway.err.log",
+        "openclaw_tasks_snapshot.json",
+        "openclaw_long_task_smoke.log",
+        "openclaw_long_task_smoke.err.log",
+        "openclaw_long_task_smoke.out.log",
+        "openclaw_long_task_smoke.py",
+        "start-openclaw-gateway.sh",
+        "hermes_long_task_smoke.log",
+        "hermes_long_task_smoke.py",
+        "qa-ppt-render",
+        "qa-ppt.pptx",
+        "api.out.log",
+        "api.err.log",
+    )
+    targets = [root / name for name in names if (root / name).exists()]
+    targets.extend(root.glob("acceptance-*"))
+    return targets
 
 
 def cleanup_expired_runtime_files(
@@ -68,18 +114,18 @@ def cleanup_expired_runtime_files(
 ) -> int:
     cutoff = datetime.now(UTC) - timedelta(days=max_age_days)
     repository = repo_root or Path(__file__).resolve().parents[4]
-    root = runtime_root(repository)
-    configured_user_root = root / "users" if repo_root is not None else user_runtime_root()
+    root = _repo_runtime_dir(repository)
+    configured_user_root = (
+        root / "users" if repo_root is not None else configured_user_runtime_dir()
+    )
     deleted = 0
 
     targets = _expired_runtime_targets(root, configured_user_root, cutoff)
+    targets.extend(_obsolete_runtime_targets(root))
     targets.extend(_expired_raw_logs(repository, cutoff))
     for target in targets:
         try:
-            if target.is_dir():
-                shutil.rmtree(target)
-            else:
-                target.unlink()
+            _remove_runtime_target(target)
             deleted += 1
         except OSError:
             continue

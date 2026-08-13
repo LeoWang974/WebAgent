@@ -1,10 +1,14 @@
 import asyncio
+from collections.abc import AsyncGenerator
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import schemas
 from app.core.config import settings
-from app.models import AgentRun, AgentRunEvent, Message
+from app.models import AgentRun, AgentRunEvent, Message, User
+from app.services.agent_run_dispatcher import enqueue_agent_run_message
+from app.services.agent_runs import AgentRunEventCursor, list_new_run_events
 from app.services.persistence import to_message, to_session
 from app.services.session_artifacts import refresh_conversation
 from app.services.stream_protocol import sse
@@ -34,7 +38,7 @@ async def stream_queued_agent_run(
         },
     )
 
-    sent_event_ids: set[str] = set()
+    event_cursor = AgentRunEventCursor()
     assistant_done_sent = False
     run_id = run.id
     while True:
@@ -42,16 +46,8 @@ async def stream_queued_agent_run(
         run = await db.get(AgentRun, run_id)
         if run is None:
             raise RuntimeError("Queued agent run disappeared before completion.")
-        result = await db.execute(
-            select(AgentRunEvent)
-            .where(AgentRunEvent.run_id == run.id)
-            .order_by(AgentRunEvent.created_at.asc())
-        )
-        events = result.scalars().all()
+        events = await list_new_run_events(db, run.id, event_cursor)
         for event in events:
-            if event.id in sent_event_ids:
-                continue
-            sent_event_ids.add(event.id)
             payload = event.payload or {}
             if (
                 event.event_type != "queued"
@@ -110,6 +106,22 @@ async def stream_queued_agent_run(
             break
         yield ": heartbeat\n\n"
         await asyncio.sleep(settings.agent_run_event_poll_interval_seconds)
+
+
+async def stream_session_message_response(
+    db: AsyncSession,
+    session_id: str,
+    input_data: schemas.MessageCreate,
+    current_user: User,
+) -> AsyncGenerator[str, None]:
+    """Queue an unchanged user message and relay persisted events as SSE."""
+    user_message, run = await enqueue_agent_run_message(
+        db,
+        session_id,
+        input_data,
+        current_user,
+    )
+    return stream_queued_agent_run(db, session_id, user_message, run)
 
 
 async def build_assistant_done_payload(

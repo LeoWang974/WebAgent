@@ -902,7 +902,7 @@ class HermesCliWrapper:
             await self._terminate_process_tree(process)
 
         async def flush_box() -> str | None:
-            text = "\n".join(line for line in box_lines if line).strip()
+            text = "\n".join(box_lines).strip()
             box_lines.clear()
             if not text or not self._should_emit_box(text):
                 return None
@@ -1032,6 +1032,11 @@ class HermesCliWrapper:
 
                 if raw_line is None:
                     finished_streams += 1
+                    continue
+
+                if in_hermes_box and not raw_line.strip():
+                    if box_lines and box_lines[-1] != "":
+                        box_lines.append("")
                     continue
 
                 is_box_line, starts_box, text = parse_box_line(raw_line)

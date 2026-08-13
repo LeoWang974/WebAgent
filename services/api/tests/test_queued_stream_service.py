@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from app import schemas
-from app.services import session_stream_service
+from app.services import queued_stream_service
 
 
 @pytest.mark.asyncio
@@ -27,10 +27,10 @@ async def test_stream_dispatches_run_before_client_starts_reading(monkeypatch) -
         assert prepared_run is run
         return fake_stream()
 
-    monkeypatch.setattr(session_stream_service, "enqueue_agent_run_message", fake_enqueue)
-    monkeypatch.setattr(session_stream_service, "stream_queued_agent_run", fake_stream_queued)
+    monkeypatch.setattr(queued_stream_service, "enqueue_agent_run_message", fake_enqueue)
+    monkeypatch.setattr(queued_stream_service, "stream_queued_agent_run", fake_stream_queued)
 
-    stream = await session_stream_service.stream_session_message_response(
+    stream = await queued_stream_service.stream_session_message_response(
         SimpleNamespace(),
         "session-1",
         schemas.MessageCreate(content="hello"),

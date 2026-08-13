@@ -35,13 +35,14 @@ from app.services.persistence import (
     to_message,
     to_session,
 )
+from app.services.queued_stream_service import stream_session_message_response
 from app.services.session_artifacts import (
     is_debug_artifact,
     refresh_conversation,
 )
 from app.services.session_message_service import send_message_core
-from app.services.session_stream_service import stream_session_message_response
 from app.services.settings_service import user_developer_mode
+from app.services.stream_protocol import SSE_HEADERS
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -261,11 +262,7 @@ async def stream_session_message(
     return StreamingResponse(
         stream,
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
+        headers=SSE_HEADERS,
     )
 
 

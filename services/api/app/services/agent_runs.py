@@ -1,3 +1,4 @@
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException
@@ -21,6 +22,33 @@ except ImportError:
 ACTIVE_RUN_STATUSES = {"queued", "running", "tool_calling", "rendering"}
 TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled", "disconnected"}
 STALE_RUN_GRACE_SECONDS = 30 * 60
+
+
+@dataclass
+class AgentRunEventCursor:
+    created_at: datetime | None = None
+    event_ids_at_timestamp: set[str] = field(default_factory=set)
+
+    def consume(self, events: list[DBAgentRunEvent]) -> list[DBAgentRunEvent]:
+        unseen = [
+            event
+            for event in events
+            if self.created_at is None
+            or event.created_at > self.created_at
+            or event.id not in self.event_ids_at_timestamp
+        ]
+        if not events:
+            return unseen
+
+        latest_timestamp = events[-1].created_at
+        latest_ids = {
+            event.id for event in events if event.created_at == latest_timestamp
+        }
+        if self.created_at == latest_timestamp:
+            latest_ids.update(self.event_ids_at_timestamp)
+        self.created_at = latest_timestamp
+        self.event_ids_at_timestamp = latest_ids
+        return unseen
 
 
 def create_hermes_adapter(
@@ -130,6 +158,20 @@ async def list_run_events(db: AsyncSession, run_id: str) -> list[DBAgentRunEvent
         .order_by(DBAgentRunEvent.created_at.asc())
     )
     return list(result.scalars().all())
+
+
+async def list_new_run_events(
+    db: AsyncSession,
+    run_id: str,
+    cursor: AgentRunEventCursor,
+) -> list[DBAgentRunEvent]:
+    query = select(DBAgentRunEvent).where(DBAgentRunEvent.run_id == run_id)
+    if cursor.created_at is not None:
+        query = query.where(DBAgentRunEvent.created_at >= cursor.created_at)
+    result = await db.execute(
+        query.order_by(DBAgentRunEvent.created_at.asc(), DBAgentRunEvent.id.asc())
+    )
+    return cursor.consume(list(result.scalars().all()))
 
 
 def is_stale_run(run: DBAgentRun) -> bool:

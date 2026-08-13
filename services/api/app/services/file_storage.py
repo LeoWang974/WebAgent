@@ -45,6 +45,7 @@ def remove_conversation_storage(user_id: str, conversation_id: str) -> None:
         / safe_storage_segment(user_id, "user")
         / "conversations"
         / safe_storage_segment(conversation_id, "conversation"),
+        # Legacy path for uploads created before storage became user-scoped.
         upload_storage_root() / safe_storage_segment(conversation_id, "conversation"),
     )
     for path in (artifact_dir, *upload_dirs):

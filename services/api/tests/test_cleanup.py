@@ -6,10 +6,14 @@ from app.services.cleanup import cleanup_expired_runtime_files
 
 
 def test_cleanup_expired_runtime_files_keeps_recent_files(tmp_path: Path):
+    workspace_dir = tmp_path / "runtime" / "agent-runs"
     prompt_dir = tmp_path / "runtime" / "hermes-prompts"
     run_dir = tmp_path / "runtime" / "hermes-runs"
+    workspace_dir.mkdir(parents=True)
     prompt_dir.mkdir(parents=True)
     run_dir.mkdir(parents=True)
+    old_workspace = workspace_dir / "old-workspace"
+    old_workspace.mkdir()
     old_prompt = prompt_dir / "old.txt"
     recent_prompt = prompt_dir / "recent.txt"
     old_run = run_dir / "old-run"
@@ -19,18 +23,20 @@ def test_cleanup_expired_runtime_files_keeps_recent_files(tmp_path: Path):
     (old_run / "artifact.md").write_text("old", encoding="utf-8")
 
     old_timestamp = time.time() - 10 * 24 * 60 * 60
+    os.utime(old_workspace, (old_timestamp, old_timestamp))
     os.utime(old_prompt, (old_timestamp, old_timestamp))
     os.utime(old_run, (old_timestamp, old_timestamp))
 
     deleted = cleanup_expired_runtime_files(max_age_days=7, repo_root=tmp_path)
 
-    assert deleted == 2
+    assert deleted == 3
+    assert not old_workspace.exists()
     assert not old_prompt.exists()
     assert not old_run.exists()
     assert recent_prompt.exists()
 
 
-def test_cleanup_expired_runtime_files_removes_run_homes_and_raw_logs(tmp_path: Path):
+def test_cleanup_expired_runtime_files_removes_run_homes_and_old_logs(tmp_path: Path):
     user_runs = tmp_path / "runtime" / "users" / "user-1" / "conversations" / "chat-1" / "runs"
     old_runtime = user_runs / "old-run"
     recent_runtime = user_runs / "recent-run"
@@ -53,9 +59,27 @@ def test_cleanup_expired_runtime_files_removes_run_homes_and_raw_logs(tmp_path: 
 
     deleted = cleanup_expired_runtime_files(max_age_days=7, repo_root=tmp_path)
 
-    assert deleted == 2
+    assert deleted == 3
     assert not old_runtime.exists()
     assert recent_runtime.exists()
     assert not old_log.exists()
     assert recent_log.exists()
-    assert unrelated_log.exists()
+    assert not unrelated_log.exists()
+
+
+def test_cleanup_expired_runtime_files_removes_retired_runtime_data(tmp_path: Path):
+    runtime_dir = tmp_path / "runtime"
+    obsolete_skills = runtime_dir / "openclaw-skills.tmp"
+    obsolete_skills.mkdir(parents=True)
+    (obsolete_skills / "skill.md").write_text("obsolete", encoding="utf-8")
+    acceptance_log = runtime_dir / "acceptance-api.log"
+    acceptance_log.write_text("obsolete", encoding="utf-8")
+    retained_skills = runtime_dir / "sensenova-skills"
+    retained_skills.mkdir()
+
+    deleted = cleanup_expired_runtime_files(max_age_days=7, repo_root=tmp_path)
+
+    assert deleted == 2
+    assert not obsolete_skills.exists()
+    assert not acceptance_log.exists()
+    assert retained_skills.exists()

@@ -1,5 +1,4 @@
 import asyncio
-import json
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
@@ -9,11 +8,13 @@ from app.api.dependencies import CurrentUser, DbSession
 from app.core.config import settings
 from app.services.agent_runs import (
     TERMINAL_RUN_STATUSES,
+    AgentRunEventCursor,
     create_db_agent_run,
     create_hermes_adapter,
     finish_db_agent_run,
     get_db_agent_run,
     list_agent_runs_for_user,
+    list_new_run_events,
     list_run_events,
     record_db_agent_run_event,
     to_agent_run_event_schema,
@@ -21,6 +22,7 @@ from app.services.agent_runs import (
 )
 from app.services.model_runtime_config import model_runtime_config_builder
 from app.services.persistence import get_conversation_or_404
+from app.services.stream_protocol import SSE_HEADERS, sse
 
 try:
     from agent_runtime.adapters.process_registry import terminate_registered_run_process
@@ -28,11 +30,6 @@ except ImportError:
     terminate_registered_run_process = None
 
 router = APIRouter()
-SSE_HEADERS = {
-    "Cache-Control": "no-cache",
-    "Connection": "keep-alive",
-    "X-Accel-Buffering": "no",
-}
 
 
 @router.get("", response_model=list[schemas.AgentRun])
@@ -166,23 +163,16 @@ async def stream_agent_run_events(
     await db.close()
 
     async def event_stream():
-        sent_event_ids: set[str] = set()
+        event_cursor = AgentRunEventCursor()
         try:
             while True:
                 run = await get_db_agent_run(db, run_id, current_user)
-                events = await list_run_events(db, run_id)
+                events = await list_new_run_events(db, run_id, event_cursor)
                 encoded_events: list[str] = []
                 for event in events:
-                    if event.id in sent_event_ids:
-                        continue
-                    sent_event_ids.add(event.id)
                     api_event = to_agent_run_event_schema(event, run)
-                    event_data = json.dumps(
-                        api_event.model_dump(by_alias=True),
-                        ensure_ascii=False,
-                    )
                     encoded_events.append(
-                        f"event: agent_run_event\ndata: {event_data}\n\n"
+                        sse("agent_run_event", api_event.model_dump(by_alias=True))
                     )
                 is_terminal = run.status in TERMINAL_RUN_STATUSES
                 # Do not retain a database connection while waiting on the client or poll timer.

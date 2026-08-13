@@ -243,26 +243,35 @@ function applyStreamAssistantDelta(
     createdAt: now,
     waitStartedAt: pendingIndex >= 0 ? state.messages[pendingIndex].waitStartedAt : undefined,
   };
-  const nextPendingMessage = createPendingAssistantMessage(
-    context.sessionId,
-    context.modelName,
-    undefined,
-    now,
-  );
-
-  const nextMessages =
-    pendingIndex >= 0
+  let messages: Message[];
+  if (existingMessageIndex >= 0) {
+    messages = state.messages.map((message) =>
+      message.id === event.messageId
+        ? {
+            ...message,
+            content: chunk,
+            waitStartedAt:
+              message.waitStartedAt ??
+              (pendingIndex >= 0 ? state.messages[pendingIndex].waitStartedAt : undefined),
+          }
+        : message,
+    );
+  } else {
+    const nextPendingMessage = createPendingAssistantMessage(
+      context.sessionId,
+      context.modelName,
+      undefined,
+      now,
+    );
+    messages = pendingIndex >= 0
       ? [
           ...state.messages.slice(0, pendingIndex),
           completedMessage,
           nextPendingMessage,
           ...state.messages.slice(pendingIndex + 1),
         ]
-      : [
-          ...state.messages,
-          completedMessage,
-          nextPendingMessage,
-        ];
+      : [...state.messages, completedMessage, nextPendingMessage];
+  }
 
   return {
     agentRuns: state.agentRuns.map((run) =>
@@ -276,20 +285,7 @@ function applyStreamAssistantDelta(
           }
         : run,
     ),
-    messages:
-      existingMessageIndex >= 0
-        ? state.messages.map((message) =>
-            message.id === event.messageId
-              ? {
-                  ...message,
-                  content: chunk,
-                  waitStartedAt:
-                    message.waitStartedAt ??
-                    (pendingIndex >= 0 ? state.messages[pendingIndex].waitStartedAt : undefined),
-                }
-              : message,
-          )
-        : nextMessages,
+    messages,
   };
 }
 

@@ -93,6 +93,8 @@ class Settings(BaseSettings):
             return
         if self.allow_dev_auth_fallback:
             raise RuntimeError("ALLOW_DEV_AUTH_FALLBACK must be false in production.")
+        if not self.agent_run_queue_enabled:
+            raise RuntimeError("AGENT_RUN_QUEUE_ENABLED must be true in production.")
         if self.jwt_secret_key in INSECURE_JWT_SECRETS or len(self.jwt_secret_key) < 32:
             raise RuntimeError("JWT_SECRET_KEY must be a strong secret in production.")
         if not self.cors_origins:
