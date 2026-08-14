@@ -196,7 +196,11 @@ async def test_hermes_emits_artifact_found_after_final_output_discovery(
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr(wrapper, "_build_chat_exec_args", lambda *args, **kwargs: ["hermes"])
-    monkeypatch.setattr(wrapper, "_raw_log_path", lambda: tmp_path / "hermes-raw.log")
+    monkeypatch.setattr(
+        wrapper,
+        "_raw_log_path",
+        lambda run_id=None: tmp_path / "hermes-raw.log",
+    )
 
     events = [
         event
@@ -263,7 +267,11 @@ async def test_hermes_session_recovery_does_not_duplicate_visible_completion(
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr(wrapper, "_build_chat_exec_args", lambda *args, **kwargs: ["hermes"])
-    monkeypatch.setattr(wrapper, "_raw_log_path", lambda: tmp_path / "hermes-raw.log")
+    monkeypatch.setattr(
+        wrapper,
+        "_raw_log_path",
+        lambda run_id=None: tmp_path / "hermes-raw.log",
+    )
 
     events = [
         event

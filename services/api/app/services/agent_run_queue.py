@@ -32,6 +32,26 @@ LONG_TASK_MARKERS = (
     "图像",
     "图片",
 )
+CONVERSATION_META_MARKERS = (
+    "上一轮",
+    "上一次",
+    "刚才",
+    "之前",
+    "previous turn",
+    "last turn",
+    "earlier",
+)
+QUESTION_MARKERS = (
+    "?",
+    "？",
+    "几",
+    "什么",
+    "是否",
+    "哪",
+    "how many",
+    "what",
+    "did i",
+)
 
 
 def is_short_chat_request(content: str) -> bool:
@@ -39,6 +59,10 @@ def is_short_chat_request(content: str) -> bool:
     if not normalized or len(normalized) > 80:
         return False
     lowered = normalized.lower()
+    if any(marker in lowered for marker in CONVERSATION_META_MARKERS) and any(
+        marker in lowered for marker in QUESTION_MARKERS
+    ):
+        return True
     return not any(marker in lowered for marker in LONG_TASK_MARKERS)
 
 

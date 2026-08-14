@@ -1,3 +1,4 @@
+import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -96,6 +97,42 @@ def test_build_user_runtime_context_uses_run_model_snapshot(monkeypatch, tmp_pat
     scrub_runtime_credentials(context)
     assert not (context.hermes_home / ".env").exists()
     assert not (context.hermes_home / "config.yaml").exists()
+
+
+def test_build_user_runtime_context_resumes_latest_conversation_session(
+    monkeypatch, tmp_path: Path
+):
+    runtime_root = tmp_path / "runtime-users"
+    hermes_home = _base_hermes_home(tmp_path)
+    monkeypatch.setattr(settings, "agent_runtime_user_root", str(runtime_root))
+    monkeypatch.setattr(settings, "hermes_home", str(hermes_home))
+    monkeypatch.setattr(settings, "hermes_skills_dir", "")
+
+    user = SimpleNamespace(id="user-one", username="Test User")
+    first = build_user_runtime_context(user, "conversation-one", run_id="run-one")
+    session_path = first.hermes_home / "sessions" / "session_previous-123.json"
+    session_path.parent.mkdir(parents=True)
+    session_path.write_text('{"messages": []}', encoding="utf-8")
+    with sqlite3.connect(first.hermes_home / "state.db") as connection:
+        connection.execute(
+            "CREATE TABLE sessions ("
+            "id TEXT PRIMARY KEY, message_count INTEGER, started_at REAL, ended_at REAL)"
+        )
+        connection.execute(
+            "INSERT INTO sessions VALUES (?, ?, ?, ?)",
+            ("previous-123", 8, 1.0, 2.0),
+        )
+
+    second = build_user_runtime_context(user, "conversation-one", run_id="run-two")
+
+    assert second.hermes_resume_session_id == "previous-123"
+    assert second.hermes_home == first.hermes_home
+    assert second.root_dir != first.root_dir
+    assert (second.hermes_home / "sessions" / session_path.name).is_file()
+    with sqlite3.connect(second.hermes_home / "state.db") as connection:
+        assert connection.execute("SELECT id FROM sessions").fetchone() == (
+            "previous-123",
+        )
 
 
 def test_adapter_lock_scope_respects_configured_scope(monkeypatch):

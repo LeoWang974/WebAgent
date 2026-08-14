@@ -105,14 +105,16 @@ export const fastApiAdapter: WebAgentApiAdapter = {
 
     return persistAuth(result);
   },
-  logout() {
-    if (typeof window !== "undefined") {
-      window.localStorage.removeItem("webagent_access_token");
+  async logout() {
+    try {
+      await apiClient<void>("/api/auth/logout", {
+        method: "POST",
+      });
+    } finally {
+      if (typeof window !== "undefined") {
+        window.localStorage.removeItem("webagent_access_token");
+      }
     }
-
-    return apiClient<void>("/api/auth/logout", {
-      method: "POST",
-    });
   },
   listArtifacts(sessionId?: string) {
     const path = sessionId

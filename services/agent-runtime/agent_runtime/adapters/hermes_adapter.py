@@ -16,7 +16,9 @@ class HermesAdapter:
         hermes_home: str = "~/.hermes",
         wsl_distribution: str = "Ubuntu",
         serper_configured: bool = False,
+        resume_session_id: str | None = None,
     ):
+        self.resume_session_id = resume_session_id
         self.cli = HermesCliWrapper(
             hermes_path,
             hermes_home,
@@ -35,6 +37,7 @@ class HermesAdapter:
 
         async for event in self.cli.ask_stream_events(
             question=input_data.content,
+            session_id=self.resume_session_id,
             run_id=input_data.run_id,
             conversation_id=input_data.session_id,
             working_dir=input_data.working_dir,

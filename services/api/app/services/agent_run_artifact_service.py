@@ -34,41 +34,6 @@ FATAL_RUNTIME_PATTERNS = (
     ),
 )
 
-PRIMARY_ARTIFACT_REQUEST_PATTERNS = {
-    "markdown_report": (
-        re.compile(
-            r"(?:输出|生成(?!的)|撰写|创建|保存).{0,48}(?:markdown|\.md\b)",
-            re.IGNORECASE,
-        ),
-        re.compile(
-            r"\b(?:create|generate|produce|write|save)\b.{0,48}(?:markdown|\.md\b)",
-            re.IGNORECASE,
-        ),
-    ),
-    "html_page": (
-        re.compile(
-            r"(?:输出|生成(?!的)|创建|保存).{0,48}(?:html|\.html?\b)",
-            re.IGNORECASE,
-        ),
-        re.compile(
-            r"\b(?:create|generate|produce|write|save)\b.{0,48}(?:html|\.html?\b)",
-            re.IGNORECASE,
-        ),
-    ),
-    "ppt_deck": (
-        re.compile(
-            r"(?:输出|生成(?!的)|创建|保存).{0,48}(?:pptx?|幻灯片)",
-            re.IGNORECASE,
-        ),
-        re.compile(
-            r"\b(?:create|generate|produce|build|save)\b.{0,48}"
-            r"(?:pptx?|presentation|slide deck)",
-            re.IGNORECASE,
-        ),
-    ),
-}
-
-
 def _diagnostic_text(adapter: object, assistant_output: str) -> str:
     diagnostics = getattr(adapter, "last_diagnostics", {}) or {}
     parts = [assistant_output]
@@ -97,14 +62,6 @@ def _adapter_artifact_paths(adapter: object) -> tuple[list[str], list[object]]:
             if getattr(artifact, "path", "")
         ]
     return list(dict.fromkeys(paths)), list(artifacts)
-
-
-def requested_primary_artifact_types(content: str) -> set[str]:
-    return {
-        artifact_type
-        for artifact_type, patterns in PRIMARY_ARTIFACT_REQUEST_PATTERNS.items()
-        if any(pattern.search(content) for pattern in patterns)
-    }
 
 
 def filter_preexisting_artifact_schemas(
@@ -166,27 +123,6 @@ async def _existing_conversation_artifact_fingerprints(
             if isinstance(value, str) and value:
                 paths.add(metadata_path_key(value))
     return hashes, paths
-
-
-def validate_requested_primary_artifacts(
-    content: str,
-    artifacts: list[Artifact],
-) -> None:
-    requested_types = requested_primary_artifact_types(content)
-    if not requested_types:
-        return
-    produced_types = {
-        artifact.type
-        for artifact in artifacts
-        if artifact.is_primary and not is_debug_artifact(artifact)
-    }
-    missing_types = sorted(requested_types - produced_types)
-    if missing_types:
-        readable_types = ", ".join(missing_types)
-        raise RuntimeError(
-            "Hermes completed without producing the requested primary artifact type(s): "
-            f"{readable_types}."
-        )
 
 
 async def _event_artifact_paths(db: AsyncSession, run_id: str) -> list[str]:
@@ -293,8 +229,6 @@ async def discover_and_persist_run_artifacts(
     artifact_discovery_summary["primary_artifact_types"] = sorted(
         {artifact.type for artifact in primary_artifacts}
     )
-    validate_requested_primary_artifacts(content, current_run_artifacts)
-
     developer_mode = await user_developer_mode_by_id(db, user_id)
     visible = [
         artifact

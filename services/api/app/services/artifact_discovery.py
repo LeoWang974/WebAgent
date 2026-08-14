@@ -30,8 +30,22 @@ SUPPORTED_SUFFIXES = {
     ".pptx",
     ".xlsx",
 }
-IGNORED_PARTS = {".git", ".next", ".venv", "__pycache__", "node_modules"}
-IGNORED_FILENAMES = {"request.md", "soul.md"}
+IGNORED_PARTS = {
+    ".git",
+    ".next",
+    ".pytest_cache",
+    ".venv",
+    "__pycache__",
+    "node_modules",
+    "site-packages",
+}
+IGNORED_PART_SUFFIXES = (".dist-info", ".egg-info")
+IGNORED_FILENAMES = {
+    "package-lock.json",
+    "package.json",
+    "request.md",
+    "soul.md",
+}
 OUTPUT_PATH_MARKERS = {
     "/deep-research-reports/",
     "/reports/",
@@ -241,7 +255,12 @@ def _runtime_artifacts_dir(run_id: str | None) -> Path:
 
 
 def _is_ignored(path: Path) -> bool:
-    return any(part in IGNORED_PARTS for part in path.parts)
+    normalized_parts = tuple(part.lower() for part in path.parts)
+    if any(part in IGNORED_PARTS for part in normalized_parts):
+        return True
+    if any(part.endswith(IGNORED_PART_SUFFIXES) for part in normalized_parts):
+        return True
+    return False
 
 
 def _is_regular_artifact_candidate(path: Path) -> bool:

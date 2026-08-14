@@ -371,6 +371,21 @@ function applyStreamAssistantDone(
       ),
   );
 
+  const normalizedFinalContent = normalizeMessageContent(event.message.content);
+  const duplicateStageIndex = [...messages]
+    .map((message, index) => ({ message, index }))
+    .reverse()
+    .find(
+      ({ message }) =>
+        message.sessionId === context.sessionId &&
+        message.role === "assistant" &&
+        message.id !== event.message.id &&
+        normalizeMessageContent(message.content) === normalizedFinalContent,
+    )?.index;
+  if (duplicateStageIndex !== undefined) {
+    messages = messages.filter((_, index) => index !== duplicateStageIndex);
+  }
+
   if (existingMessage) {
     messages = messages.map((message) =>
       message.id === event.message.id
@@ -414,4 +429,8 @@ function applyStreamAssistantDone(
       session.id === event.session.id ? event.session : session,
     ),
   };
+}
+
+function normalizeMessageContent(content: string) {
+  return content.replace(/\s+/g, " ").trim();
 }

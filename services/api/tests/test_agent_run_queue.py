@@ -19,6 +19,11 @@ def test_artifact_requests_stay_on_long_task_queue():
         assert queue_for_message(prompt)[0] == "agent-runs"
 
 
+def test_short_question_about_previous_artifact_uses_priority_queue():
+    assert is_short_chat_request("请只回答：我上一轮要求生成几页 PPT？") is True
+    assert is_short_chat_request("How many slides did I ask for last turn?") is True
+
+
 def test_long_plain_request_stays_on_long_task_queue():
     prompt = "请详细分析这个主题，并给出完整论证、风险、案例和实施建议。" * 3
     assert is_short_chat_request(prompt) is False

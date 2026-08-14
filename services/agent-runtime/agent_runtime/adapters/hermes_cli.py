@@ -40,6 +40,15 @@ ARTIFACT_SUFFIXES = {
     ".xlsx",
     ".json",
 }
+IGNORED_ARTIFACT_PATH_PARTS = {
+    ".git",
+    ".pytest_cache",
+    "__pycache__",
+    "node_modules",
+    "site-packages",
+}
+IGNORED_ARTIFACT_PATH_SUFFIXES = (".dist-info", ".egg-info")
+IGNORED_ARTIFACT_FILENAMES = {"package-lock.json", "package.json"}
 BOX_CODEPOINTS = {
     0x2500,
     0x2502,
@@ -150,11 +159,12 @@ class HermesCliWrapper:
         )
         return env_loader + command
 
-    def _raw_log_path(self) -> Path:
+    def _raw_log_path(self, run_id: str | None = None) -> Path:
         log_dir = Path(__file__).resolve().parents[4] / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        return log_dir / f"hermes-raw-{timestamp}.log"
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        run_suffix = re.sub(r"[^A-Za-z0-9_-]+", "-", run_id or "run")[:32]
+        return log_dir / f"hermes-raw-{timestamp}-{run_suffix}.log"
 
     def _prompt_file_path(self, question: str, run_id: str | None = None) -> tuple[Path, str]:
         prompt_dir = Path(__file__).resolve().parents[4] / "runtime" / "hermes-prompts"
@@ -496,11 +506,31 @@ class HermesCliWrapper:
                     if (
                         candidate.is_file()
                         and candidate.suffix.lower() in ARTIFACT_SUFFIXES
+                        and not self._is_runtime_dependency_path(candidate)
                         and candidate.stat().st_mtime >= threshold
                     ):
                         self._remember_artifact_path(str(candidate.resolve()))
                 except OSError:
                     continue
+
+    @staticmethod
+    def _is_runtime_dependency_path(path: Path) -> bool:
+        normalized_parts = tuple(part.lower() for part in path.parts)
+        if path.name.lower() in IGNORED_ARTIFACT_FILENAMES:
+            return True
+        if any(part in IGNORED_ARTIFACT_PATH_PARTS for part in normalized_parts):
+            return True
+        if any(
+            part.endswith(IGNORED_ARTIFACT_PATH_SUFFIXES)
+            for part in normalized_parts
+        ):
+            return True
+        if "hermes-home" in normalized_parts:
+            hermes_index = normalized_parts.index("hermes-home")
+            hermes_relative_parts = normalized_parts[hermes_index + 1 :]
+            if not hermes_relative_parts or hermes_relative_parts[0] != "reports":
+                return True
+        return False
 
     @staticmethod
     def _summarize_raw_runtime_line(text: str) -> str | None:
@@ -662,6 +692,10 @@ class HermesCliWrapper:
             "\u6700\u7ec8\u62a5\u544a\u5df2\u751f\u6210",
             "\u5df2\u751f\u6210\u6700\u7ec8\u62a5\u544a",
             "pptx\u8f6c\u6362\u5b8c\u6210",
+            "pptx\u5df2\u4fdd\u5b58",
+            "pptx\u5df2\u751f\u6210",
+            "pptxissaved",
+            "pptxhasbeensaved",
             "ppt\u5df2\u751f\u6210",
             "\u8f6c\u6362\u5b8c\u6210",
             "finalreportcompleted",
@@ -846,7 +880,7 @@ class HermesCliWrapper:
             len(question),
             session_id or "",
         )
-        raw_log_path = self._raw_log_path()
+        raw_log_path = self._raw_log_path(run_id)
         self.last_diagnostics["raw_log_path"] = str(raw_log_path)
         raw_log_path.write_text(
             (

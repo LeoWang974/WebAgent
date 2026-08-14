@@ -9,8 +9,6 @@ from app.models import Conversation
 from app.services.agent_run_artifact_service import (
     filter_preexisting_artifact_schemas,
     raise_for_fatal_runtime_diagnostics,
-    requested_primary_artifact_types,
-    validate_requested_primary_artifacts,
 )
 from app.services.session_artifacts import metadata_path_key, organize_artifact_schema
 
@@ -58,22 +56,6 @@ def test_fatal_runtime_diagnostics_match_explicit_http_401():
         raise_for_fatal_runtime_diagnostics(adapter, "")
 
 
-def test_requested_primary_artifact_types_only_match_explicit_output_requests():
-    assert requested_primary_artifact_types(
-        "Use the report at C:/input/source.md and generate a PPTX presentation."
-    ) == {"ppt_deck"}
-    assert requested_primary_artifact_types(
-        "输出中文 Markdown 报告，然后生成 HTML 文件。"
-    ) == {"markdown_report", "html_page"}
-    assert requested_primary_artifact_types("Summarize the source.md file in chat.") == set()
-    assert requested_primary_artifact_types(
-        "请基于本对话刚生成的 Markdown 报告，生成一份中文 HTML 报告并保存为 .html 文件。"
-    ) == {"html_page"}
-    assert requested_primary_artifact_types(
-        "Based on the generated Markdown report, create an English HTML report."
-    ) == {"html_page"}
-
-
 def test_filter_preexisting_artifacts_excludes_staged_input_by_hash(tmp_path):
     source = tmp_path / "source.md"
     output = tmp_path / "report.html"
@@ -110,26 +92,6 @@ def test_filter_preexisting_artifacts_excludes_staged_input_by_hash(tmp_path):
 
     assert filtered == [output_artifact]
     assert excluded == [str(source)]
-
-
-def test_validate_requested_primary_artifacts_rejects_only_intermediate_outputs():
-    intermediate = type(
-        "ArtifactRecord",
-        (),
-        {
-            "type": "markdown_report",
-            "is_primary": False,
-            "artifact_metadata": {"artifactRole": "intermediate"},
-        },
-    )()
-
-    with pytest.raises(RuntimeError, match="markdown_report"):
-        validate_requested_primary_artifacts(
-            "Generate a Markdown report.",
-            [intermediate],
-        )
-
-    validate_requested_primary_artifacts("Answer this question in chat.", [intermediate])
 
 
 def test_organize_artifact_schema_keeps_metadata_path_existing(tmp_path):

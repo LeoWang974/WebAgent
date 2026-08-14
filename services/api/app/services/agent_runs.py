@@ -70,6 +70,7 @@ def create_hermes_adapter(
         hermes_home=runtime_context.hermes_home_for_shell(),
         wsl_distribution=settings.hermes_wsl_distribution,
         serper_configured=bool(settings.serper_api_key),
+        resume_session_id=runtime_context.hermes_resume_session_id,
     )
 
 

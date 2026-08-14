@@ -83,6 +83,24 @@ def test_create_artifacts_from_paths_dedupes_by_content_hash(tmp_path: Path):
     assert artifacts[0].metadata["contentHash"]
 
 
+def test_create_artifacts_from_paths_ignores_runtime_dependency_docs(tmp_path: Path):
+    package_license = (
+        tmp_path
+        / "hermes-home"
+        / ".local"
+        / "lib"
+        / "python3.12"
+        / "site-packages"
+        / "markdown-3.10.dist-info"
+        / "licenses"
+        / "LICENSE.md"
+    )
+    package_license.parent.mkdir(parents=True)
+    package_license.write_text("dependency license", encoding="utf-8")
+
+    assert create_artifacts_from_paths("session_1", [str(package_license)]) == []
+
+
 def test_create_artifacts_from_paths_resolves_bare_filename_from_candidate_roots(
     monkeypatch,
     tmp_path: Path,

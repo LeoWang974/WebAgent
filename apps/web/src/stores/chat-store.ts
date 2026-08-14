@@ -558,7 +558,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
 
     const currentSession = get().sessions.find((session) => session.id === sessionId);
-    const shouldAutoRename = isDefaultSessionTitle(currentSession?.title);
+    const shouldAutoRename = Boolean(
+      currentSession && isDefaultSessionTitle(currentSession.title),
+    );
     const autoTitle = generateSessionTitle(trimmed);
 
     const now = new Date().toISOString();

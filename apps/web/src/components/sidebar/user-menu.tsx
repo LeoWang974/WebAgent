@@ -15,8 +15,11 @@ export function UserMenu() {
     <button
       className="flex h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-[#e9e9e2]"
       onClick={async () => {
-        await logout();
-        router.replace("/login");
+        try {
+          await logout();
+        } finally {
+          router.replace("/login");
+        }
       }}
       title="退出登录"
       type="button"

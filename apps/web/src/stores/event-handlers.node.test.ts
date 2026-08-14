@@ -14,3 +14,9 @@ test("stream assistant delta dedupes repeated run steps", () => {
   assert.match(source, /appendAssistantStepOnce/);
   assert.match(source, /normalizedSteps\.some\(\(step\)\s*=>\s*step\.id\s*===\s*messageId\)/);
 });
+
+test("assistant done removes a duplicate terminal stage bubble", () => {
+  assert.match(source, /normalizeMessageContent\(event\.message\.content\)/);
+  assert.match(source, /duplicateStageIndex/);
+  assert.match(source, /message\.id\s*!==\s*event\.message\.id/);
+});

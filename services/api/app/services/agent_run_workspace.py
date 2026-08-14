@@ -1,3 +1,4 @@
+import json
 import re
 import shutil
 from pathlib import Path
@@ -27,6 +28,21 @@ def run_workspace_dir(
     run_part = safe_run_path_segment(run_id)
     path = root / user_part / conversation_part / run_part
     path.mkdir(parents=True, exist_ok=True)
+    package_marker = path / "package.json"
+    if not package_marker.exists():
+        package_marker.write_text(
+            json.dumps(
+                {
+                    "name": f"webagent-run-{run_part.lower()}",
+                    "private": True,
+                    "version": "0.0.0",
+                },
+                ensure_ascii=True,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
     return path
 
 

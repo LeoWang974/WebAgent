@@ -1,6 +1,7 @@
 import logging
 import re
 import shutil
+import sqlite3
 from dataclasses import dataclass
 from os import environ
 from os import name as os_name
@@ -232,6 +233,7 @@ class UserRuntimeContext:
     shared_dir: Path
     hermes_home: Path
     hermes_skills_dir: Path
+    hermes_resume_session_id: str | None = None
 
     def adapter_lock_scope(self) -> str:
         user_segment = safe_runtime_segment(self.user_id)
@@ -240,6 +242,79 @@ class UserRuntimeContext:
 
     def hermes_home_for_shell(self) -> str:
         return shell_path(self.hermes_home)
+
+
+def _stage_latest_hermes_session(
+    conversation_dir: Path,
+    current_run_dir: Path,
+    hermes_home: Path,
+) -> str | None:
+    runs_dir = conversation_dir / "runs"
+    if not runs_dir.is_dir():
+        return None
+
+    candidates = [
+        path
+        for path in runs_dir.glob("*/hermes-home/sessions/session_*.json")
+        if current_run_dir not in path.parents and path.is_file()
+    ]
+    if not candidates:
+        return None
+
+    viable_sessions: list[tuple[float, float, int, Path, Path]] = []
+    for candidate in candidates:
+        candidate_session_id = candidate.stem.removeprefix("session_")
+        candidate_state_db = candidate.parent.parent / "state.db"
+        if not candidate_state_db.is_file():
+            continue
+        try:
+            with sqlite3.connect(candidate_state_db) as source_connection:
+                session_row = source_connection.execute(
+                    "SELECT message_count, COALESCE(ended_at, started_at, 0) "
+                    "FROM sessions WHERE id = ? LIMIT 1",
+                    (candidate_session_id,),
+                ).fetchone()
+        except sqlite3.Error:
+            logger.debug(
+                "Unable to inspect Hermes state database %s",
+                candidate_state_db,
+                exc_info=True,
+            )
+            continue
+        if session_row:
+            viable_sessions.append(
+                (
+                    candidate.stat().st_mtime,
+                    float(session_row[1] or 0),
+                    int(session_row[0] or 0),
+                    candidate,
+                    candidate_state_db,
+                )
+            )
+
+    if not viable_sessions:
+        return None
+
+    _, _, _, latest, source_state_db = max(viable_sessions)
+
+    destination = hermes_home / "sessions" / latest.name
+    _copy_file(latest, destination)
+    destination_state_db = hermes_home / "state.db"
+    try:
+        with (
+            sqlite3.connect(source_state_db) as source_connection,
+            sqlite3.connect(destination_state_db) as destination_connection,
+        ):
+            source_connection.backup(destination_connection)
+    except sqlite3.Error:
+        logger.warning(
+            "Unable to stage Hermes state database from %s",
+            source_state_db,
+            exc_info=True,
+        )
+        return None
+    return latest.stem.removeprefix("session_")
+
 
 def scrub_runtime_credentials(context: UserRuntimeContext) -> None:
     for credential_path in (
@@ -263,8 +338,12 @@ def build_user_runtime_context(
     model_runtime_config: ModelRuntimeConfig | None = None,
 ) -> UserRuntimeContext:
     root = runtime_run_dir(user, conversation_id, run_id)
+    conversation_dir = runtime_conversation_dir(user, conversation_id)
     shared_dir = runtime_user_shared_dir(user.id)
-    hermes_home = root / "hermes-home"
+    # Hermes session state belongs to a conversation, while generated files and
+    # process workspaces remain isolated by run. The per-conversation adapter
+    # lock prevents concurrent processes from mutating this home at once.
+    hermes_home = conversation_dir / "hermes-home"
     hermes_home.mkdir(parents=True, exist_ok=True)
     base_hermes_home = Path(settings.hermes_home).expanduser()
     _copy_file(base_hermes_home / ".env", hermes_home / ".env")
@@ -278,6 +357,23 @@ def build_user_runtime_context(
     )
     hermes_skills_dir = hermes_home / "skills"
     _copy_skills(source_skills, hermes_skills_dir)
+    resume_session_id = None
+    if run_id:
+        state_db = hermes_home / "state.db"
+        if not state_db.is_file():
+            resume_session_id = _stage_latest_hermes_session(
+                conversation_dir,
+                root,
+                hermes_home,
+            )
+        else:
+            sessions = sorted(
+                (hermes_home / "sessions").glob("session_*.json"),
+                key=lambda path: path.stat().st_mtime,
+                reverse=True,
+            )
+            if sessions:
+                resume_session_id = sessions[0].stem.removeprefix("session_")
 
     return UserRuntimeContext(
         user_id=user.id,
@@ -287,4 +383,5 @@ def build_user_runtime_context(
         shared_dir=shared_dir,
         hermes_home=hermes_home,
         hermes_skills_dir=hermes_skills_dir,
+        hermes_resume_session_id=resume_session_id,
     )
