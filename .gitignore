@@ -58,6 +58,7 @@ services/api/deep-research-reports/
 services/api/uploads/
 services/api/outputs/
 services/api/storage/
+services/api/runtime/
 services/api/work-*.log
 work-*.log
 

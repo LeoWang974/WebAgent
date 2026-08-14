@@ -56,6 +56,10 @@ class Settings(BaseSettings):
     agent_adapter_lock_wait_timeout_seconds: int = 60 * 60
     artifact_storage_enabled: bool = True
     artifact_storage_root: str = r"D:\WebAgentArtifacts"
+    artifact_preview_cache_root: str = "runtime/artifact-previews"
+    libreoffice_path: str | None = None
+    pptx_preview_max_slides: int = 100
+    pptx_preview_timeout_seconds: int = 120
     cleanup_enabled: bool = True
     cleanup_initial_delay_seconds: int = 60
     cleanup_interval_seconds: int = 6 * 60 * 60

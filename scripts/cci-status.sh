@@ -98,6 +98,14 @@ else
   echo "hermes: unavailable on PATH"
 fi
 
+if command -v soffice >/dev/null 2>&1; then
+  echo "pptx preview: available ($(command -v soffice))"
+elif command -v libreoffice >/dev/null 2>&1; then
+  echo "pptx preview: available ($(command -v libreoffice))"
+else
+  echo "pptx preview: unavailable (install LibreOffice Impress or set LIBREOFFICE_PATH)"
+fi
+
 echo "recent logs:"
 for log_name in webagent-api.log webagent-worker.log webagent-web.log; do
   log_path="$LOG_DIR/$log_name"

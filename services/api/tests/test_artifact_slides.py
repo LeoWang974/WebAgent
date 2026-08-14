@@ -3,6 +3,7 @@ from pathlib import Path
 from app.api.routes.artifacts import (
     dedupe_slide_artifacts,
     discover_deck_slide_paths,
+    is_deck_slide_artifact,
     slides_from_paths,
 )
 from app.models import Artifact
@@ -102,3 +103,23 @@ def test_slides_from_png_paths_returns_html_wrapped_images(tmp_path: Path):
     assert slides[0].content_type == "text/html"
     assert "data:image/png;base64," in (slides[0].content or "")
     assert slides[0].title == "page_001"
+
+
+def test_is_deck_slide_artifact_rejects_report_html():
+    report = Artifact(
+        conversation_id="session_1",
+        title="market-report",
+        type="html_page",
+        status="ready",
+        artifact_metadata={"filename": "market-report.html"},
+    )
+    slide = Artifact(
+        conversation_id="session_1",
+        title="page_002",
+        type="html_page",
+        status="ready",
+        artifact_metadata={"filename": "page_002.html"},
+    )
+
+    assert not is_deck_slide_artifact(report)
+    assert is_deck_slide_artifact(slide)

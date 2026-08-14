@@ -85,6 +85,7 @@ function SlideFrame({
 export function PptArtifactViewer({ artifact }: PptArtifactViewerProps) {
   const [error, setError] = useState<string | undefined>();
   const [loading, setLoading] = useState(true);
+  const [previewSource, setPreviewSource] = useState<string>();
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [slides, setSlides] = useState<SlidePreview[]>([]);
   const [zoom, setZoom] = useState<number | undefined>();
@@ -99,6 +100,7 @@ export function PptArtifactViewer({ artifact }: PptArtifactViewerProps) {
         const result = await webAgentApi.getArtifactSlides(artifact.id);
         if (!cancelled) {
           setSlides(result.slides);
+          setPreviewSource(result.source);
           setSelectedIndex(0);
         }
       } catch (loadError) {
@@ -133,7 +135,7 @@ export function PptArtifactViewer({ artifact }: PptArtifactViewerProps) {
       <div className="flex min-h-[320px] items-center justify-center rounded-lg border bg-white">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="size-4 animate-spin" />
-          Rendering slide preview...
+          正在渲染幻灯片预览...
         </div>
       </div>
     );
@@ -145,8 +147,8 @@ export function PptArtifactViewer({ artifact }: PptArtifactViewerProps) {
         artifact={artifact}
         description={
           error
-            ? `Slide rendering failed: ${error}`
-            : "The PPTX file is ready. No browser-renderable slide preview is available yet."
+            ? `幻灯片渲染失败：${error}`
+            : "PPTX 文件已就绪，但暂时无法生成浏览器预览。"
         }
       />
     );
@@ -225,7 +227,9 @@ export function PptArtifactViewer({ artifact }: PptArtifactViewerProps) {
           </div>
         </div>
         <div className="border-b bg-[#fbfbfa] px-3 py-2 text-xs text-muted-foreground">
-          预览来自浏览器内 HTML 渲染；下载按钮获取 PPTX 原文件。
+          {previewSource === "pptx_rendered"
+            ? "预览由服务端从 PPTX 渲染；下载按钮获取 PPTX 原文件。"
+            : "预览来自配套 HTML 或图片页面；下载按钮获取 PPTX 原文件。"}
         </div>
         <div className="bg-[#eeeeea] p-3">
           <SlideFrame

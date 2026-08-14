@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import html
 import re
@@ -16,6 +17,7 @@ from app.services.persistence import (
     require_owner,
     to_artifact,
 )
+from app.services.pptx_preview import PptxPreviewError, render_pptx_preview
 from app.services.session_artifacts import is_debug_artifact
 from app.services.settings_service import user_developer_mode
 
@@ -100,6 +102,12 @@ def slide_identity(value: str) -> str:
 
 def is_deck_slide_path(path: Path) -> bool:
     return re.search(r"page[_-]?\d+", path.stem, re.IGNORECASE) is not None
+
+
+def is_deck_slide_artifact(artifact: Artifact) -> bool:
+    metadata = artifact.artifact_metadata or {}
+    filename = str(metadata.get("filename") or artifact.title or "")
+    return re.search(r"page[_-]?\d+", filename, re.IGNORECASE) is not None
 
 
 def normalize_artifact_path(raw_path: str) -> Path:
@@ -290,7 +298,6 @@ async def get_artifact_slides(
     if artifact.type != "ppt_deck":
         raise HTTPException(status_code=400, detail="Artifact is not a PPT deck")
 
-    metadata = artifact.artifact_metadata or {}
     deck_slide_paths = discover_deck_slide_paths(artifact)
     deck_slides = slides_from_paths(artifact, deck_slide_paths)
     if deck_slides:
@@ -300,19 +307,21 @@ async def get_artifact_slides(
             source="deck_slide_paths",
         )
 
-    metadata_slides = metadata.get("slides")
-    if isinstance(metadata_slides, list) and metadata_slides:
-        slides = [
-            schemas.SlidePreview(
-                content=None,
-                content_type="application/json",
-                id=f"{artifact.id}_{index}",
-                index=index,
-                title=str(item.get("title") if isinstance(item, dict) else f"Slide {index}"),
-            )
-            for index, item in enumerate(metadata_slides, start=1)
-        ]
-        return schemas.ArtifactSlides(artifact_id=artifact.id, slides=slides, source="metadata")
+    render_error: PptxPreviewError | None = None
+    pptx_path = artifact_file_path(artifact)
+    if pptx_path is not None and pptx_path.suffix.lower() == ".pptx":
+        try:
+            rendered_paths = await asyncio.to_thread(render_pptx_preview, pptx_path)
+        except PptxPreviewError as error:
+            render_error = error
+        else:
+            rendered_slides = slides_from_paths(artifact, rendered_paths)
+            if rendered_slides:
+                return schemas.ArtifactSlides(
+                    artifact_id=artifact.id,
+                    slides=rendered_slides,
+                    source="pptx_rendered",
+                )
 
     if artifact.run_id:
         html_result = await db.execute(
@@ -323,7 +332,10 @@ async def get_artifact_slides(
             )
         )
         html_artifacts = dedupe_slide_artifacts(
-            sorted(html_result.scalars().all(), key=slide_sort_key)
+            sorted(
+                filter(is_deck_slide_artifact, html_result.scalars().all()),
+                key=slide_sort_key,
+            )
         )
         slides = [
             schemas.SlidePreview(
@@ -340,6 +352,9 @@ async def get_artifact_slides(
             return schemas.ArtifactSlides(
                 artifact_id=artifact.id, slides=slides, source="html_artifacts"
             )
+
+    if render_error is not None:
+        raise HTTPException(status_code=503, detail=str(render_error)) from render_error
 
     return schemas.ArtifactSlides(artifact_id=artifact.id, slides=[], source="unavailable")
 

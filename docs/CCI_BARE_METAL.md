@@ -27,6 +27,18 @@ Required services and tools:
 - PostgreSQL from `DATABASE_URL`
 - Redis from `REDIS_URL`
 - Hermes CLI on `PATH`
+- LibreOffice Impress on `PATH` for browser previews of standalone PPTX files
+
+On Ubuntu, install the PPTX renderer with:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y libreoffice-impress fonts-noto-cjk
+```
+
+If LibreOffice is installed outside `PATH`, set `LIBREOFFICE_PATH` to its
+`soffice` executable. WebAgent converts PPTX to cached slide images; the
+original PPTX remains unchanged and is still used for downloads.
 
 ## Environment
 
@@ -44,6 +56,9 @@ SERPER_API_KEY=...
 HERMES_CLI_PATH=$WEBAGENT_ROOT/runtime/agent-home/.local/bin/hermes
 HERMES_HOME=$WEBAGENT_ROOT/runtime/agent-home/.hermes
 HERMES_SKILLS_DIR=$WEBAGENT_ROOT/runtime/agent-home/.hermes/skills
+
+ARTIFACT_PREVIEW_CACHE_ROOT=$WEBAGENT_ROOT/runtime/artifact-previews
+LIBREOFFICE_PATH=/usr/bin/soffice
 
 AGENT_RUN_QUEUE_ENABLED=true
 WORKER_INSTANCES=4
