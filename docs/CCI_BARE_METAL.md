@@ -29,6 +29,11 @@ Required services and tools:
 - Hermes CLI on `PATH`
 - LibreOffice Impress on `PATH` for browser previews of standalone PPTX files
 
+By default, `scripts/cci-start.sh` starts the user-space PostgreSQL and
+Redis/Valkey binaries under `$WEBAGENT_ROOT/runtime/conda-webagent`. Set
+`CCI_MANAGE_LOCAL_INFRA=false` when `DATABASE_URL` and `REDIS_URL` point to
+externally managed services.
+
 On Ubuntu, install the PPTX renderer with:
 
 ```bash

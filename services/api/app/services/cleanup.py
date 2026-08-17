@@ -1,3 +1,4 @@
+import asyncio
 import os
 import shutil
 from dataclasses import dataclass
@@ -185,7 +186,8 @@ async def run_data_cleanup(
     runtime_file_max_age_days: int = 14,
     repo_root: Path | None = None,
 ) -> CleanupResult:
-    runtime_deleted = cleanup_expired_runtime_files(
+    runtime_deleted = await asyncio.to_thread(
+        cleanup_expired_runtime_files,
         max_age_days=runtime_file_max_age_days,
         repo_root=repo_root,
     )

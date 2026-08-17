@@ -6,6 +6,7 @@ REPO_DIR="$ROOT_DIR/repo/WebAgent"
 LOG_DIR="$ROOT_DIR/logs"
 RUN_DIR="$ROOT_DIR/run"
 PYTHON_BIN="$ROOT_DIR/runtime/conda-webagent/bin/python"
+RUNTIME_BIN_DIR="$ROOT_DIR/runtime/conda-webagent/bin"
 AGENT_ENV="$ROOT_DIR/secrets/agent-pack.env"
 MODEL_SECRET_KEY_FILE="$ROOT_DIR/secrets/model-config.key"
 AGENT_BIN_DIR="$ROOT_DIR/runtime/agent-home/.local/bin"
@@ -19,6 +20,11 @@ WORKER_CONCURRENCY="${WORKER_CONCURRENCY:-1}"
 WORKER_INSTANCES="${WORKER_INSTANCES:-4}"
 SHORT_CHAT_QUEUE_NAME="${SHORT_CHAT_QUEUE_NAME:-short-chat}"
 AGENT_RUN_QUEUE_NAME="${AGENT_RUN_QUEUE_NAME:-agent-runs}"
+CCI_MANAGE_LOCAL_INFRA="${CCI_MANAGE_LOCAL_INFRA:-true}"
+POSTGRES_DATA_DIR="${POSTGRES_DATA_DIR:-$ROOT_DIR/runtime/postgres/data}"
+POSTGRES_PORT="${POSTGRES_PORT:-5432}"
+REDIS_DATA_DIR="${REDIS_DATA_DIR:-$ROOT_DIR/runtime/redis}"
+REDIS_PORT="${REDIS_PORT:-6379}"
 WEB_PUBLIC_API_BASE_URL="${NEXT_PUBLIC_API_BASE_URL:-}"
 WEB_PUBLIC_API_ADAPTER="${NEXT_PUBLIC_API_ADAPTER:-fastapi}"
 DEFAULT_CORS_ORIGINS="http://localhost:$WEB_PORT,http://127.0.0.1:$WEB_PORT,http://localhost:3300,http://127.0.0.1:3300,http://localhost:3002,http://127.0.0.1:3002"
@@ -31,6 +37,66 @@ if [ ! -x "$PYTHON_BIN" ]; then
   echo "Missing Python runtime: $PYTHON_BIN" >&2
   exit 1
 fi
+
+start_local_infrastructure() {
+  if [ "$CCI_MANAGE_LOCAL_INFRA" != "true" ]; then
+    return
+  fi
+
+  for command_name in pg_isready pg_ctl redis-cli redis-server; do
+    if [ ! -x "$RUNTIME_BIN_DIR/$command_name" ]; then
+      echo "Missing local infrastructure command: $RUNTIME_BIN_DIR/$command_name" >&2
+      echo "Set CCI_MANAGE_LOCAL_INFRA=false when using external services." >&2
+      exit 1
+    fi
+  done
+
+  if ! "$RUNTIME_BIN_DIR/pg_isready" -h 127.0.0.1 -p "$POSTGRES_PORT" \
+    >/dev/null 2>&1; then
+    if [ ! -d "$POSTGRES_DATA_DIR" ] || [ ! -x "$RUNTIME_BIN_DIR/pg_ctl" ]; then
+      echo "Local PostgreSQL runtime is incomplete under $ROOT_DIR/runtime." >&2
+      exit 1
+    fi
+    echo "Starting local PostgreSQL on port $POSTGRES_PORT..."
+    "$RUNTIME_BIN_DIR/pg_ctl" \
+      -D "$POSTGRES_DATA_DIR" \
+      -l "$LOG_DIR/postgres.log" \
+      start
+  fi
+
+  if ! "$RUNTIME_BIN_DIR/redis-cli" -h 127.0.0.1 -p "$REDIS_PORT" ping \
+    >/dev/null 2>&1; then
+    if [ ! -x "$RUNTIME_BIN_DIR/redis-server" ]; then
+      echo "Local Redis/Valkey runtime is incomplete under $ROOT_DIR/runtime." >&2
+      exit 1
+    fi
+    echo "Starting local Redis/Valkey on port $REDIS_PORT..."
+    mkdir -p "$REDIS_DATA_DIR"
+    "$RUNTIME_BIN_DIR/redis-server" \
+      --daemonize yes \
+      --bind 127.0.0.1 \
+      --port "$REDIS_PORT" \
+      --dir "$REDIS_DATA_DIR" \
+      --pidfile "$RUN_DIR/redis.pid" \
+      --logfile "$LOG_DIR/redis.log"
+  fi
+
+  for attempt in {1..30}; do
+    if "$RUNTIME_BIN_DIR/pg_isready" -h 127.0.0.1 -p "$POSTGRES_PORT" \
+      >/dev/null 2>&1 && \
+      "$RUNTIME_BIN_DIR/redis-cli" -h 127.0.0.1 -p "$REDIS_PORT" ping \
+      >/dev/null 2>&1; then
+      return
+    fi
+    if [ "$attempt" -eq 30 ]; then
+      echo "Local PostgreSQL or Redis/Valkey did not become ready." >&2
+      exit 1
+    fi
+    sleep 1
+  done
+}
+
+start_local_infrastructure
 
 if [ -f "$AGENT_ENV" ]; then
   set -a
