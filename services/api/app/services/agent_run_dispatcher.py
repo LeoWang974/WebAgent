@@ -1,3 +1,6 @@
+# File purpose: Implements the agent run dispatcher backend service workflow.
+# Main declarations: enqueue_agent_run_message handles enqueue agent run message.
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import schemas

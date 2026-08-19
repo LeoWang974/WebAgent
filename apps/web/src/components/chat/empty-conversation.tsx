@@ -1,3 +1,8 @@
+/**
+ * File purpose: Renders and coordinates the empty conversation user-interface feature.
+ * Main declarations: EmptyConversation handles empty conversation.
+ */
+
 "use client";
 
 import { useChatStore } from "@/stores";

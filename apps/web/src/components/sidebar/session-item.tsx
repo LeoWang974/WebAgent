@@ -1,3 +1,8 @@
+/**
+ * File purpose: Renders and coordinates the session item user-interface feature.
+ * Main declarations: SessionItem handles session item.
+ */
+
 "use client";
 
 import { Check, Pencil, Pin, PinOff, Trash2, X } from "lucide-react";

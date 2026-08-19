@@ -1,3 +1,9 @@
+# File purpose: Verifies test settings service behavior and its regression contracts.
+# Main declarations: test_listing_models_preserves_legacy_named_configuration verifies listing
+# models preserves legacy named configuration;
+# test_default_model_repair_leaves_exactly_one_default verifies default model repair leaves
+# exactly one default.
+
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker

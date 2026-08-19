@@ -1,3 +1,9 @@
+/**
+ * File purpose: Verifies sse parser.node.test behavior and its regression contracts.
+ * Main declarations: this file contains declarative configuration or re-exports and has no
+ * callable declarations.
+ */
+
 import assert from "node:assert/strict";
 import test from "node:test";
 import { parseSseEvents, splitSseBuffer } from "./sse-parser.ts";

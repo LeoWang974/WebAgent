@@ -1,3 +1,10 @@
+# File purpose: Implements the artifact storage backend service workflow.
+# Main declarations: safe_storage_segment handles safe storage segment; artifact_storage_root
+# handles artifact storage root; artifact_run_storage_dir handles artifact run storage dir;
+# file_sha256 handles file sha256; StoredArtifactFile defines stored artifact file state or
+# behavior; store_artifact_file handles store artifact file; update_artifact_manifest updates
+# artifact manifest.
+
 import hashlib
 import json
 import re

@@ -1,3 +1,8 @@
+/**
+ * File purpose: Renders and coordinates the route session sync user-interface feature.
+ * Main declarations: RouteSessionSync handles route session sync.
+ */
+
 "use client";
 
 import { useLayoutEffect } from "react";

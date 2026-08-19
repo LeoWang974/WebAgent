@@ -1,3 +1,8 @@
+# File purpose: Implements the file storage backend service workflow.
+# Main declarations: upload_storage_root handles upload storage root; conversation_upload_dir
+# handles conversation upload dir; user_global_upload_dir handles user global upload dir;
+# remove_conversation_storage removes conversation storage.
+
 import logging
 import shutil
 from pathlib import Path

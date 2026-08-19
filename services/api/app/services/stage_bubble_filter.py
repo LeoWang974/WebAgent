@@ -1,3 +1,8 @@
+# File purpose: Implements the stage bubble filter backend service workflow.
+# Main declarations: normalize_runtime_update normalizes runtime update; runtime_stage_key handles
+# runtime stage key; is_low_value_runtime_update checks low value runtime update;
+# should_suppress_stage_bubble decides suppress stage bubble.
+
 import re
 
 

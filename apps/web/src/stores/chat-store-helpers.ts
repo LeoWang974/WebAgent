@@ -1,3 +1,12 @@
+/**
+ * File purpose: Manages client state and actions for chat store helpers.
+ * Main declarations: createId handles create id; isTerminalRunStatus handles is terminal run
+ * status; isDefaultSessionTitle handles is default session title; generateSessionTitle handles
+ * generate session title; createPendingAssistantMessage handles create pending assistant message;
+ * pendingMessageForRun handles pending message for run; hasPendingAssistantMessage handles has
+ * pending assistant message.
+ */
+
 "use client";
 
 import { useUiStore } from "./ui-store";

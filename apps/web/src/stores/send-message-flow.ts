@@ -1,3 +1,9 @@
+/**
+ * File purpose: Manages client state and actions for send message flow.
+ * Main declarations: mergeDiscoveredRun handles merge discovered run; sendMessageFlow handles send
+ * message flow.
+ */
+
 "use client";
 
 import { webAgentApi } from "@/services";

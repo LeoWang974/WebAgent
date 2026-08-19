@@ -1,3 +1,11 @@
+/**
+ * File purpose: Provides shared browser utilities for artifact actions.
+ * Main declarations: safeFileName handles safe file name; tableToCsv handles table to csv;
+ * metadataFileName handles metadata file name; firstImageUrl handles first image url;
+ * getArtifactFallbackDownload handles get artifact fallback download; saveBlob handles save blob;
+ * dataUrlToBlob handles data url to blob; downloadArtifact handles download artifact.
+ */
+
 import type { Artifact } from "@/types";
 import { webAgentApi } from "@/services/adapters";
 

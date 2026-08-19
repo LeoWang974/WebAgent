@@ -1,3 +1,9 @@
+/**
+ * File purpose: Implements browser-side API access for fastapi settings adapter.
+ * Main declarations: this file contains declarative configuration or re-exports and has no
+ * callable declarations.
+ */
+
 import { apiClient } from "../api-client";
 import type {
   DataContextSettings,

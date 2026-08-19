@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# File purpose: Automates the test api development, deployment, or maintenance workflow.
+# Main declarations: this file contains declarative configuration or re-exports and has no
+# callable declarations.
+
 set -euo pipefail
 
 GROUP="${1:-unit}"

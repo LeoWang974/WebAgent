@@ -1,3 +1,9 @@
+/**
+ * File purpose: Defines shared TypeScript contracts for agent run.
+ * Main declarations: this file contains declarative configuration or re-exports and has no
+ * callable declarations.
+ */
+
 export type AgentRunStatus =
   | "queued"
   | "running"

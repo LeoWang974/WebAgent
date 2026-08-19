@@ -1,3 +1,8 @@
+/**
+ * File purpose: Renders and coordinates the language settings user-interface feature.
+ * Main declarations: LanguageSettings handles language settings.
+ */
+
 "use client";
 
 import { useEffect } from "react";

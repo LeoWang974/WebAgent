@@ -1,3 +1,9 @@
+/**
+ * File purpose: Renders and coordinates the ppt artifact viewer user-interface feature.
+ * Main declarations: slideTitle handles slide title; SlideFrame handles slide frame;
+ * PptArtifactViewer handles ppt artifact viewer.
+ */
+
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";

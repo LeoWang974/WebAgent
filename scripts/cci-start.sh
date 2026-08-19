@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# File purpose: Automates the cci start development, deployment, or maintenance workflow.
+# Main declarations: start_local_infrastructure starts local infrastructure.
+
 set -euo pipefail
 
 ROOT_DIR="${WEBAGENT_ROOT:-/mnt/afs/tj_share/webagent-cci}"
@@ -26,8 +29,7 @@ POSTGRES_PORT="${POSTGRES_PORT:-5432}"
 REDIS_DATA_DIR="${REDIS_DATA_DIR:-$ROOT_DIR/runtime/redis}"
 REDIS_PORT="${REDIS_PORT:-6379}"
 WEB_PUBLIC_API_BASE_URL="${NEXT_PUBLIC_API_BASE_URL:-}"
-WEB_PUBLIC_API_ADAPTER="${NEXT_PUBLIC_API_ADAPTER:-fastapi}"
-DEFAULT_CORS_ORIGINS="http://localhost:$WEB_PORT,http://127.0.0.1:$WEB_PORT,http://localhost:3300,http://127.0.0.1:3300,http://localhost:3002,http://127.0.0.1:3002"
+DEFAULT_CORS_ORIGINS="http://localhost:$WEB_PORT,http://127.0.0.1:$WEB_PORT"
 
 cd "$REPO_DIR"
 mkdir -p "$LOG_DIR"
@@ -175,7 +177,6 @@ for pattern in \
   "uvicorn app.main:app --host 0.0.0.0 --port $API_PORT" \
   "celery -A app.workers.celery_app.celery_app worker" \
   "next start -H 0.0.0.0 -p $WEB_PORT" \
-  "next start -H 0.0.0.0 -p 3002"
 do
   pids="$(pgrep -u "$(id -un)" -f "$pattern" || true)"
   if [ -n "$pids" ]; then
@@ -189,7 +190,6 @@ for pattern in \
   "uvicorn app.main:app --host 0.0.0.0 --port $API_PORT" \
   "celery -A app.workers.celery_app.celery_app worker" \
   "next start -H 0.0.0.0 -p $WEB_PORT" \
-  "next start -H 0.0.0.0 -p 3002"
 do
   pids="$(pgrep -u "$(id -un)" -f "$pattern" || true)"
   if [ -n "$pids" ]; then
@@ -257,8 +257,7 @@ if ! command -v pnpm >/dev/null 2>&1; then
   echo "Missing pnpm on PATH; API and worker started, web was not started." >&2
 else
   BUILD_ENV_STAMP="$REPO_DIR/apps/web/.next-build/.webagent-env"
-  CURRENT_BUILD_ENV="NEXT_PUBLIC_API_BASE_URL=$WEB_PUBLIC_API_BASE_URL
-NEXT_PUBLIC_API_ADAPTER=$WEB_PUBLIC_API_ADAPTER"
+  CURRENT_BUILD_ENV="NEXT_PUBLIC_API_BASE_URL=$WEB_PUBLIC_API_BASE_URL"
   WEB_SOURCE_CHANGED=false
   if [ -f "$BUILD_ENV_STAMP" ] && find \
     "$REPO_DIR/apps/web/src" \
@@ -273,12 +272,10 @@ NEXT_PUBLIC_API_ADAPTER=$WEB_PUBLIC_API_ADAPTER"
     [ "$WEB_SOURCE_CHANGED" = true ]; then
     rm -rf "$REPO_DIR/apps/web/.next-build"
     NEXT_PUBLIC_API_BASE_URL="$WEB_PUBLIC_API_BASE_URL" \
-    NEXT_PUBLIC_API_ADAPTER="$WEB_PUBLIC_API_ADAPTER" \
     pnpm --filter web build >> "$LOG_DIR/webagent-web.log" 2>&1
     printf "%s" "$CURRENT_BUILD_ENV" > "$BUILD_ENV_STAMP"
   fi
   NEXT_PUBLIC_API_BASE_URL="$WEB_PUBLIC_API_BASE_URL" \
-  NEXT_PUBLIC_API_ADAPTER="$WEB_PUBLIC_API_ADAPTER" \
   nohup pnpm --filter web exec next start -H 0.0.0.0 -p "$WEB_PORT" \
     >> "$LOG_DIR/webagent-web.log" 2>&1 &
   echo "$!" > "$RUN_DIR/webagent-web.pid"

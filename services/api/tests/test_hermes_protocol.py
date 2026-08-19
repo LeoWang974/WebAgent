@@ -1,3 +1,24 @@
+# File purpose: Verifies test hermes protocol behavior and its regression contracts.
+# Main declarations: test_hermes_recovers_latest_assistant_message_from_session verifies hermes
+# recovers latest assistant message from session;
+# test_hermes_session_recovery_ignores_sessions_from_before_run verifies hermes session recovery
+# ignores sessions from before run; test_hermes_completion_signal_accepts_chinese_and_mojibake
+# verifies hermes completion signal accepts chinese and mojibake;
+# test_hermes_box_parser_accepts_mojibake_box_prefixes verifies hermes box parser accepts mojibake
+# box prefixes; test_hermes_summarizes_long_box_to_visible_stage verifies hermes summarizes long
+# box to visible stage; test_hermes_stream_event_payload_contains_protocol_fields verifies hermes
+# stream event payload contains protocol fields;
+# test_hermes_extracts_report_path_from_generated_message verifies hermes extracts report path
+# from generated message; test_hermes_resolves_relative_artifacts_from_final_output verifies
+# hermes resolves relative artifacts from final output;
+# test_hermes_final_discovery_scans_only_run_directories verifies hermes final discovery scans
+# only run directories; test_hermes_emits_artifact_found_after_final_output_discovery verifies
+# hermes emits artifact found after final output discovery;
+# test_hermes_session_recovery_does_not_duplicate_visible_completion verifies hermes session
+# recovery does not duplicate visible completion; test_hermes_stream_event_classification verifies
+# hermes stream event classification; test_hermes_summarizes_raw_tool_lines_to_user_visible_status
+# verifies hermes summarizes raw tool lines to user visible status.
+
 import asyncio
 import json
 import os
@@ -147,6 +168,26 @@ def test_hermes_resolves_relative_artifacts_from_final_output(tmp_path: Path):
     assert str(html_path.resolve()) in wrapper.last_artifact_paths
     artifact_types = {item["artifact_type"] for item in wrapper.last_artifacts}
     assert {"ppt_deck", "html_page"}.issubset(artifact_types)
+
+
+def test_hermes_resolves_reports_path_without_ingesting_repository_docs(
+    tmp_path: Path,
+):
+    wrapper = HermesCliWrapper()
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    report_path = reports_dir / "generated.md"
+    readme_path = tmp_path / "README.md"
+    report_path.write_text("# Generated report", encoding="utf-8")
+    readme_path.write_text("# Repository documentation", encoding="utf-8")
+
+    wrapper._remember_final_output_artifact_paths(
+        "报告已保存到 ./reports/generated.md，相关命令见 README.md。",
+        working_dir=str(tmp_path),
+        artifacts_dir=None,
+    )
+
+    assert wrapper.last_artifact_paths == [str(report_path.resolve())]
 
 
 def test_hermes_final_discovery_scans_only_run_directories(tmp_path: Path):

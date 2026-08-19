@@ -1,3 +1,12 @@
+# File purpose: Implements the Hermes CLI integration for process registry.
+# Main declarations: register_run_process handles register run process; unregister_run_process
+# handles unregister run process; terminate_registered_run_process handles terminate registered
+# run process; terminate_process_tree handles terminate process tree; terminate_process_group
+# handles terminate process group; terminate_processes_by_marker handles terminate processes by
+# marker; _registry_path handles registry path; _process_group_id handles process group id;
+# _registered_process_targets handles registered process targets; _descendant_pids handles
+# descendant pids; _kill_posix handles kill posix.
+
 import asyncio
 import json
 import os

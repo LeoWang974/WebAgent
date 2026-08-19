@@ -1,3 +1,8 @@
+/**
+ * File purpose: Renders and coordinates the artifact empty state user-interface feature.
+ * Main declarations: ArtifactEmptyState handles artifact empty state.
+ */
+
 "use client";
 
 import { useI18n } from "@/lib/i18n";

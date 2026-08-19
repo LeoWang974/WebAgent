@@ -1,3 +1,8 @@
+/**
+ * File purpose: Defines the Next.js layout route or route layout.
+ * Main declarations: RootLayout handles root layout.
+ */
+
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import "../styles/globals.css";

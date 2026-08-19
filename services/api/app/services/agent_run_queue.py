@@ -1,3 +1,7 @@
+# File purpose: Implements the agent run queue backend service workflow.
+# Main declarations: is_short_chat_request checks short chat request; queue_for_message handles
+# queue for message; estimated_queue_position handles estimated queue position.
+
 import logging
 
 from redis.asyncio import Redis

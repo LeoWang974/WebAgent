@@ -1,3 +1,9 @@
+/**
+ * File purpose: Renders and coordinates the markdown viewer user-interface feature.
+ * Main declarations: slugify handles slugify; extractToc handles extract toc; headingText handles
+ * heading text; MarkdownViewer handles markdown viewer.
+ */
+
 "use client";
 
 import { useMemo } from "react";

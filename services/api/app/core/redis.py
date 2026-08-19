@@ -1,3 +1,7 @@
+# File purpose: Provides core redis configuration and infrastructure helpers.
+# Main declarations: this file contains declarative configuration or re-exports and has no
+# callable declarations.
+
 from redis.asyncio import Redis
 
 from app.core.config import settings

@@ -1,7 +1,11 @@
+# File purpose: Automates the stop dev development, deployment, or maintenance workflow.
+# Main declarations: this file contains declarative configuration or re-exports and has no
+# callable declarations.
+
 $ErrorActionPreference = "Continue"
 
 $repoRoot = (Split-Path -Parent $PSScriptRoot).ToLowerInvariant()
-$ports = @(3002, 8010)
+$ports = @(3000, 8010)
 
 foreach ($port in $ports) {
   $listeners = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue |

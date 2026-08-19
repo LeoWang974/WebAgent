@@ -1,3 +1,15 @@
+# File purpose: Defines FastAPI endpoints for the artifacts API surface.
+# Main declarations: ensure_artifact_visible ensures artifact visible; artifact_download_name
+# handles artifact download name; artifact_file_path handles artifact file path; slide_sort_key
+# handles slide sort key; slide_path_sort_key handles slide path sort key; slide_identity handles
+# slide identity; is_deck_slide_path checks deck slide path; is_deck_slide_artifact checks deck
+# slide artifact; normalize_artifact_path normalizes artifact path; deck_slide_directories handles
+# deck slide directories; discover_deck_slide_paths discovers deck slide paths;
+# slide_content_from_path handles slide content from path; slides_from_paths handles slides from
+# paths; dedupe_slide_artifacts handles dedupe slide artifacts; list_artifacts lists artifacts;
+# get_artifact retrieves artifact; get_artifact_slides retrieves artifact slides; delete_artifact
+# deletes artifact; download_artifact handles download artifact.
+
 import asyncio
 import base64
 import html

@@ -1,3 +1,6 @@
+# File purpose: Implements the main module for WebAgent.
+# Main declarations: lifespan handles lifespan; create_app creates app.
+
 import asyncio
 import logging
 from collections.abc import AsyncIterator

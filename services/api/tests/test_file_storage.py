@@ -1,3 +1,8 @@
+# File purpose: Verifies test file storage behavior and its regression contracts.
+# Main declarations: test_conversation_upload_dir_is_scoped_by_user verifies conversation upload
+# dir is scoped by user; test_remove_conversation_storage_removes_managed_directories verifies
+# remove conversation storage removes managed directories.
+
 from pathlib import Path
 
 from app.core.config import settings

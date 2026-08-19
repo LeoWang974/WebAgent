@@ -1,3 +1,8 @@
+/**
+ * File purpose: Renders and coordinates the user management user-interface feature.
+ * Main declarations: UserManagement handles user management.
+ */
+
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";

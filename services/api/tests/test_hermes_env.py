@@ -1,3 +1,17 @@
+# File purpose: Verifies test hermes env behavior and its regression contracts.
+# Main declarations: test_hermes_marks_serper_as_configured_from_runtime_settings verifies hermes
+# marks serper as configured from runtime settings;
+# test_hermes_repairs_gb18030_mojibake_from_pty_output verifies hermes repairs gb18030 mojibake
+# from pty output; test_hermes_keeps_valid_chinese_unchanged verifies hermes keeps valid chinese
+# unchanged; test_hermes_emits_concise_chinese_box_reply_without_punctuation verifies hermes emits
+# concise chinese box reply without punctuation;
+# test_hermes_chat_exec_args_keep_prompt_out_of_shell verifies hermes chat exec args keep prompt
+# out of shell; test_hermes_chat_exec_args_auto_approve_background_tool_calls verifies hermes chat
+# exec args auto approve background tool calls;
+# test_hermes_chat_exec_args_avoid_windows_shell_quoting verifies hermes chat exec args avoid
+# windows shell quoting; test_hermes_remembers_json_paths_as_debug_artifacts verifies hermes
+# remembers json paths as debug artifacts.
+
 from os import name as os_name
 
 from app.integrations.hermes import HermesCliWrapper

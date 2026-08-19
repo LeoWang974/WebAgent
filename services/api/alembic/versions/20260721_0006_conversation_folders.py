@@ -1,3 +1,7 @@
+# File purpose: Defines the 20260721 0006 conversation folders database schema migration and
+# rollback.
+# Main declarations: upgrade handles upgrade; downgrade handles downgrade.
+
 """add conversation folders
 
 Revision ID: 20260721_0006

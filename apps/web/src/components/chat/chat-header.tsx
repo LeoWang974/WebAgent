@@ -1,3 +1,8 @@
+/**
+ * File purpose: Renders and coordinates the chat header user-interface feature.
+ * Main declarations: copyText handles copy text; ChatHeader handles chat header.
+ */
+
 "use client";
 
 import { useState } from "react";

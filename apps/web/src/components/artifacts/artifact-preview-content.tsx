@@ -1,3 +1,9 @@
+/**
+ * File purpose: Renders and coordinates the artifact preview content user-interface feature.
+ * Main declarations: getMetadata handles get metadata; formatJsonContent handles format json
+ * content; ArtifactPreviewContent handles artifact preview content.
+ */
+
 import type { Artifact } from "@/types";
 import { ArtifactEmptyState } from "./artifact-empty-state";
 import { DataTableViewer } from "./data-table-viewer";

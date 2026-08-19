@@ -1,3 +1,8 @@
+/**
+ * File purpose: Renders and coordinates the html viewer user-interface feature.
+ * Main declarations: HtmlViewer handles html viewer.
+ */
+
 "use client";
 
 interface HtmlViewerProps {

@@ -1,3 +1,11 @@
+# File purpose: Implements the skills updater backend service workflow.
+# Main declarations: SkillsUpdateResult defines skills update result state or behavior; repo_root
+# handles repo root; default_skills_cache_dir handles default skills cache dir; _run_command
+# handles run command; _git_update handles git update; _windows_path_to_wsl handles windows path
+# to wsl; _is_wsl_absolute_path handles is wsl absolute path; _sync_local_directory handles sync
+# local directory; _sync_wsl_directory handles sync wsl directory; _sync_skills_target handles
+# sync skills target; update_sensenova_skills updates sensenova skills.
+
 import asyncio
 import logging
 import platform

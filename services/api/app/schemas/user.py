@@ -1,3 +1,7 @@
+# File purpose: Defines Pydantic API contracts for user.
+# Main declarations: User defines user state or behavior; AdminUser defines admin user state or
+# behavior; AdminPasswordReset defines admin password reset state or behavior.
+
 from app.schemas.base import ApiModel
 
 

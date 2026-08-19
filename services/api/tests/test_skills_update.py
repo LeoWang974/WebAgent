@@ -1,3 +1,11 @@
+# File purpose: Verifies test skills update behavior and its regression contracts.
+# Main declarations: init_git_repo handles init git repo;
+# test_next_weekly_run_at_schedules_friday_5pm_shanghai verifies next weekly run at schedules
+# friday 5pm shanghai; test_next_weekly_run_at_rolls_to_next_week_after_target_time verifies next
+# weekly run at rolls to next week after target time;
+# test_update_sensenova_skills_syncs_local_repo_to_runtime_targets verifies update sensenova
+# skills syncs local repo to runtime targets.
+
 from datetime import UTC, datetime
 from pathlib import Path
 

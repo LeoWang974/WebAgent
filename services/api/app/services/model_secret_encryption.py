@@ -1,3 +1,12 @@
+# File purpose: Implements the model secret encryption backend service workflow.
+# Main declarations: ModelSecretError defines model secret error state or behavior;
+# ModelSecretConfigurationError defines model secret configuration error state or behavior;
+# ModelSecretDecryptionError defines model secret decryption error state or behavior;
+# SecretRotationResult defines secret rotation result state or behavior; ModelSecretCipher defines
+# model secret cipher state or behavior; _configured_previous_keys handles configured previous
+# keys; model_secret_cipher handles model secret cipher; encrypt_model_secret encrypts model
+# secret; decrypt_model_secret decrypts model secret; mask_model_secret masks model secret.
+
 import binascii
 import hashlib
 from dataclasses import dataclass

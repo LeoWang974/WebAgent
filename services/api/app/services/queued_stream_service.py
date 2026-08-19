@@ -1,3 +1,9 @@
+# File purpose: Implements the queued stream service backend service workflow.
+# Main declarations: stream_queued_agent_run handles stream queued agent run;
+# stream_session_message_response handles stream session message response;
+# build_assistant_done_payload builds assistant done payload; _queued_event_payload handles queued
+# event payload.
+
 import asyncio
 from collections.abc import AsyncGenerator
 

@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# File purpose: Automates the cci status development, deployment, or maintenance workflow.
+# Main declarations: print_process handles print process.
+
 set -euo pipefail
 
 ROOT_DIR="${WEBAGENT_ROOT:-/mnt/afs/tj_share/webagent-cci}"

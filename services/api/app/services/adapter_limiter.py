@@ -1,3 +1,10 @@
+# File purpose: Implements the adapter limiter backend service workflow.
+# Main declarations: AdapterCapacityTimeout defines adapter capacity timeout state or behavior;
+# AdapterCapacityLease defines adapter capacity lease state or behavior; NoopAdapterCapacityLease
+# defines noop adapter capacity lease state or behavior; adapter_concurrency_limit handles adapter
+# concurrency limit; adapter_lock_scope handles adapter lock scope; acquire_adapter_capacity
+# handles acquire adapter capacity.
+
 import asyncio
 import secrets
 from collections.abc import Awaitable, Callable

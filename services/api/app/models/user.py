@@ -1,3 +1,6 @@
+# File purpose: Defines SQLAlchemy persistence models for user.
+# Main declarations: User defines user state or behavior.
+
 from sqlalchemy import String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 

@@ -1,3 +1,9 @@
+/**
+ * File purpose: Implements browser-side API access for api client.
+ * Main declarations: ApiError defines api error state or behavior; getAccessToken handles get
+ * access token; apiClient handles api client; API_BASE_URL exposes the api base url public API.
+ */
+
 export const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").replace(/\/$/, "");
 
 export class ApiError extends Error {

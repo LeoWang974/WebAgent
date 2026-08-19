@@ -1,3 +1,6 @@
+# File purpose: Defines FastAPI endpoints for the skills API surface.
+# Main declarations: list_skills lists skills.
+
 from fastapi import APIRouter
 
 from app import schemas

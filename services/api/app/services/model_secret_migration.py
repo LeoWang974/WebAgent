@@ -1,3 +1,9 @@
+# File purpose: Implements the model secret migration backend service workflow.
+# Main declarations: SecretCollectionMigration defines secret collection migration state or
+# behavior; ModelSecretMigrationReport defines model secret migration report state or behavior;
+# migrate_model_secrets handles migrate model secrets; _migrate_collection handles migrate
+# collection.
+
 from dataclasses import dataclass, field
 
 from sqlalchemy import select

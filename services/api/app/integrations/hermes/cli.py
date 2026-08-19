@@ -1,3 +1,7 @@
+# File purpose: Implements the Hermes CLI integration for cli.
+# Main declarations: HermesStreamEvent defines hermes stream event state or behavior;
+# HermesCliWrapper defines hermes cli wrapper state or behavior.
+
 import asyncio
 import codecs
 import json
@@ -48,7 +52,15 @@ IGNORED_ARTIFACT_PATH_PARTS = {
     "site-packages",
 }
 IGNORED_ARTIFACT_PATH_SUFFIXES = (".dist-info", ".egg-info")
-IGNORED_ARTIFACT_FILENAMES = {"package-lock.json", "package.json"}
+IGNORED_ARTIFACT_FILENAMES = {
+    "package-lock.json",
+    "package.json",
+    "readme.md",
+    "request.md",
+    "skill.md",
+    "soul.md",
+    "testing.md",
+}
 BOX_CODEPOINTS = {
     0x2500,
     0x2502,
@@ -438,6 +450,7 @@ class HermesCliWrapper:
             working_dir,
             str(run_runtime_root) if run_runtime_root else None,
             str(Path.cwd()),
+            str(Path(__file__).resolve().parents[4]),
             str(Path(__file__).resolve().parents[4] / "services" / "api"),
         ]
         for candidate in candidates:
@@ -465,7 +478,12 @@ class HermesCliWrapper:
                 candidate = match.group("path").strip().strip(".,;:：()[]{} ")
                 if not candidate or ARTIFACT_PATH_RE.fullmatch(candidate):
                     continue
+                relative_marker = max(candidate.rfind("./"), candidate.rfind(".\\"))
+                if relative_marker >= 0:
+                    candidate = candidate[relative_marker:]
                 candidate_path = Path(candidate.replace("\\", os.sep).replace("/", os.sep))
+                if candidate_path.name.lower() in IGNORED_ARTIFACT_FILENAMES:
+                    continue
                 if candidate_path.is_absolute():
                     if candidate_path.exists():
                         self._remember_artifact_path(str(candidate_path.resolve()))

@@ -1,3 +1,46 @@
+# File purpose: Verifies test artifact discovery behavior and its regression contracts.
+# Main declarations: test_windows_path_to_wsl_normalizes_backslashes verifies windows path to wsl
+# normalizes backslashes; test_wsl_artifact_mtime_rejects_directories verifies wsl artifact mtime
+# rejects directories; test_normalized_path_key_unifies_windows_and_wsl_paths verifies normalized
+# path key unifies windows and wsl paths; test_configured_hermes_home_candidates_use_settings
+# verifies configured hermes home candidates use settings;
+# test_candidate_roots_include_hermes_deep_research_reports verifies candidate roots include
+# hermes deep research reports; test_create_artifacts_from_paths_dedupes_by_content_hash verifies
+# create artifacts from paths dedupes by content hash;
+# test_create_artifacts_from_paths_ignores_runtime_dependency_docs verifies create artifacts from
+# paths ignores runtime dependency docs;
+# test_create_artifacts_from_paths_resolves_bare_filename_from_candidate_roots verifies create
+# artifacts from paths resolves bare filename from candidate roots;
+# test_create_artifacts_from_paths_resolves_bare_filename_from_api_workdir verifies create
+# artifacts from paths resolves bare filename from api workdir;
+# test_create_artifacts_from_paths_supports_debug_json verifies create artifacts from paths
+# supports debug json; test_create_artifacts_from_paths_ignores_runtime_temp_json verifies create
+# artifacts from paths ignores runtime temp json;
+# test_create_artifacts_from_paths_accepts_run_scoped_runtime_report verifies create artifacts
+# from paths accepts run scoped runtime report;
+# test_create_artifacts_from_paths_accepts_agent_run_artifact verifies create artifacts from paths
+# accepts agent run artifact; test_create_artifacts_from_paths_accepts_agent_run_root_artifact
+# verifies create artifacts from paths accepts agent run root artifact;
+# test_create_artifacts_from_paths_ignores_runtime_skill_docs verifies create artifacts from paths
+# ignores runtime skill docs; test_explicit_run_skill_doc_is_developer_only verifies explicit run
+# skill doc is developer only; test_hermes_runtime_soul_is_not_an_artifact verifies hermes runtime
+# soul is not an artifact; test_create_artifacts_from_refs_preserves_hermes_protocol_metadata
+# verifies create artifacts from refs preserves hermes protocol metadata;
+# test_create_artifacts_from_refs_marks_source_cache_as_intermediate verifies create artifacts
+# from refs marks source cache as intermediate;
+# test_explicit_run_ref_accepts_primary_output_from_hermes_context verifies explicit run ref
+# accepts primary output from hermes context;
+# test_discover_related_artifact_paths_finds_html_slides_for_pptx verifies discover related
+# artifact paths finds html slides for pptx;
+# test_create_artifacts_from_paths_marks_ppt_page_html_as_preview_fallback verifies create
+# artifacts from paths marks ppt page html as preview fallback;
+# test_discover_related_artifact_paths_does_not_scan_repo_root verifies discover related artifact
+# paths does not scan repo root;
+# test_extract_artifact_path_strings_supports_relative_chinese_filename verifies extract artifact
+# path strings supports relative chinese filename;
+# test_extract_artifact_path_strings_supports_markdown_bold_filename verifies extract artifact
+# path strings supports markdown bold filename.
+
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -6,8 +49,10 @@ from app.integrations.hermes import AgentArtifactRef
 from app.services.artifact_discovery import (
     _candidate_roots,
     _configured_hermes_home_candidates,
+    _normalize_path,
     _normalized_path_key,
     _repo_root,
+    _resolve_bare_artifact_filename,
     _windows_path_to_wsl,
     _wsl_artifact_mtime,
     create_artifacts_from_paths,
@@ -66,6 +111,20 @@ def test_candidate_roots_include_hermes_deep_research_reports():
 
     assert any("/.hermes/deep-research-reports" in root for root in roots)
     assert f"{repo_root}/deep-research-reports" in roots
+
+
+def test_reports_relative_path_resolves_from_repo_root():
+    expected = _repo_root() / "reports" / "generated.md"
+
+    assert _normalize_path("./reports/generated.md") == expected
+    assert "./reports/generated.md" in extract_artifact_path_strings(
+        "报告已保存到 ./reports/generated.md"
+    )
+
+
+def test_bare_repository_docs_are_not_resolved_as_artifacts():
+    assert _resolve_bare_artifact_filename("README.md") is None
+    assert _resolve_bare_artifact_filename("TESTING.md") is None
 
 
 def test_create_artifacts_from_paths_dedupes_by_content_hash(tmp_path: Path):

@@ -1,3 +1,8 @@
+/**
+ * File purpose: Renders and coordinates the settings overview user-interface feature.
+ * Main declarations: SettingsOverview handles settings overview.
+ */
+
 "use client";
 
 import { useI18n, type TranslationKey } from "@/lib/i18n";

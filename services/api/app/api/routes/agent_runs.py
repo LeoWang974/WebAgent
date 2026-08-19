@@ -1,3 +1,8 @@
+# File purpose: Defines FastAPI endpoints for the agent runs API surface.
+# Main declarations: list_agent_runs lists agent runs; create_agent_run creates agent run;
+# get_agent_run retrieves agent run; cancel_agent_run handles cancel agent run;
+# stream_agent_run_events handles stream agent run events.
+
 import asyncio
 
 from fastapi import APIRouter

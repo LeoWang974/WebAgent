@@ -1,6 +1,16 @@
+# File purpose: Implements the agent run artifact service backend service workflow.
+# Main declarations: _diagnostic_text handles diagnostic text; raise_for_fatal_runtime_diagnostics
+# handles raise for fatal runtime diagnostics; _adapter_artifact_paths handles adapter artifact
+# paths; filter_preexisting_artifact_schemas handles filter preexisting artifact schemas;
+# _existing_conversation_artifact_fingerprints handles existing conversation artifact
+# fingerprints; _event_artifact_paths handles event artifact paths;
+# discover_and_persist_run_artifacts discovers and persist run artifacts; final_assistant_message
+# handles final assistant message; user_developer_mode_by_id handles user developer mode by id.
+
 import asyncio
 import re
 from datetime import datetime
+from pathlib import Path
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,7 +43,28 @@ FATAL_RUNTIME_PATTERNS = (
         r"|\b401\s+(?:unauthorized|error)\b",
         re.IGNORECASE,
     ),
+    re.compile(
+        r"stream stalled|action was not executed|tool-call[^\n]*not executed",
+        re.IGNORECASE,
+    ),
 )
+
+EXPLICIT_OUTPUT_PATH_RE = re.compile(
+    r"(?:保存为|输出(?:到|为)|导出(?:到|为)|save\s+as|write\s+to|export\s+to)"
+    r"\s*[`\"']?(?P<path>[^`\"'\r\n]+?\.(?:md|html?|pptx|png|jpe?g|csv|xlsx))",
+    re.IGNORECASE,
+)
+ARTIFACT_TYPE_BY_SUFFIX = {
+    ".md": "markdown_report",
+    ".html": "html_page",
+    ".htm": "html_page",
+    ".pptx": "ppt_deck",
+    ".png": "image_result",
+    ".jpg": "image_result",
+    ".jpeg": "image_result",
+    ".csv": "data_table",
+    ".xlsx": "data_table",
+}
 
 def _diagnostic_text(adapter: object, assistant_output: str) -> str:
     diagnostics = getattr(adapter, "last_diagnostics", {}) or {}
@@ -51,6 +82,26 @@ def raise_for_fatal_runtime_diagnostics(adapter: object, assistant_output: str) 
         return
     tail = diagnostic_text.strip()[-800:] or "Hermes reported a model/API failure."
     raise RuntimeError(f"Hermes reported a model/API failure: {tail}")
+
+
+def explicit_requested_artifact_type(content: str) -> str | None:
+    matches = list(EXPLICIT_OUTPUT_PATH_RE.finditer(content))
+    if not matches:
+        return None
+    suffix = Path(matches[-1].group("path").strip()).suffix.lower()
+    return ARTIFACT_TYPE_BY_SUFFIX.get(suffix)
+
+
+def validate_explicit_output_artifact(content: str, artifacts: list[Artifact]) -> None:
+    expected_type = explicit_requested_artifact_type(content)
+    if expected_type is None:
+        return
+    produced_types = {artifact.type for artifact in artifacts if artifact.is_primary}
+    if expected_type not in produced_types:
+        raise RuntimeError(
+            "Hermes completed without producing the explicitly requested "
+            f"{expected_type} artifact."
+        )
 
 
 def _adapter_artifact_paths(adapter: object) -> tuple[list[str], list[object]]:
@@ -233,6 +284,7 @@ async def discover_and_persist_run_artifacts(
         for artifact in current_run_artifacts
         if artifact.is_primary and not is_debug_artifact(artifact)
     ]
+    validate_explicit_output_artifact(content, primary_artifacts)
     artifact_discovery_summary["primary_artifact_count"] = len(primary_artifacts)
     artifact_discovery_summary["primary_artifact_types"] = sorted(
         {artifact.type for artifact in primary_artifacts}

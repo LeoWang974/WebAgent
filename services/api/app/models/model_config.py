@@ -1,3 +1,6 @@
+# File purpose: Defines SQLAlchemy persistence models for model config.
+# Main declarations: ModelConfig defines model config state or behavior.
+
 from sqlalchemy import ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 

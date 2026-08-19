@@ -1,3 +1,9 @@
+/**
+ * File purpose: Provides shared browser utilities for status.
+ * Main declarations: getStatusLabelKey handles get status label key; getStatusDotClass handles get
+ * status dot class.
+ */
+
 import type { AgentRunStatus, SessionStatus } from "@/types";
 import type { TranslationKey } from "./i18n";
 

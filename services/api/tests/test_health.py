@@ -1,3 +1,10 @@
+# File purpose: Verifies test health behavior and its regression contracts.
+# Main declarations: _set_check handles set check; test_health_reports_ready_dependencies verifies
+# health reports ready dependencies; test_health_reports_postgresql_failure verifies health
+# reports postgresql failure; test_health_reports_redis_failure verifies health reports redis
+# failure; test_redis_check_handles_invalid_configuration verifies redis check handles invalid
+# configuration.
+
 import json
 
 import pytest

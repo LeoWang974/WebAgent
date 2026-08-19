@@ -1,3 +1,7 @@
+# File purpose: Defines the 20260804 0011 model secret ciphertext database schema migration and
+# rollback.
+# Main declarations: upgrade handles upgrade; downgrade handles downgrade.
+
 """allow versioned model credential ciphertext
 
 Revision ID: 20260804_0011

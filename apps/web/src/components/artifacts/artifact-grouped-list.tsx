@@ -1,3 +1,10 @@
+/**
+ * File purpose: Renders and coordinates the artifact grouped list user-interface feature.
+ * Main declarations: artifactTime handles artifact time; timeGroupLabel handles time group label;
+ * runGroupLabel handles run group label; buildGroups handles build groups; ArtifactGroupedList
+ * handles artifact grouped list.
+ */
+
 "use client";
 
 import { useMemo, useState } from "react";

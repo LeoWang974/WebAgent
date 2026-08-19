@@ -1,3 +1,7 @@
+# File purpose: Defines the 20260714 0004 agent artifact indexes database schema migration and
+# rollback.
+# Main declarations: upgrade handles upgrade; downgrade handles downgrade.
+
 """add agent and artifact query indexes
 
 Revision ID: 20260714_0004

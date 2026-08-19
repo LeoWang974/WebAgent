@@ -1,3 +1,7 @@
+# File purpose: Defines Pydantic API contracts for   init  .
+# Main declarations: this file contains declarative configuration or re-exports and has no
+# callable declarations.
+
 from app.schemas.agent_run import AgentRun, AgentRunCreate, AgentRunEvent, AgentRunStep
 from app.schemas.artifact import Artifact, ArtifactSlides, FileAsset, SlidePreview
 from app.schemas.auth import AdminUserCreate, AuthResult, LoginInput, RegisterInput

@@ -1,3 +1,8 @@
+/**
+ * File purpose: Verifies agent run diagnostics.node.test behavior and its regression contracts.
+ * Main declarations: run handles run; event handles event.
+ */
+
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AgentRun, AgentRunEvent } from "../../types/agent-run.ts";

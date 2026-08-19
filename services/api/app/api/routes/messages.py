@@ -1,3 +1,6 @@
+# File purpose: Defines FastAPI endpoints for the messages API surface.
+# Main declarations: list_messages lists messages.
+
 from fastapi import APIRouter
 from sqlalchemy import or_, select
 

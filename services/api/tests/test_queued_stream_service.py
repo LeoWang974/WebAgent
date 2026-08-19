@@ -1,3 +1,7 @@
+# File purpose: Verifies test queued stream service behavior and its regression contracts.
+# Main declarations: test_stream_dispatches_run_before_client_starts_reading verifies stream
+# dispatches run before client starts reading.
+
 from types import SimpleNamespace
 
 import pytest

@@ -1,3 +1,8 @@
+/**
+ * File purpose: Renders and coordinates the message list user-interface feature.
+ * Main declarations: MessageList handles message list.
+ */
+
 "use client";
 
 import { ArtifactCard } from "../artifacts";

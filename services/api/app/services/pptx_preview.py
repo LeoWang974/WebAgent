@@ -1,3 +1,10 @@
+# File purpose: Implements the pptx preview backend service workflow.
+# Main declarations: PptxPreviewError defines pptx preview error state or behavior; _render_lock
+# handles render lock; _file_sha256 handles file sha256; _preview_cache_root handles preview cache
+# root; _cached_slide_paths handles cached slide paths; _soffice_candidates handles soffice
+# candidates; find_soffice handles find soffice; _convert_pptx_to_pdf handles convert pptx to pdf;
+# _render_pdf_to_pngs handles render pdf to pngs; render_pptx_preview renders pptx preview.
+
 from __future__ import annotations
 
 import hashlib

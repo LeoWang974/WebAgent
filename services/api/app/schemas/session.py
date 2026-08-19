@@ -1,3 +1,10 @@
+# File purpose: Defines Pydantic API contracts for session.
+# Main declarations: SessionShare defines session share state or behavior; Session defines session
+# state or behavior; SessionCreate defines session create state or behavior; SessionUpdate defines
+# session update state or behavior; ConversationFolder defines conversation folder state or
+# behavior; ConversationFolderCreate defines conversation folder create state or behavior;
+# ConversationFolderUpdate defines conversation folder update state or behavior.
+
 from typing import Literal
 
 from pydantic import Field

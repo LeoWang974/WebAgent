@@ -1,3 +1,7 @@
+# File purpose: Defines Pydantic API contracts for message.
+# Main declarations: Message defines message state or behavior; MessageCreate defines message
+# create state or behavior; SendMessageResult defines send message result state or behavior.
+
 from typing import Literal
 
 from app.schemas.base import ApiModel

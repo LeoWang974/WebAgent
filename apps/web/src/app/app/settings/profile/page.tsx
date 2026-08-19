@@ -1,3 +1,8 @@
+/**
+ * File purpose: Defines the Next.js page route or route layout.
+ * Main declarations: ProfileSettingsPage handles profile settings page.
+ */
+
 "use client";
 
 import { ProfileSettings } from "@/components/settings";

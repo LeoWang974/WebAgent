@@ -1,3 +1,8 @@
+/**
+ * File purpose: Defines the Next.js page route or route layout.
+ * Main declarations: ChatSessionPage handles chat session page.
+ */
+
 import { ChatWorkspace } from "@/components/chat";
 
 interface ChatSessionPageProps {

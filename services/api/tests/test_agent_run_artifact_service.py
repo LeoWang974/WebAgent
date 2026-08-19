@@ -1,3 +1,18 @@
+# File purpose: Verifies test agent run artifact service behavior and its regression contracts.
+# Main declarations: _Adapter defines adapter state or behavior; _TruncatedAdapter defines
+# truncated adapter state or behavior; test_fatal_runtime_diagnostics_are_not_treated_as_success
+# verifies fatal runtime diagnostics are not treated as success;
+# test_fatal_runtime_diagnostics_do_not_match_unrelated_401_text verifies fatal runtime
+# diagnostics do not match unrelated 401 text;
+# test_fatal_runtime_diagnostics_match_explicit_http_401 verifies fatal runtime diagnostics match
+# explicit http 401; test_filter_preexisting_artifacts_excludes_staged_input_by_hash verifies
+# filter preexisting artifacts excludes staged input by hash;
+# test_organize_artifact_schema_keeps_metadata_path_existing verifies organize artifact schema
+# keeps metadata path existing; test_organize_artifact_schema_separates_intermediate_outputs
+# verifies organize artifact schema separates intermediate outputs;
+# test_organize_artifact_schema_records_managed_runtime_output verifies organize artifact schema
+# records managed runtime output.
+
 import json
 from pathlib import Path
 
@@ -7,8 +22,10 @@ from app import schemas
 from app.core.config import settings
 from app.models import Conversation
 from app.services.agent_run_artifact_service import (
+    explicit_requested_artifact_type,
     filter_preexisting_artifact_schemas,
     raise_for_fatal_runtime_diagnostics,
+    validate_explicit_output_artifact,
 )
 from app.services.session_artifacts import metadata_path_key, organize_artifact_schema
 
@@ -54,6 +71,35 @@ def test_fatal_runtime_diagnostics_match_explicit_http_401():
     )()
     with pytest.raises(RuntimeError, match="model/API failure"):
         raise_for_fatal_runtime_diagnostics(adapter, "")
+
+
+def test_fatal_runtime_diagnostics_match_stalled_tool_call():
+    adapter = type("Adapter", (), {"last_diagnostics": {}})()
+    with pytest.raises(RuntimeError, match="model/API failure"):
+        raise_for_fatal_runtime_diagnostics(
+            adapter,
+            "Stream stalled mid tool-call; the action was not executed.",
+        )
+
+
+def test_explicit_requested_artifact_type_uses_declared_output_path():
+    content = "读取 ./reports/source.html，保存为 ./reports/final.pptx。"
+
+    assert explicit_requested_artifact_type(content) == "ppt_deck"
+
+
+def test_explicit_output_validation_rejects_missing_requested_type():
+    html_artifact = type(
+        "Artifact",
+        (),
+        {"type": "html_page", "is_primary": True},
+    )()
+
+    with pytest.raises(RuntimeError, match="explicitly requested ppt_deck"):
+        validate_explicit_output_artifact(
+            "保存为 ./reports/final.pptx",
+            [html_artifact],
+        )
 
 
 def test_filter_preexisting_artifacts_excludes_staged_input_by_hash(tmp_path):

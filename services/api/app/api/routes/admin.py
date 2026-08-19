@@ -1,3 +1,8 @@
+# File purpose: Defines FastAPI endpoints for the admin API surface.
+# Main declarations: to_user_schema converts user schema; require_admin handles require admin;
+# list_users lists users; create_user creates user; reset_user_password handles reset user
+# password; delete_user deletes user; run_cleanup runs cleanup.
+
 from dataclasses import asdict
 
 from fastapi import APIRouter, HTTPException, status

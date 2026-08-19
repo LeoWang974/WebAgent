@@ -1,3 +1,8 @@
+# File purpose: Automates the seed local users development, deployment, or maintenance workflow.
+# Main declarations: upsert_user handles upsert user; move_conversations_to_user handles move
+# conversations to user; count_conversations_for_user handles count conversations for user; main
+# handles main.
+
 import asyncio
 
 from sqlalchemy import select, update

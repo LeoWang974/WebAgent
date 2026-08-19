@@ -1,3 +1,7 @@
+# File purpose: Defines the 20260714 0003 agent run adapter key database schema migration and
+# rollback.
+# Main declarations: upgrade handles upgrade; downgrade handles downgrade.
+
 """add agent run adapter key
 
 Revision ID: 20260714_0003

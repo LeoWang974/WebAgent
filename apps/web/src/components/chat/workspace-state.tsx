@@ -1,3 +1,8 @@
+/**
+ * File purpose: Renders and coordinates the workspace state user-interface feature.
+ * Main declarations: WorkspaceState handles workspace state.
+ */
+
 "use client";
 
 import { useChatStore } from "@/stores";

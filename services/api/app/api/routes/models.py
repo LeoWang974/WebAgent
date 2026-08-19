@@ -1,3 +1,6 @@
+# File purpose: Defines FastAPI endpoints for the models API surface.
+# Main declarations: list_models lists models.
+
 from fastapi import APIRouter
 
 from app import schemas

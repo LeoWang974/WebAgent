@@ -1,3 +1,8 @@
+/**
+ * File purpose: Implements browser-side API access for fastapi adapter.
+ * Main declarations: persistAuth handles persist auth.
+ */
+
 import { API_BASE_URL, apiClient, getAccessToken } from "../api-client";
 import { parseSseEvents, splitSseBuffer } from "../sse-parser";
 import type {
@@ -20,7 +25,6 @@ import type {
   LoginInput,
   RegisterInput,
   SendMessageInput,
-  SendMessageResult,
   SendMessageStreamHandler,
   UpdateSessionInput,
   UploadFileInput,
@@ -167,23 +171,11 @@ export const fastApiAdapter: WebAgentApiAdapter = {
       method: "POST",
     });
   },
-  sendMessage(input: SendMessageInput) {
-    return apiClient<SendMessageResult>(
-      `/api/sessions/${input.sessionId}/messages`,
-      {
-        body: JSON.stringify({
-          content: input.content,
-          model_id: input.modelId,
-        }),
-        method: "POST",
-        signal: input.signal,
-      },
-    );
-  },
   async sendMessageStream(
     input: SendMessageInput,
     onEvent: SendMessageStreamHandler,
   ) {
+    const token = getAccessToken();
     const response = await fetch(
       `${API_BASE_URL}/api/sessions/${input.sessionId}/messages/stream`,
       {
@@ -193,9 +185,7 @@ export const fastApiAdapter: WebAgentApiAdapter = {
         }),
         headers: {
           "Content-Type": "application/json",
-          ...(typeof window !== "undefined" && window.localStorage.getItem("webagent_access_token")
-            ? { Authorization: `Bearer ${window.localStorage.getItem("webagent_access_token")}` }
-            : {}),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         method: "POST",
         signal: input.signal,

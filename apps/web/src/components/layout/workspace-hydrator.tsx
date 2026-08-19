@@ -1,3 +1,8 @@
+/**
+ * File purpose: Renders and coordinates the workspace hydrator user-interface feature.
+ * Main declarations: WorkspaceHydrator handles workspace hydrator.
+ */
+
 "use client";
 
 import { useEffect } from "react";

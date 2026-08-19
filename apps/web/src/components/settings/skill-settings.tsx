@@ -1,3 +1,8 @@
+/**
+ * File purpose: Renders and coordinates the skill settings user-interface feature.
+ * Main declarations: SkillSettings handles skill settings.
+ */
+
 "use client";
 
 import { Loader2, RotateCcw, Star } from "lucide-react";

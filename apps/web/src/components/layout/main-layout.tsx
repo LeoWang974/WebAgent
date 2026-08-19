@@ -1,3 +1,8 @@
+/**
+ * File purpose: Renders and coordinates the main layout user-interface feature.
+ * Main declarations: MainLayout handles main layout.
+ */
+
 import { MobileSidebarDrawer } from "./mobile-sidebar-drawer";
 import type { ReactNode } from "react";
 import { Sidebar } from "./sidebar";

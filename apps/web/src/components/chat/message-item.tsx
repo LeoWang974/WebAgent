@@ -1,3 +1,9 @@
+/**
+ * File purpose: Renders and coordinates the message item user-interface feature.
+ * Main declarations: formatTime handles format time; formatDuration handles format duration;
+ * useElapsed handles use elapsed; MessageItem handles message item.
+ */
+
 "use client";
 
 import { Loader2 } from "lucide-react";

@@ -1,3 +1,8 @@
+/**
+ * File purpose: Renders and coordinates the artifact card user-interface feature.
+ * Main declarations: ArtifactIcon handles artifact icon; ArtifactCard handles artifact card.
+ */
+
 "use client";
 
 import { FileImage, FileSpreadsheet, FileText, Globe2, Presentation } from "lucide-react";

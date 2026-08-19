@@ -1,3 +1,6 @@
+# File purpose: Defines the 20260804 0010 file ownership database schema migration and rollback.
+# Main declarations: upgrade handles upgrade; downgrade handles downgrade.
+
 """add file ownership
 
 Revision ID: 20260804_0010

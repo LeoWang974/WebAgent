@@ -1,3 +1,8 @@
+/**
+ * File purpose: Renders and coordinates the artifact drawer user-interface feature.
+ * Main declarations: ArtifactDrawer handles artifact drawer.
+ */
+
 "use client";
 
 import { ArtifactPreviewContent } from "./artifact-preview-content";

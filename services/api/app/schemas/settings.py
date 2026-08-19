@@ -1,3 +1,8 @@
+# File purpose: Defines Pydantic API contracts for settings.
+# Main declarations: DataContextSettings defines data context settings state or behavior;
+# InterfaceSettings defines interface settings state or behavior; ProfileUpdate defines profile
+# update state or behavior; PasswordUpdate defines password update state or behavior.
+
 from app.schemas.base import ApiModel
 
 

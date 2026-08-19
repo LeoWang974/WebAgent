@@ -1,3 +1,6 @@
+# File purpose: Provides core config configuration and infrastructure helpers.
+# Main declarations: Settings defines settings state or behavior.
+
 import binascii
 from functools import cached_property
 

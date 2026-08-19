@@ -1,3 +1,9 @@
+# File purpose: Verifies test cleanup behavior and its regression contracts.
+# Main declarations: test_cleanup_expired_runtime_files_keeps_recent_files verifies cleanup
+# expired runtime files keeps recent files;
+# test_cleanup_expired_runtime_files_removes_run_homes_and_old_logs verifies cleanup expired
+# runtime files removes run homes and old logs.
+
 import os
 import time
 from pathlib import Path

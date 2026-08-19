@@ -50,6 +50,7 @@ dump.rdb
 services/runtime/
 /deep-research-reports/
 /ppt_decks/
+/reports/
 /*.html
 /*.md
 !/README.md

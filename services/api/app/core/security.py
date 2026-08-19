@@ -1,3 +1,7 @@
+# File purpose: Provides core security configuration and infrastructure helpers.
+# Main declarations: create_access_token creates access token; decode_access_token handles decode
+# access token; hash_password handles hash password; verify_password handles verify password.
+
 import hashlib
 import hmac
 import secrets

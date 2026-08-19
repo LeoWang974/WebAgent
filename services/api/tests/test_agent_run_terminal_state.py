@@ -1,3 +1,8 @@
+# File purpose: Verifies test agent run terminal state behavior and its regression contracts.
+# Main declarations: test_completed_run_ignores_late_cancellation verifies completed run ignores
+# late cancellation; test_successful_completion_can_win_cancel_race verifies successful completion
+# can win cancel race.
+
 import pytest
 
 from app.models import AgentRun, Conversation

@@ -1,3 +1,6 @@
+# File purpose: Defines Pydantic API contracts for skill.
+# Main declarations: Skill defines skill state or behavior.
+
 from app.schemas.base import ApiModel
 from app.schemas.session import SkillKey
 

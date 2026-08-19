@@ -1,3 +1,8 @@
+/**
+ * File purpose: Renders and coordinates the sidebar user-interface feature.
+ * Main declarations: Sidebar handles sidebar.
+ */
+
 "use client";
 
 import { NewChatButton } from "../sidebar/new-chat-button";

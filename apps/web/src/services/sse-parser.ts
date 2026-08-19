@@ -1,3 +1,9 @@
+/**
+ * File purpose: Implements browser-side API access for sse parser.
+ * Main declarations: parseSseJson handles parse sse json; parseSseEvents handles parse sse events;
+ * splitSseBuffer handles split sse buffer.
+ */
+
 export interface ParsedSseEvent {
   data: Record<string, unknown>;
   type: string;

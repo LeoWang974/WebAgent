@@ -1,3 +1,6 @@
+# File purpose: Implements the session message service backend service workflow.
+# Main declarations: send_message_core handles send message core.
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import schemas

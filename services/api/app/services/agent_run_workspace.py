@@ -1,3 +1,8 @@
+# File purpose: Implements the agent run workspace backend service workflow.
+# Main declarations: safe_run_path_segment handles safe run path segment; run_workspace_dir runs
+# workspace dir; run_artifacts_dir runs artifacts dir; _stage_artifact_file handles stage artifact
+# file; stage_conversation_artifacts handles stage conversation artifacts.
+
 import json
 import os
 import re
@@ -59,10 +64,17 @@ def run_artifacts_dir(
 
 def _stage_artifact_file(source: Path, destination: Path) -> None:
     """Prefer a hard link so repeated run context staging does not duplicate files."""
+    if destination.exists():
+        return
     try:
         os.link(source, destination)
+    except FileExistsError:
+        return
     except OSError:
-        shutil.copy2(source, destination)
+        try:
+            shutil.copy2(source, destination)
+        except FileExistsError:
+            return
 
 
 async def stage_conversation_artifacts(

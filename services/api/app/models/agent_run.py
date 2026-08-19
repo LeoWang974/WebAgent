@@ -1,3 +1,7 @@
+# File purpose: Defines SQLAlchemy persistence models for agent run.
+# Main declarations: AgentRun defines agent run state or behavior; AgentRunEvent defines agent run
+# event state or behavior.
+
 from sqlalchemy import JSON, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 

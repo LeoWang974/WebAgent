@@ -1,3 +1,8 @@
+/**
+ * File purpose: Renders and coordinates the new chat button user-interface feature.
+ * Main declarations: NewChatButton handles new chat button.
+ */
+
 "use client";
 
 import { useChatStore, useUiStore } from "@/stores";

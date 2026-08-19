@@ -1,3 +1,8 @@
+/**
+ * File purpose: Manages client state and actions for ui store.
+ * Main declarations: useUiStore exposes the use ui store public API.
+ */
+
 "use client";
 
 import { create } from "zustand";

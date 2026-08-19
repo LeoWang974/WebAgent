@@ -1,3 +1,9 @@
+/**
+ * File purpose: Renders and coordinates the file artifact viewer user-interface feature.
+ * Main declarations: iconForType handles icon for type; formatBytes handles format bytes;
+ * FileArtifactViewer handles file artifact viewer.
+ */
+
 "use client";
 
 import type { Artifact } from "@/types";

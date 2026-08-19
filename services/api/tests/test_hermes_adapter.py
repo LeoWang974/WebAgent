@@ -1,3 +1,11 @@
+# File purpose: Verifies test hermes adapter behavior and its regression contracts.
+# Main declarations: test_hermes_adapter_has_no_skill_mapping_helpers verifies hermes adapter has
+# no skill mapping helpers; test_hermes_chat_command_starts_in_run_workspace verifies hermes chat
+# command starts in run workspace; test_hermes_stream_forwards_prompt_verbatim verifies hermes
+# stream forwards prompt verbatim; test_final_discovery_scans_the_run_runtime_root verifies final
+# discovery scans the run runtime root; test_final_discovery_ignores_runtime_dependencies verifies
+# final discovery ignores runtime dependencies.
+
 from datetime import datetime, timedelta
 
 import pytest

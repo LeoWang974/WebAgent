@@ -1,3 +1,9 @@
+/**
+ * File purpose: Manages client state and actions for agent run binding.
+ * Main declarations: bindBackendRunId handles bind backend run id; applyBackendRunIdBinding
+ * handles apply backend run id binding.
+ */
+
 import type { AgentRun } from "@/types";
 
 export interface AgentRunBindingState {

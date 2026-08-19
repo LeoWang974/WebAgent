@@ -1,3 +1,9 @@
+/**
+ * File purpose: Renders and coordinates the data context settings user-interface feature.
+ * Main declarations: Toggle handles toggle; DataContextSettingsPanel handles data context settings
+ * panel.
+ */
+
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";

@@ -1,3 +1,7 @@
+# File purpose: Defines the 20260728 0007 agent run model snapshot database schema migration and
+# rollback.
+# Main declarations: upgrade handles upgrade; downgrade handles downgrade.
+
 """add agent run model snapshot
 
 Revision ID: 20260728_0007

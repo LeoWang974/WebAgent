@@ -1,7 +1,13 @@
 # WebAgent
 
-WebAgent is a multi-user web interface for the Hermes CLI. It keeps the runtime
-boundary intentionally small:
+WebAgent is a multi-user web interface for the Hermes CLI. The browser only
+needs the frontend application port `3000`; Next.js proxies `/api/*` to the
+internal FastAPI service on port `8010`.
+
+The web client always uses the real FastAPI path. The former browser-only mock
+adapter has been removed so local and deployed builds exercise the same flow.
+
+The runtime boundary is intentionally small:
 
 1. Persist users, conversations, messages, runs, and artifacts.
 2. Send the user's message to Hermes without rewriting it or selecting a skill.
@@ -11,14 +17,42 @@ boundary intentionally small:
 The application does not contain a second agent runtime and does not generate
 replacement reports, HTML pages, or PPTX files when Hermes does not produce one.
 
-## Structure
+## Architecture
+
+```text
+Browser :3000
+    |
+    +-- Next.js UI
+    |     +-- /api/* reverse proxy
+    |
+    +-- FastAPI :8010 (internal)
+          +-- PostgreSQL: users, sessions, messages, runs, artifacts
+          +-- Redis: Celery queues and adapter capacity locks
+          +-- Celery workers
+                +-- short-chat queue
+                +-- agent-runs queue
+                      +-- Hermes CLI
+```
+
+Only port `3000` is user-facing. Port `8010`, PostgreSQL, and Redis should stay
+inside the host or container network.
+
+## Project Structure
 
 ```text
 apps/web                 Next.js workspace UI
-services/api             FastAPI, SQLAlchemy, Celery, PostgreSQL, Redis
-services/api/app/integrations/hermes   Hermes CLI integration
-scripts                  Local and CCI process scripts
-docs                     Operations and testing notes
+  src/app                Routes and layouts
+  src/components         Workspace, settings, admin, and artifact UI
+  src/services           FastAPI adapters and SSE parsing
+  src/stores             Client state and runtime event handling
+services/api             FastAPI service and migrations
+  app/api/routes         HTTP and SSE endpoints
+  app/integrations/hermes Hermes CLI adapter and protocol parsing
+  app/services           Runs, queues, persistence, artifacts, and cleanup
+  app/workers            Celery task entry points
+  tests                  Backend unit and integration tests
+scripts                  Local development and CCI process scripts
+docs                     Operations, deployment, and testing notes
 ```
 
 ## Runtime Model
@@ -52,10 +86,26 @@ cd ../..
 powershell -ExecutionPolicy Bypass -File scripts/dev-all.ps1
 ```
 
+The scripts start:
+
+- Next.js on `0.0.0.0:3000`.
+- FastAPI on `127.0.0.1:8010`.
+- A Celery worker consuming `short-chat` and `agent-runs`.
+
+Use the following command to stop all three processes:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/stop-dev.ps1
+```
+
 Default URLs:
 
 - Web: `http://127.0.0.1:3000/app`
 - API health: `http://127.0.0.1:8010/api/health`
+
+The frontend defaults to same-origin API requests. Keep
+`NEXT_PUBLIC_API_BASE_URL` empty so Next.js can proxy `/api/*` to FastAPI using
+`API_INTERNAL_BASE_URL`.
 
 ## Configuration
 
@@ -83,12 +133,48 @@ The optional scheduler synchronizes
 Hermes skills directory. WebAgent does not select a skill for a user message;
 Hermes receives the original message and makes that decision itself.
 
+## Source Documentation Convention
+
+First-party Python, TypeScript, JavaScript, CSS, PowerShell, and shell files
+start with a concise header containing:
+
+1. `File purpose`: the responsibility and ownership boundary of the file.
+2. `Main declarations`: the role of the file's top-level classes and functions.
+
+Keep these headers synchronized when moving responsibilities or renaming public
+declarations. Prefer comments that explain ownership and behavior; implementation
+details should remain next to the relevant code only when they are not obvious.
+
+## CCI Deployment
+
+CCI uses the persistent directory `/mnt/afs/tj_share/webagent-cci`. After the
+runtime and repository have been prepared, the application entry point is:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+exec /bin/bash \
+  /mnt/afs/tj_share/webagent-cci/repo/WebAgent/scripts/cci-app-start.sh
+```
+
+Configure the CCI application port and DNAT target as `3000`. The entry script
+starts and supervises FastAPI, Celery, PostgreSQL, Redis, Hermes, and Next.js;
+only Next.js is exposed through the application port.
+
 ## Verification
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/test-api.ps1 -Group all
 pnpm --dir apps/web test
+pnpm --dir apps/web lint
 pnpm --dir apps/web build
+```
+
+The API health endpoint checks both PostgreSQL and Redis:
+
+```text
+GET http://127.0.0.1:8010/api/health
 ```
 
 See [docs/TESTING.md](docs/TESTING.md) and

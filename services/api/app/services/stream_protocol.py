@@ -1,3 +1,6 @@
+# File purpose: Implements the stream protocol backend service workflow.
+# Main declarations: sse handles sse; runtime_diagnostics handles runtime diagnostics.
+
 import json
 
 SSE_HEADERS = {

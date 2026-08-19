@@ -1,3 +1,8 @@
+# File purpose: Verifies conftest behavior and its regression contracts.
+# Main declarations: model_secret_encryption_key handles model secret encryption key; auth_headers
+# handles auth headers; db_sessionmaker handles db sessionmaker; seeded_users handles seeded
+# users; api_client handles api client.
+
 import os
 from collections.abc import AsyncGenerator
 

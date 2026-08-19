@@ -1,10 +1,13 @@
+# File purpose: Automates the dev web development, deployment, or maintenance workflow.
+# Main declarations: Stop-ProcessTreeByPort handles stop process tree by port.
+
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $webRoot = Join-Path $repoRoot "apps\web"
 $envFile = Join-Path $webRoot ".env.local"
 $envExample = Join-Path $webRoot ".env.local.example"
-$webPort = 3002
+$webPort = 3000
 
 function Stop-ProcessTreeByPort {
   param([int]$Port)

@@ -1,3 +1,7 @@
+# File purpose: Defines FastAPI endpoints for the health API surface.
+# Main declarations: _check_postgresql handles check postgresql; _check_redis handles check redis;
+# health_check handles health check.
+
 import asyncio
 import logging
 

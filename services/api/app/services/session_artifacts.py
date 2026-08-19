@@ -1,3 +1,15 @@
+# File purpose: Implements the session artifacts backend service workflow.
+# Main declarations: is_primary_report_artifact checks primary report artifact;
+# artifact_display_priority handles artifact display priority; is_debug_artifact checks debug
+# artifact; is_primary_artifact_schema checks primary artifact schema; artifact_metadata_paths
+# handles artifact metadata paths; file_sha256 handles file sha256; artifact_content_hash handles
+# artifact content hash; artifact_dedupe_keys handles artifact dedupe keys; metadata_path_key
+# handles metadata path key; _path_is_within handles path is within; artifact_source_location
+# handles artifact source location; organize_artifact_schema handles organize artifact schema;
+# _artifact_match_keys handles artifact match keys; _index_existing_artifacts handles index
+# existing artifacts; refresh_conversation handles refresh conversation;
+# persist_discovered_artifacts persists discovered artifacts.
+
 import hashlib
 import re
 from datetime import datetime

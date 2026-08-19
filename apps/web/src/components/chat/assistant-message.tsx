@@ -1,3 +1,8 @@
+/**
+ * File purpose: Renders and coordinates the assistant message user-interface feature.
+ * Main declarations: AssistantMessage handles assistant message.
+ */
+
 import { MessageItem } from "./message-item";
 
 interface AssistantMessageProps {

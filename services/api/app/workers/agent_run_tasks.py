@@ -1,3 +1,7 @@
+# File purpose: Defines background worker behavior for agent run tasks.
+# Main declarations: _execute_agent_run_task handles execute agent run task;
+# execute_agent_run_task handles execute agent run task.
+
 import asyncio
 
 from app.db.session import engine

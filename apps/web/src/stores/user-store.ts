@@ -1,3 +1,9 @@
+/**
+ * File purpose: Manages client state and actions for user store.
+ * Main declarations: userFacingAuthError handles user facing auth error; useUserStore exposes the
+ * use user store public API.
+ */
+
 "use client";
 
 import { create } from "zustand";

@@ -1,3 +1,7 @@
+# File purpose: Defines the 20260803 0009 backfill artifact is primary database schema migration and
+# rollback.
+# Main declarations: upgrade handles upgrade; downgrade handles downgrade.
+
 """backfill artifact is_primary
 
 Revision ID: 20260803_0009

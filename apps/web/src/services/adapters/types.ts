@@ -1,3 +1,9 @@
+/**
+ * File purpose: Implements browser-side API access for types.
+ * Main declarations: this file contains declarative configuration or re-exports and has no
+ * callable declarations.
+ */
+
 import type {
   AgentRun,
   AgentRunEvent,
@@ -49,12 +55,6 @@ export interface SendMessageInput {
   modelId?: string;
   signal?: AbortSignal;
   sessionId: string;
-}
-
-export interface SendMessageResult {
-  messages: Message[];
-  runId?: string;
-  session: Session;
 }
 
 export type SendMessageStreamEvent =
@@ -141,7 +141,6 @@ export interface WebAgentApiAdapter {
   listUsers(): Promise<User[]>;
   register(input: RegisterInput): Promise<AuthResult>;
   resetUserPassword(userId: string, newPassword: string): Promise<User>;
-  sendMessage(input: SendMessageInput): Promise<SendMessageResult>;
   sendMessageStream(
     input: SendMessageInput,
     onEvent: SendMessageStreamHandler,

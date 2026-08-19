@@ -1,3 +1,8 @@
+# File purpose: Defines Pydantic API contracts for agent run.
+# Main declarations: AgentRunStep defines agent run step state or behavior; AgentRun defines agent
+# run state or behavior; AgentRunCreate defines agent run create state or behavior; AgentRunEvent
+# defines agent run event state or behavior.
+
 from typing import Any, Literal
 
 from app.schemas.base import ApiModel

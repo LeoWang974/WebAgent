@@ -1,3 +1,9 @@
+/**
+ * File purpose: Defines shared TypeScript contracts for skill.
+ * Main declarations: this file contains declarative configuration or re-exports and has no
+ * callable declarations.
+ */
+
 export type SkillKey =
   | "data_analysis"
   | "deep_research"

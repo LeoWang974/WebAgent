@@ -1,3 +1,9 @@
+/**
+ * File purpose: Defines shared TypeScript contracts for session.
+ * Main declarations: this file contains declarative configuration or re-exports and has no
+ * callable declarations.
+ */
+
 import type { SkillKey } from "./skill";
 
 export type SessionStatus = "active" | "running" | "failed" | "completed";

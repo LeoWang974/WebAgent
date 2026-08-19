@@ -1,3 +1,8 @@
+# File purpose: Defines Pydantic API contracts for auth.
+# Main declarations: LoginInput defines login input state or behavior; RegisterInput defines
+# register input state or behavior; AuthResult defines auth result state or behavior;
+# AdminUserCreate defines admin user create state or behavior.
+
 from app.schemas.base import ApiModel
 from app.schemas.user import User
 

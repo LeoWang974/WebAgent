@@ -1,3 +1,8 @@
+/**
+ * File purpose: Renders and coordinates the file upload button user-interface feature.
+ * Main declarations: FileUploadButton handles file upload button.
+ */
+
 import { Paperclip } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 

@@ -1,3 +1,8 @@
+# File purpose: Implements the agent run control backend service workflow.
+# Main declarations: AgentRunCancelled defines agent run cancelled state or behavior;
+# AgentRunTimeout defines agent run timeout state or behavior; is_agent_run_cancelled checks agent
+# run cancelled.
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 

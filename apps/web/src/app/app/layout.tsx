@@ -1,3 +1,8 @@
+/**
+ * File purpose: Defines the Next.js layout route or route layout.
+ * Main declarations: WorkspaceLayout handles workspace layout.
+ */
+
 import { MainLayout } from "@/components/layout";
 import type { ReactNode } from "react";
 

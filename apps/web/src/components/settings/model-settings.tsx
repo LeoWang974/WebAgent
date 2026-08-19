@@ -1,3 +1,10 @@
+/**
+ * File purpose: Renders and coordinates the model settings user-interface feature.
+ * Main declarations: runtimeStatusText handles runtime status text; runtimeHealthSummary handles
+ * runtime health summary; formatCheckedAt handles format checked at; ModelSettings handles model
+ * settings.
+ */
+
 "use client";
 
 import { useState } from "react";

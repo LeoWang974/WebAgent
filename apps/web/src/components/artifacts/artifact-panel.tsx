@@ -1,3 +1,8 @@
+/**
+ * File purpose: Renders and coordinates the artifact panel user-interface feature.
+ * Main declarations: copyText handles copy text; ArtifactPanel handles artifact panel.
+ */
+
 "use client";
 
 import { ArtifactPreviewContent } from "./artifact-preview-content";

@@ -1,3 +1,8 @@
+/**
+ * File purpose: Manages client state and actions for chat store.
+ * Main declarations: useChatStore exposes the use chat store public API.
+ */
+
 "use client";
 
 import { create } from "zustand";

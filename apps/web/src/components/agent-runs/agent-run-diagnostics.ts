@@ -1,3 +1,10 @@
+/**
+ * File purpose: Renders and coordinates the agent run diagnostics user-interface feature.
+ * Main declarations: asRecord handles as record; getText handles get text; adapterLabel handles
+ * adapter label; latestStage handles latest stage; buildRunDiagnosticViewModel handles build run
+ * diagnostic view model.
+ */
+
 import type { AgentRun, AgentRunEvent } from "@/types";
 
 export interface RunDiagnosticViewModel {

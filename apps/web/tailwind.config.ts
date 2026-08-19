@@ -1,3 +1,8 @@
+/**
+ * File purpose: Defines Tailwind source discovery and WebAgent design-token mappings.
+ * Main declarations: config exports content paths, theme colors, and plugin configuration.
+ */
+
 import type { Config } from "tailwindcss";
 
 const config: Config = {
@@ -19,4 +24,3 @@ const config: Config = {
 };
 
 export default config;
-

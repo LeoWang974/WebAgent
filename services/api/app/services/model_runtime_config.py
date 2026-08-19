@@ -1,3 +1,12 @@
+# File purpose: Implements the model runtime config backend service workflow.
+# Main declarations: ModelRuntimeConfig defines model runtime config state or behavior;
+# _yaml_scalar handles yaml scalar; _normalize_provider handles normalize provider;
+# _default_base_url handles default base url; _default_api_key handles default api key;
+# default_model_runtime_config handles default model runtime config;
+# model_runtime_config_from_model handles model runtime config from model;
+# model_runtime_config_from_run handles model runtime config from run; ModelRuntimeConfigBuilder
+# defines model runtime config builder state or behavior.
+
 from dataclasses import dataclass
 from os import environ
 

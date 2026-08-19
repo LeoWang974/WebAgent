@@ -1,3 +1,28 @@
+# File purpose: Implements the artifact discovery backend service workflow.
+# Main declarations: explicit_artifact_source_dirs handles explicit artifact source dirs;
+# discover_artifacts_with_retry discovers artifacts with retry; _repo_root handles repo root;
+# _configured_hermes_home_candidates handles configured hermes home candidates; _candidate_roots
+# handles candidate roots; _resolve_bare_artifact_filename handles resolve bare artifact filename;
+# _hermes_session_roots handles hermes session roots; _runtime_artifacts_dir handles runtime
+# artifacts dir; _is_ignored handles is ignored; _is_regular_artifact_candidate handles is regular
+# artifact candidate; _windows_path_to_wsl handles windows path to wsl; _wsl_artifact_mtime
+# handles wsl artifact mtime; _artifact_mtime handles artifact mtime; _materialize_wsl_artifact
+# handles materialize wsl artifact; _is_non_artifact_path handles is non artifact path;
+# _is_repo_runtime_temp_path handles is repo runtime temp path; _is_safe_related_artifact_dir
+# handles is safe related artifact dir; _is_likely_output_path handles is likely output path;
+# _artifact_id handles artifact id; _file_sha256 handles file sha256; _normalized_path_key handles
+# normalized path key; _artifact_type handles artifact type; _artifact_role handles artifact role;
+# _valid_artifact_type handles valid artifact type; _read_text handles read text; _csv_metadata
+# handles csv metadata; _image_metadata handles image metadata; _metadata handles metadata;
+# _content handles content; _artifact_from_path handles artifact from path; _normalize_path
+# handles normalize path; _archive_artifact_path handles archive artifact path;
+# _extract_path_strings handles extract path strings; extract_artifact_path_strings handles
+# extract artifact path strings; _as_local_naive handles as local naive;
+# discover_artifact_paths_from_hermes_sessions discovers artifact paths from hermes sessions;
+# create_artifacts_from_paths creates artifacts from paths; create_artifacts_from_refs creates
+# artifacts from refs; discover_related_artifact_paths discovers related artifact paths;
+# discover_artifacts_since discovers artifacts since.
+
 import asyncio
 import base64
 import csv
@@ -43,8 +68,10 @@ IGNORED_PART_SUFFIXES = (".dist-info", ".egg-info")
 IGNORED_FILENAMES = {
     "package-lock.json",
     "package.json",
+    "readme.md",
     "request.md",
     "soul.md",
+    "testing.md",
 }
 OUTPUT_PATH_MARKERS = {
     "/deep-research-reports/",
@@ -146,7 +173,7 @@ NON_ARTIFACT_MARKERS = {
     "\\node_modules\\",
 }
 ARTIFACT_PATH_RE = re.compile(
-    r"(?P<path>(?:[A-Za-z]:\\|/mnt/[^/]+/|/home/|/tmp/|(?:\.?/)?(?:output|outputs|artifacts|ppt_decks|deep-research-reports)/)[^\"'<>|`\r\n]+?\.(?:md|html?|pptx|png|jpe?g|csv|xlsx|json))",
+    r"(?P<path>(?:[A-Za-z]:\\|/mnt/[^/]+/|/home/|/tmp/|(?:\.?/)?(?:output|outputs|artifacts|reports|ppt_decks|deep-research-reports)/)[^\"'<>|`\r\n]+?\.(?:md|html?|pptx|png|jpe?g|csv|xlsx|json))",
     re.IGNORECASE,
 )
 ARTIFACT_FILENAME_RE = re.compile(
@@ -178,6 +205,7 @@ def _candidate_roots() -> list[Path]:
     repo_root = _repo_root()
     user_home = Path.home()
     roots = [
+        repo_root / "reports",
         repo_root / "deep-research-reports",
         repo_root / "services" / "api" / "deep-research-reports",
         repo_root / "ppt_decks",
@@ -214,7 +242,11 @@ def _candidate_roots() -> list[Path]:
 
 def _resolve_bare_artifact_filename(filename: str) -> Path | None:
     name = Path(filename).name
-    if not name or Path(name).suffix.lower() not in SUPPORTED_SUFFIXES:
+    if (
+        not name
+        or name.lower() in IGNORED_FILENAMES
+        or Path(name).suffix.lower() not in SUPPORTED_SUFFIXES
+    ):
         return None
 
     candidates: list[Path] = []
@@ -643,6 +675,7 @@ def _normalize_path(raw_path: str) -> Path:
             "output/",
             "outputs/",
             "artifacts/",
+            "reports/",
             "ppt_decks/",
             "deep-research-reports/",
         )

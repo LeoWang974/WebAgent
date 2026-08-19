@@ -1,3 +1,7 @@
+# File purpose: Defines SQLAlchemy persistence models for artifact.
+# Main declarations: Artifact defines artifact state or behavior; FileAsset defines file asset
+# state or behavior.
+
 from sqlalchemy import JSON, BigInteger, Boolean, ForeignKey, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 

@@ -1,3 +1,16 @@
+/**
+ * File purpose: Manages client state and actions for event handlers.
+ * Main declarations: applyAgentRunEventState handles apply agent run event state;
+ * removePendingMessagesForRun handles remove pending messages for run;
+ * applyRunningAgentRunEventMessages handles apply running agent run event messages;
+ * applySendMessageStreamEventState handles apply send message stream event state;
+ * applyStreamRunStarted handles apply stream run started; queueStatusLabel handles queue status
+ * label; applyStreamAssistantDelta handles apply stream assistant delta; appendAssistantStepOnce
+ * handles append assistant step once; applyStreamArtifactCreated handles apply stream artifact
+ * created; applyStreamAssistantDone handles apply stream assistant done; normalizeMessageContent
+ * handles normalize message content.
+ */
+
 "use client";
 
 import {

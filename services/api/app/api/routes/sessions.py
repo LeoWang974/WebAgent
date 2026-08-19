@@ -1,3 +1,12 @@
+# File purpose: Defines FastAPI endpoints for the sessions API surface.
+# Main declarations: list_conversation_folders lists conversation folders;
+# create_conversation_folder creates conversation folder; update_conversation_folder updates
+# conversation folder; delete_conversation_folder deletes conversation folder; list_sessions lists
+# sessions; create_session creates session; update_session updates session; delete_session deletes
+# session; list_session_messages lists session messages; send_session_message handles send session
+# message; stream_session_message handles stream session message; list_session_artifacts lists
+# session artifacts; list_session_files lists session files.
+
 import asyncio
 import logging
 

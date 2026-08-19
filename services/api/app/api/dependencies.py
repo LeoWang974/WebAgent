@@ -1,3 +1,7 @@
+# File purpose: Implements the dependencies module for WebAgent.
+# Main declarations: this file contains declarative configuration or re-exports and has no
+# callable declarations.
+
 from typing import Annotated
 
 from fastapi import Depends

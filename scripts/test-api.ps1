@@ -1,3 +1,7 @@
+# File purpose: Automates the test api development, deployment, or maintenance workflow.
+# Main declarations: this file contains declarative configuration or re-exports and has no
+# callable declarations.
+
 param(
   [ValidateSet("unit", "integration", "all")]
   [string]$Group = "unit",

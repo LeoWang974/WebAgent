@@ -1,3 +1,8 @@
+/**
+ * File purpose: Renders and coordinates the session search user-interface feature.
+ * Main declarations: SessionSearch handles session search.
+ */
+
 "use client";
 
 import { useUiStore } from "@/stores";

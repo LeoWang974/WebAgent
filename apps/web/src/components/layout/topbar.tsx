@@ -1,3 +1,8 @@
+/**
+ * File purpose: Renders and coordinates the topbar user-interface feature.
+ * Main declarations: formatCheckedAt handles format checked at; Topbar handles topbar.
+ */
+
 "use client";
 
 import { Menu, PanelRight, RefreshCw, Search } from "lucide-react";

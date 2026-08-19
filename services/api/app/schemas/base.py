@@ -1,3 +1,6 @@
+# File purpose: Defines Pydantic API contracts for base.
+# Main declarations: to_camel converts camel; ApiModel defines api model state or behavior.
+
 from pydantic import BaseModel, ConfigDict
 
 

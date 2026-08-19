@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# File purpose: Automates the cci stop development, deployment, or maintenance workflow.
+# Main declarations: stop_process stops process; stop_orphans_by_pattern stops orphans by pattern.
+
 set -euo pipefail
 
 ROOT_DIR="${WEBAGENT_ROOT:-/mnt/afs/tj_share/webagent-cci}"

@@ -1,3 +1,7 @@
+# File purpose: Implements the router module for WebAgent.
+# Main declarations: this file contains declarative configuration or re-exports and has no
+# callable declarations.
+
 from fastapi import APIRouter
 
 from app.api.routes import (

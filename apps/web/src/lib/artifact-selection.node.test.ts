@@ -1,3 +1,8 @@
+/**
+ * File purpose: Verifies artifact selection.node.test behavior and its regression contracts.
+ * Main declarations: artifact handles artifact.
+ */
+
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Artifact } from "../types/artifact.ts";

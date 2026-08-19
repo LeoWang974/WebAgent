@@ -1,3 +1,7 @@
+# File purpose: Defines FastAPI endpoints for the files API surface.
+# Main declarations: safe_upload_filename handles safe upload filename; validate_upload_type
+# validates upload type; list_files lists files; upload_file handles upload file.
+
 import asyncio
 from pathlib import Path
 from typing import Annotated

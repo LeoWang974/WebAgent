@@ -1,3 +1,8 @@
+/**
+ * File purpose: Defines the Next.js page route or route layout.
+ * Main declarations: ModelSettingsPage handles model settings page.
+ */
+
 "use client";
 
 import { ModelSettings } from "@/components/settings";

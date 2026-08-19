@@ -1,3 +1,13 @@
+/**
+ * File purpose: Manages client state and actions for chat runtime.
+ * Main declarations: createRequestAbortController handles create request abort controller;
+ * releaseRequestAbortController handles release request abort controller; abortSessionRequest
+ * handles abort session request; unsubscribeAgentRun handles unsubscribe agent run;
+ * startAgentRunPolling handles start agent run polling; subscribeAgentRunEvents handles subscribe
+ * agent run events; setSwitchingState handles set switching state; loadSessionWorkspace handles
+ * load session workspace; resetChatRuntime handles reset chat runtime.
+ */
+
 import { selectPreferredArtifact } from "@/lib/artifact-selection";
 import { webAgentApi } from "@/services";
 import type { AgentRunUnsubscribe } from "@/services/adapters/types";

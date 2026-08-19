@@ -1,3 +1,8 @@
+# File purpose: Verifies test source encoding behavior and its regression contracts.
+# Main declarations: test_production_source_contains_no_known_mojibake verifies production source
+# contains no known mojibake; test_production_source_uses_utf8_without_bom verifies production
+# source uses utf8 without bom.
+
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]

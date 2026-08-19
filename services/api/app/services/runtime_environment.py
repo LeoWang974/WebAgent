@@ -1,3 +1,17 @@
+# File purpose: Implements the runtime environment backend service workflow.
+# Main declarations: safe_runtime_segment handles safe runtime segment; path_from_runtime_setting
+# handles path from runtime setting; runtime_root handles runtime root; runtime_user_shared_dir
+# handles runtime user shared dir; runtime_conversation_dir handles runtime conversation dir;
+# runtime_conversation_dir_for_ids handles runtime conversation dir for ids; runtime_run_dir
+# handles runtime run dir; runtime_run_dir_for_ids handles runtime run dir for ids;
+# _restrict_private_file handles restrict private file; _copy_file handles copy file; _copy_skills
+# handles copy skills; _read_env_file handles read env file; _write_runtime_env_values handles
+# write runtime env values; _sync_runtime_env handles sync runtime env; _ensure_hermes_config
+# handles ensure hermes config; shell_path handles shell path; UserRuntimeContext defines user
+# runtime context state or behavior; _stage_latest_hermes_session handles stage latest hermes
+# session; scrub_runtime_credentials handles scrub runtime credentials; build_user_runtime_context
+# builds user runtime context.
+
 import logging
 import re
 import shutil
@@ -236,12 +250,19 @@ class UserRuntimeContext:
     hermes_resume_session_id: str | None = None
 
     def adapter_lock_scope(self) -> str:
-        user_segment = safe_runtime_segment(self.user_id)
-        conversation_segment = safe_runtime_segment(self.conversation_id, "conversation")
-        return f"conversation:{user_segment}:{conversation_segment}"
+        return runtime_adapter_lock_scope(self.user_id, self.conversation_id)
 
     def hermes_home_for_shell(self) -> str:
         return shell_path(self.hermes_home)
+
+
+def runtime_adapter_lock_scope(
+    user_id: str,
+    conversation_id: str | None = None,
+) -> str:
+    user_segment = safe_runtime_segment(user_id)
+    conversation_segment = safe_runtime_segment(conversation_id or "", "conversation")
+    return f"conversation:{user_segment}:{conversation_segment}"
 
 
 def _stage_latest_hermes_session(

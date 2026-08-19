@@ -1,3 +1,16 @@
+# File purpose: Verifies test model secret encryption behavior and its regression contracts.
+# Main declarations: _new_key handles new key;
+# test_model_secret_round_trip_uses_versioned_envelope verifies model secret round trip uses
+# versioned envelope; test_model_secret_rotation_accepts_previous_key verifies model secret
+# rotation accepts previous key; test_model_secret_rejects_missing_previous_key verifies model
+# secret rejects missing previous key; test_model_secret_rejects_invalid_key_and_unknown_envelope
+# verifies model secret rejects invalid key and unknown envelope;
+# test_model_secret_rejects_tampered_ciphertext verifies model secret rejects tampered ciphertext;
+# test_migrate_model_secrets_encrypts_plaintext_and_rotates_old_ciphertext verifies migrate model
+# secrets encrypts plaintext and rotates old ciphertext;
+# test_migrate_model_secrets_rolls_back_when_old_key_is_missing verifies migrate model secrets
+# rolls back when old key is missing.
+
 import pytest
 from cryptography.fernet import Fernet
 from sqlalchemy import select

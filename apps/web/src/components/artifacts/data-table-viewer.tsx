@@ -1,3 +1,9 @@
+/**
+ * File purpose: Renders and coordinates the data table viewer user-interface feature.
+ * Main declarations: csvEscape handles csv escape; downloadCsv handles download csv;
+ * DataTableViewer handles data table viewer.
+ */
+
 "use client";
 
 import { useMemo, useState } from "react";

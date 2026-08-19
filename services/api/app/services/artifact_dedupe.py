@@ -1,3 +1,6 @@
+# File purpose: Implements the artifact dedupe backend service workflow.
+# Main declarations: dedupe_discovered_artifacts handles dedupe discovered artifacts.
+
 from app import schemas
 
 

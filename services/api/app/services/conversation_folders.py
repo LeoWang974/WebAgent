@@ -1,3 +1,8 @@
+# File purpose: Implements the conversation folders backend service workflow.
+# Main declarations: get_owned_folder_or_404 retrieves owned folder or 404; to_folder_schema
+# converts folder schema; list_user_folders lists user folders; create_user_folder creates user
+# folder; update_user_folder updates user folder; delete_user_folder deletes user folder.
+
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError

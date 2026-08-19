@@ -1,3 +1,7 @@
+# File purpose: Verifies test agent run stale diagnostics behavior and its regression contracts.
+# Main declarations: test_mark_stale_agent_runs_preserves_last_event_diagnostics verifies mark
+# stale agent runs preserves last event diagnostics.
+
 from datetime import UTC, datetime, timedelta
 
 import pytest

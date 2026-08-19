@@ -1,3 +1,9 @@
+/**
+ * File purpose: Verifies chat store helpers.node.test behavior and its regression contracts.
+ * Main declarations: this file contains declarative configuration or re-exports and has no
+ * callable declarations.
+ */
+
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";

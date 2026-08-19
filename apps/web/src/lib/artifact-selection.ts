@@ -1,3 +1,11 @@
+/**
+ * File purpose: Provides shared browser utilities for artifact selection.
+ * Main declarations: artifactDisplayPriority handles artifact display priority; artifactTime
+ * handles artifact time; sameRun handles same run; compareArtifactsForPreview handles compare
+ * artifacts for preview; selectPreferredArtifact handles select preferred artifact;
+ * shouldSelectCreatedArtifact handles should select created artifact.
+ */
+
 import type { Artifact } from "@/types";
 
 export function artifactDisplayPriority(artifact?: Artifact) {

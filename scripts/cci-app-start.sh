@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# File purpose: Automates the cci app start development, deployment, or maintenance workflow.
+# Main declarations: fail handles fail; ensure_runtime_user ensures runtime user;
+# ensure_cryptography_compatibility ensures cryptography compatibility; cleanup handles cleanup.
+
 set -Eeuo pipefail
 
 ROOT_DIR="${WEBAGENT_ROOT:-/mnt/afs/tj_share/webagent-cci}"
@@ -62,7 +66,6 @@ ensure_runtime_user() {
     LD_LIBRARY_PATH="$PYTHON_HOME/lib:${LD_LIBRARY_PATH:-}" \
     API_INTERNAL_BASE_URL="http://127.0.0.1:$API_PORT" \
     NEXT_PUBLIC_API_BASE_URL="" \
-    NEXT_PUBLIC_API_ADAPTER="fastapi" \
     CCI_MANAGE_LOCAL_INFRA="true" \
     /bin/bash "$0" "$@"
 }

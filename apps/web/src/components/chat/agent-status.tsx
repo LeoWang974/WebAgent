@@ -1,3 +1,8 @@
+/**
+ * File purpose: Renders and coordinates the agent status user-interface feature.
+ * Main declarations: AgentStatus handles agent status.
+ */
+
 "use client";
 
 import { useState } from "react";

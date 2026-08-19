@@ -1,3 +1,7 @@
+# File purpose: Automates the api worker development, deployment, or maintenance workflow.
+# Main declarations: this file contains declarative configuration or re-exports and has no
+# callable declarations.
+
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot

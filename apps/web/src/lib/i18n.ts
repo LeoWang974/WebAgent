@@ -1,3 +1,8 @@
+/**
+ * File purpose: Provides shared browser utilities for i18n.
+ * Main declarations: useI18n handles use i18n; translations exposes the translations public API.
+ */
+
 "use client";
 
 import { useUiStore } from "@/stores";

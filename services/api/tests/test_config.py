@@ -1,3 +1,7 @@
+# File purpose: Verifies test config behavior and its regression contracts.
+# Main declarations: test_production_requires_agent_run_queue verifies production requires agent
+# run queue.
+
 import pytest
 from cryptography.fernet import Fernet
 

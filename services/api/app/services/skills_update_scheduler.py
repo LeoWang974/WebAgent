@@ -1,3 +1,8 @@
+# File purpose: Implements the skills update scheduler backend service workflow.
+# Main declarations: _timezone handles timezone; next_weekly_run_at handles next weekly run at;
+# run_configured_skills_update runs configured skills update; run_periodic_skills_update runs
+# periodic skills update; stop_skills_update_task stops skills update task.
+
 import asyncio
 import logging
 from contextlib import suppress

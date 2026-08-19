@@ -1,3 +1,12 @@
+# File purpose: Implements the cleanup backend service workflow.
+# Main declarations: CleanupResult defines cleanup result state or behavior; _repo_runtime_dir
+# handles repo runtime dir; _is_expired handles is expired; _deletion_path handles deletion path;
+# _remove_runtime_target handles remove runtime target; _expired_runtime_targets handles expired
+# runtime targets; _expired_raw_logs handles expired raw logs; cleanup_expired_runtime_files
+# handles cleanup expired runtime files; cleanup_orphan_artifacts handles cleanup orphan
+# artifacts; cleanup_long_disconnected_runs handles cleanup long disconnected runs;
+# run_data_cleanup runs data cleanup.
+
 import asyncio
 import os
 import shutil

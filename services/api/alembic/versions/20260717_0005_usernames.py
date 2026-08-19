@@ -1,3 +1,6 @@
+# File purpose: Defines the 20260717 0005 usernames database schema migration and rollback.
+# Main declarations: upgrade handles upgrade; downgrade handles downgrade.
+
 """add usernames
 
 Revision ID: 20260717_0005

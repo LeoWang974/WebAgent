@@ -1,3 +1,9 @@
+/**
+ * File purpose: Implements browser-side API access for types.
+ * Main declarations: this file contains declarative configuration or re-exports and has no
+ * callable declarations.
+ */
+
 import type {
   DataContextSettings,
   InterfaceSettings,

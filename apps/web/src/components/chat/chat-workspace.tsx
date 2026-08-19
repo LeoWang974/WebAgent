@@ -1,3 +1,8 @@
+/**
+ * File purpose: Renders and coordinates the chat workspace user-interface feature.
+ * Main declarations: ChatWorkspace handles chat workspace.
+ */
+
 "use client";
 
 import { ArtifactDrawer, ArtifactFullscreen, ArtifactPanel } from "../artifacts";

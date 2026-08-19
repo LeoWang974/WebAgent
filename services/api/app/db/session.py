@@ -1,3 +1,6 @@
+# File purpose: Manages session database lifecycle and session infrastructure.
+# Main declarations: get_db retrieves db.
+
 from collections.abc import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine

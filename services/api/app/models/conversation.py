@@ -1,3 +1,8 @@
+# File purpose: Defines SQLAlchemy persistence models for conversation.
+# Main declarations: Conversation defines conversation state or behavior; Message defines message
+# state or behavior; ConversationShare defines conversation share state or behavior;
+# ConversationFolder defines conversation folder state or behavior.
+
 from sqlalchemy import JSON, ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 

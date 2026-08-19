@@ -1,3 +1,7 @@
+# File purpose: Defines SQLAlchemy persistence models for skill.
+# Main declarations: SkillConfig defines skill config state or behavior; SkillVersion defines
+# skill version state or behavior.
+
 from sqlalchemy import String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 

@@ -1,3 +1,8 @@
+# File purpose: Defines FastAPI endpoints for the auth API surface.
+# Main declarations: to_user_schema converts user schema; login_identifier handles login
+# identifier; registration_email handles registration email; login handles login; register handles
+# register; logout handles logout; me handles me.
+
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy.exc import IntegrityError
 

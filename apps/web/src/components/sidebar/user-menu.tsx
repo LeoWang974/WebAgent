@@ -1,3 +1,8 @@
+/**
+ * File purpose: Renders and coordinates the user menu user-interface feature.
+ * Main declarations: UserMenu handles user menu.
+ */
+
 "use client";
 
 import { LogOut } from "lucide-react";

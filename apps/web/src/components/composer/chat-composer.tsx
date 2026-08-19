@@ -1,3 +1,8 @@
+/**
+ * File purpose: Renders and coordinates the chat composer user-interface feature.
+ * Main declarations: ChatComposer handles chat composer.
+ */
+
 "use client";
 
 import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";

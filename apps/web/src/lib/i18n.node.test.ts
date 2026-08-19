@@ -1,3 +1,8 @@
+/**
+ * File purpose: Verifies i18n.node.test behavior and its regression contracts.
+ * Main declarations: translationValue handles translation value.
+ */
+
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";

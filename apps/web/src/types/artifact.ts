@@ -1,3 +1,9 @@
+/**
+ * File purpose: Defines shared TypeScript contracts for artifact.
+ * Main declarations: this file contains declarative configuration or re-exports and has no
+ * callable declarations.
+ */
+
 export type ArtifactType =
   | "markdown_report"
   | "html_page"

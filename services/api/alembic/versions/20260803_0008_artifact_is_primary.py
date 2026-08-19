@@ -1,3 +1,7 @@
+# File purpose: Defines the 20260803 0008 artifact is primary database schema migration and
+# rollback.
+# Main declarations: upgrade handles upgrade; downgrade handles downgrade.
+
 """add artifact is_primary
 
 Revision ID: 20260803_0008

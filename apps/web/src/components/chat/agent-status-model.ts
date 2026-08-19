@@ -1,3 +1,9 @@
+/**
+ * File purpose: Renders and coordinates the agent status model user-interface feature.
+ * Main declarations: isAgentRunActive handles is agent run active; selectAgentStatusRun handles
+ * select agent status run.
+ */
+
 import type { AgentRun } from "@/types";
 
 const TERMINAL_STATUSES: AgentRun["status"][] = [

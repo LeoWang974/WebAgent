@@ -1,3 +1,12 @@
+# File purpose: Verifies test artifact slides behavior and its regression contracts.
+# Main declarations: test_discover_deck_slide_paths_finds_png_pages verifies discover deck slide
+# paths finds png pages; test_discover_deck_slide_paths_dedupes_archived_and_source_pages verifies
+# discover deck slide paths dedupes archived and source pages;
+# test_dedupe_slide_artifacts_keeps_one_artifact_per_page verifies dedupe slide artifacts keeps
+# one artifact per page; test_slides_from_png_paths_returns_html_wrapped_images verifies slides
+# from png paths returns html wrapped images; test_is_deck_slide_artifact_rejects_report_html
+# verifies is deck slide artifact rejects report html.
+
 from pathlib import Path
 
 from app.api.routes.artifacts import (

@@ -1,3 +1,9 @@
+/**
+ * File purpose: Defines shared TypeScript contracts for message.
+ * Main declarations: this file contains declarative configuration or re-exports and has no
+ * callable declarations.
+ */
+
 export type MessageRole = "user" | "assistant" | "system" | "tool";
 
 export interface Message {

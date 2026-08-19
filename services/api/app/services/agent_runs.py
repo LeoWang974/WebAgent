@@ -1,3 +1,14 @@
+# File purpose: Implements the agent runs backend service workflow.
+# Main declarations: AgentRunEventCursor defines agent run event cursor state or behavior;
+# create_hermes_adapter creates hermes adapter; _event_to_step handles event to step;
+# to_agent_run_schema converts agent run schema; to_agent_run_event_schema converts agent run
+# event schema; list_run_events lists run events; list_new_run_events lists new run events;
+# is_stale_run checks stale run; mark_stale_agent_runs handles mark stale agent runs;
+# _latest_run_event handles latest run event; create_db_agent_run creates db agent run;
+# record_db_agent_run_event handles record db agent run event; touch_db_agent_run handles touch db
+# agent run; finish_db_agent_run handles finish db agent run; get_db_agent_run retrieves db agent
+# run; list_agent_runs_for_user lists agent runs for user.
+
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 

@@ -1,3 +1,6 @@
+# File purpose: Defines SQLAlchemy persistence models for settings.
+# Main declarations: UserSettings defines user settings state or behavior.
+
 from sqlalchemy import JSON, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
 

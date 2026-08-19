@@ -1,3 +1,8 @@
+/**
+ * File purpose: Defines the Next.js page route or route layout.
+ * Main declarations: RegisterPage handles register page.
+ */
+
 "use client";
 
 import Link from "next/link";

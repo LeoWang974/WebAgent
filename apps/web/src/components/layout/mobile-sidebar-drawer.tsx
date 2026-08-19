@@ -1,3 +1,8 @@
+/**
+ * File purpose: Renders and coordinates the mobile sidebar drawer user-interface feature.
+ * Main declarations: MobileSidebarDrawer handles mobile sidebar drawer.
+ */
+
 "use client";
 
 import { Sidebar } from "./sidebar";

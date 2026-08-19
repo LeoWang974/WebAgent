@@ -1,3 +1,7 @@
+# File purpose: Defines the 20260710 0001 core persistence database schema migration and rollback.
+# Main declarations: create_timestamp_columns creates timestamp columns; upgrade handles upgrade;
+# downgrade handles downgrade.
+
 """core persistence baseline
 
 Revision ID: 20260710_0001

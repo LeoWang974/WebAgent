@@ -1,3 +1,8 @@
+/**
+ * File purpose: Renders and coordinates the theme effect user-interface feature.
+ * Main declarations: ThemeEffect handles theme effect.
+ */
+
 "use client";
 
 import { useEffect } from "react";

@@ -1,3 +1,12 @@
+# File purpose: Implements the settings service backend service workflow.
+# Main declarations: to_model_schema converts model schema; check_runtime_model checks runtime
+# model; to_skill_schema converts skill schema; to_data_context_schema converts data context
+# schema; to_interface_schema converts interface schema; ensure_default_models ensures default
+# models; list_user_models lists user models; get_user_model retrieves user model;
+# ensure_user_settings ensures user settings; user_developer_mode handles user developer mode;
+# ensure_default_skills ensures default skills; list_skill_configs lists skill configs;
+# get_skill_config retrieves skill config.
+
 from typing import Any
 
 from fastapi import HTTPException

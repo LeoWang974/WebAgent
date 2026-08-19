@@ -1,3 +1,9 @@
+# File purpose: Verifies test agent run steps behavior and its regression contracts.
+# Main declarations: test_stage_step_uses_message_id_for_message_timing_recovery verifies stage
+# step uses message id for message timing recovery;
+# test_agent_run_event_cursor_keeps_only_boundary_ids verifies agent run event cursor keeps only
+# boundary ids.
+
 from datetime import UTC, datetime
 
 from app.models import AgentRunEvent

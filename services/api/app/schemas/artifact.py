@@ -1,3 +1,8 @@
+# File purpose: Defines Pydantic API contracts for artifact.
+# Main declarations: Artifact defines artifact state or behavior; SlidePreview defines slide
+# preview state or behavior; ArtifactSlides defines artifact slides state or behavior; FileAsset
+# defines file asset state or behavior.
+
 from typing import Any, Literal
 
 from app.schemas.base import ApiModel

@@ -1,3 +1,8 @@
+/**
+ * File purpose: Manages client state and actions for settings store.
+ * Main declarations: useSettingsStore exposes the use settings store public API.
+ */
+
 "use client";
 
 import { create } from "zustand";

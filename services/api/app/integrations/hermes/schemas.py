@@ -1,3 +1,8 @@
+# File purpose: Implements the Hermes CLI integration for schemas.
+# Main declarations: AgentRunStep defines agent run step state or behavior; AgentRunCreate defines
+# agent run create state or behavior; AgentArtifactRef defines agent artifact ref state or
+# behavior; AgentRunEvent defines agent run event state or behavior.
+
 class AgentRunStep:
     def __init__(self, id: str, label: str, status: str, timestamp: str | None = None):
         self.id = id

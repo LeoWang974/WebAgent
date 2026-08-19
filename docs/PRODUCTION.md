@@ -23,7 +23,6 @@ Use these templates and replace every placeholder:
 Production must use:
 
 ```text
-NEXT_PUBLIC_API_ADAPTER=fastapi
 ENVIRONMENT=production
 ALLOW_DEV_AUTH_FALLBACK=false
 JWT_SECRET_KEY=<at least 32 random characters>
@@ -94,7 +93,7 @@ pnpm --filter web build
 Then verify:
 
 - `GET https://api.example.com/api/health` returns `{"status":"ok"}`.
-- The web app loads with no mock responses.
+- The web app reaches the FastAPI service through the configured API origin.
 - Login works with a real user.
 - A Hermes run creates Agent Run events and artifacts.
 - Generated artifacts are stored outside git-tracked directories.

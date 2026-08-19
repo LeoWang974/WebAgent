@@ -1,3 +1,7 @@
+# File purpose: Defines SQLAlchemy persistence models for mixins.
+# Main declarations: uuid_hex handles uuid hex; IdMixin defines id mixin state or behavior;
+# TimestampMixin defines timestamp mixin state or behavior.
+
 from datetime import datetime
 from uuid import uuid4
 

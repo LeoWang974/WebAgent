@@ -1,3 +1,9 @@
+# File purpose: Implements the agent run executor backend service workflow.
+# Main declarations: _load_run_context handles load run context; _message_snapshot handles message
+# snapshot; execute_queued_agent_run handles execute queued agent run; _execute_queued_agent_run
+# handles execute queued agent run; _complete_run handles complete run; _fail_conversation handles
+# fail conversation.
+
 import asyncio
 import logging
 from datetime import datetime
@@ -37,6 +43,7 @@ from app.services.model_runtime_config import model_runtime_config_builder
 from app.services.persistence import persist_message, to_artifact, to_message, to_session
 from app.services.runtime_environment import (
     build_user_runtime_context,
+    runtime_adapter_lock_scope,
     scrub_runtime_credentials,
 )
 from app.services.session_artifacts import artifact_display_priority, refresh_conversation
@@ -132,8 +139,39 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
     run_started_monotonic = asyncio.get_running_loop().time()
     last_run_touch_monotonic = run_started_monotonic
     model_runtime_config = None
+    adapter_lock_scope_value = runtime_adapter_lock_scope(user_id, conversation_id)
 
     try:
+        async def on_adapter_capacity_wait(elapsed_seconds: float) -> None:
+            if await is_agent_run_cancelled(db, run_id_value):
+                raise AgentRunCancelled()
+            await record_db_agent_run_event(
+                db,
+                run,
+                event_type="adapter_capacity_wait",
+                label=(
+                    f"Waiting for {current_adapter_key or 'agent'} adapter capacity "
+                    f"({int(elapsed_seconds)}s)."
+                ),
+                status="running",
+                progress=5,
+                step_status="running",
+                payload={
+                    "adapterKey": current_adapter_key,
+                    "elapsedSeconds": int(elapsed_seconds),
+                },
+            )
+
+        adapter_capacity_lease = await acquire_adapter_capacity(
+            current_adapter_key,
+            run_id_value,
+            scope=adapter_lock_scope_value,
+            on_wait=on_adapter_capacity_wait,
+        )
+        logger.info("Acquired adapter capacity lease object: run_id=%s", run_id_value)
+        await adapter_capacity_lease.__aenter__()
+        logger.info("Entered adapter capacity lease: run_id=%s", run_id_value)
+
         model_runtime_config = model_runtime_config_builder.build_for_run(run)
         user_runtime_context = build_user_runtime_context(
             user,
@@ -195,35 +233,6 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
         if adapter is None:
             raise RuntimeError("No agent runtime adapter is available.")
 
-        async def on_adapter_capacity_wait(elapsed_seconds: float) -> None:
-            if await is_agent_run_cancelled(db, run_id_value):
-                raise AgentRunCancelled()
-            await record_db_agent_run_event(
-                db,
-                run,
-                event_type="adapter_capacity_wait",
-                label=(
-                    f"Waiting for {current_adapter_key or 'agent'} adapter capacity "
-                    f"({int(elapsed_seconds)}s)."
-                ),
-                status="running",
-                progress=5,
-                step_status="running",
-                payload={
-                    "adapterKey": current_adapter_key,
-                    "elapsedSeconds": int(elapsed_seconds),
-                },
-            )
-
-        adapter_capacity_lease = await acquire_adapter_capacity(
-            current_adapter_key,
-            run_id_value,
-            scope=user_runtime_context.adapter_lock_scope(),
-            on_wait=on_adapter_capacity_wait,
-        )
-        logger.info("Acquired adapter capacity lease object: run_id=%s", run_id_value)
-        await adapter_capacity_lease.__aenter__()
-        logger.info("Entered adapter capacity lease: run_id=%s", run_id_value)
         await record_db_agent_run_event(
             db,
             run,
@@ -522,10 +531,10 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
         )
         await _fail_conversation(db, run, conversation_id, f"Agent runtime error: {error}")
     finally:
-        if adapter_capacity_lease is not None:
-            await adapter_capacity_lease.__aexit__(None, None, None)
         if user_runtime_context is not None:
             scrub_runtime_credentials(user_runtime_context)
+        if adapter_capacity_lease is not None:
+            await adapter_capacity_lease.__aexit__(None, None, None)
 
 
 async def _complete_run(

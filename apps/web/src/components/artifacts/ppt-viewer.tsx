@@ -1,3 +1,8 @@
+/**
+ * File purpose: Renders and coordinates the ppt viewer user-interface feature.
+ * Main declarations: PptViewer handles ppt viewer.
+ */
+
 "use client";
 
 import { useState } from "react";

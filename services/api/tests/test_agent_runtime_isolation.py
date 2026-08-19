@@ -1,3 +1,15 @@
+# File purpose: Verifies test agent runtime isolation behavior and its regression contracts.
+# Main declarations: test_safe_runtime_segment_strips_path_unsafe_characters verifies safe runtime
+# segment strips path unsafe characters;
+# test_path_from_runtime_setting_accepts_wsl_drive_path_on_windows verifies path from runtime
+# setting accepts wsl drive path on windows; _base_hermes_home handles base hermes home;
+# test_build_user_runtime_context_creates_per_conversation_dirs verifies build user runtime
+# context creates per conversation dirs; test_build_user_runtime_context_uses_run_model_snapshot
+# verifies build user runtime context uses run model snapshot;
+# test_build_user_runtime_context_resumes_latest_conversation_session verifies build user runtime
+# context resumes latest conversation session; test_adapter_lock_scope_respects_configured_scope
+# verifies adapter lock scope respects configured scope.
+
 import sqlite3
 from pathlib import Path
 from types import SimpleNamespace

@@ -1,3 +1,7 @@
+# File purpose: Implements the Hermes CLI integration for adapter.
+# Main declarations: now_iso handles now iso; HermesAdapter defines hermes adapter state or
+# behavior.
+
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 

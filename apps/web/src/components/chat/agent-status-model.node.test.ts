@@ -1,3 +1,8 @@
+/**
+ * File purpose: Verifies agent status model.node.test behavior and its regression contracts.
+ * Main declarations: run handles run.
+ */
+
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AgentRun } from "../../types/agent-run.ts";

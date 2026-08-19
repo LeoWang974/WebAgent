@@ -1,3 +1,12 @@
+# File purpose: Implements the persistence backend service workflow.
+# Main declarations: now_iso handles now iso; normalize_email normalizes email; normalize_username
+# normalizes username; ensure_user ensures user; get_user_by_email retrieves user by email;
+# get_user_by_username retrieves user by username; get_user_by_identifier retrieves user by
+# identifier; get_user_by_id retrieves user by id; get_current_user retrieves current user;
+# to_session converts session; to_message converts message; to_file_asset converts file asset;
+# persist_message persists message; to_artifact converts artifact; get_conversation_or_404
+# retrieves conversation or 404; require_owner handles require owner.
+
 from datetime import UTC, datetime
 from typing import Annotated
 

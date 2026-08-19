@@ -1,3 +1,6 @@
+# File purpose: Defines Pydantic API contracts for model.
+# Main declarations: ModelConfig defines model config state or behavior.
+
 from typing import Any, Literal
 
 from app.schemas.base import ApiModel

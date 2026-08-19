@@ -1,3 +1,14 @@
+# File purpose: Defines FastAPI endpoints for the settings API surface.
+# Main declarations: get_input_value retrieves input value; get_model_name_input retrieves model
+# name input; to_user_schema converts user schema; update_profile updates profile; update_password
+# updates password; get_data_context_settings retrieves data context settings;
+# update_data_context_settings updates data context settings; get_interface_settings retrieves
+# interface settings; update_interface_settings updates interface settings; add_model handles add
+# model; update_model updates model; delete_model deletes model; set_default_model handles set
+# default model; test_model_connection verifies model connection; set_default_skill handles set
+# default skill; toggle_skill_enabled handles toggle skill enabled; update_skill_version updates
+# skill version.
+
 from typing import Any
 
 from fastapi import APIRouter, HTTPException

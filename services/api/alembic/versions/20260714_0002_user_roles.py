@@ -1,3 +1,6 @@
+# File purpose: Defines the 20260714 0002 user roles database schema migration and rollback.
+# Main declarations: upgrade handles upgrade; downgrade handles downgrade.
+
 """add user roles
 
 Revision ID: 20260714_0002

@@ -1,3 +1,7 @@
+# File purpose: Verifies test celery app behavior and its regression contracts.
+# Main declarations: test_agent_workers_only_prefetch_one_long_run verifies agent workers only
+# prefetch one long run.
+
 from app.workers.celery_app import celery_app
 
 

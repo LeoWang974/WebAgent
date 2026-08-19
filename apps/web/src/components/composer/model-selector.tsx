@@ -1,3 +1,8 @@
+/**
+ * File purpose: Renders and coordinates the model selector user-interface feature.
+ * Main declarations: optionLabel handles option label; ModelSelector handles model selector.
+ */
+
 "use client";
 
 import { useI18n } from "@/lib/i18n";

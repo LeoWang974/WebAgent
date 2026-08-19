@@ -1,3 +1,8 @@
+/**
+ * File purpose: Renders and coordinates the user message user-interface feature.
+ * Main declarations: UserMessage handles user message.
+ */
+
 import { MessageItem } from "./message-item";
 
 interface UserMessageProps {

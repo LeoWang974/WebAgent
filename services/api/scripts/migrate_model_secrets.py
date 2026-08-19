@@ -1,3 +1,7 @@
+# File purpose: Automates the migrate model secrets development, deployment, or maintenance
+# workflow.
+# Main declarations: parse_args parses args; run handles run.
+
 import argparse
 import asyncio
 

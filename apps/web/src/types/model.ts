@@ -1,3 +1,9 @@
+/**
+ * File purpose: Defines shared TypeScript contracts for model.
+ * Main declarations: this file contains declarative configuration or re-exports and has no
+ * callable declarations.
+ */
+
 export type ModelProvider = "sensenova" | "openai_compatible" | "custom";
 
 export interface ModelRuntimeStatus {

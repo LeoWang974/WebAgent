@@ -1,3 +1,7 @@
+# File purpose: Defines background worker behavior for celery app.
+# Main declarations: this file contains declarative configuration or re-exports and has no
+# callable declarations.
+
 from celery import Celery
 
 from app.core.config import settings

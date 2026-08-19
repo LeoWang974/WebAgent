@@ -1,3 +1,12 @@
+# File purpose: Verifies test files api behavior and its regression contracts.
+# Main declarations: isolated_upload_storage handles isolated upload storage;
+# test_file_upload_persists_and_links_to_session verifies file upload persists and links to
+# session; test_file_upload_rejects_mismatched_content_type verifies file upload rejects
+# mismatched content type; test_global_files_are_private_to_the_uploader verifies global files are
+# private to the uploader; test_file_upload_sanitizes_client_path verifies file upload sanitizes
+# client path; test_file_upload_rejects_oversized_content verifies file upload rejects oversized
+# content.
+
 from pathlib import Path
 
 import pytest

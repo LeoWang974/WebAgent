@@ -1,3 +1,8 @@
+/**
+ * File purpose: Renders and coordinates the profile settings user-interface feature.
+ * Main declarations: ProfileSettings handles profile settings.
+ */
+
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";

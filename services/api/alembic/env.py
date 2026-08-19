@@ -1,3 +1,7 @@
+# File purpose: Configures Alembic migration discovery and database connectivity.
+# Main declarations: run_migrations_offline runs migrations offline; do_run_migrations handles do
+# run migrations; run_migrations_online runs migrations online.
+
 from logging.config import fileConfig
 
 from sqlalchemy.ext.asyncio import async_engine_from_config

@@ -1,3 +1,6 @@
+# File purpose: Automates the dev api development, deployment, or maintenance workflow.
+# Main declarations: Stop-ProcessTreeByPort handles stop process tree by port.
+
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot

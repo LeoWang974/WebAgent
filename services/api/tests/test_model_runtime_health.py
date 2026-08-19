@@ -1,3 +1,11 @@
+# File purpose: Verifies test model runtime health behavior and its regression contracts.
+# Main declarations: FailingHermesAdapter defines failing hermes adapter state or behavior;
+# RaisingHermesAdapter defines raising hermes adapter state or behavior; make_model handles make
+# model; stub_runtime_config handles stub runtime config;
+# test_runtime_model_reports_hermes_health_failure verifies runtime model reports hermes health
+# failure; test_runtime_model_reports_hermes_health_exception verifies runtime model reports
+# hermes health exception.
+
 from types import SimpleNamespace
 
 import pytest

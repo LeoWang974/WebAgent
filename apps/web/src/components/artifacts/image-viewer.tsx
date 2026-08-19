@@ -1,3 +1,8 @@
+/**
+ * File purpose: Renders and coordinates the image viewer user-interface feature.
+ * Main declarations: ImageViewer handles image viewer.
+ */
+
 "use client";
 
 import { useEffect, useState } from "react";

@@ -1,3 +1,12 @@
+# File purpose: Verifies test model runtime config behavior and its regression contracts.
+# Main declarations: test_runtime_selector_model_uses_default_sensenova_snapshot verifies runtime
+# selector model uses default sensenova snapshot;
+# test_custom_openai_compatible_model_uses_user_snapshot verifies custom openai compatible model
+# uses user snapshot; test_explicit_custom_model_is_not_treated_as_runtime_selector verifies
+# explicit custom model is not treated as runtime selector;
+# test_adapter_model_alias_does_not_query_database verifies adapter model alias does not query
+# database.
+
 from types import SimpleNamespace
 
 import pytest

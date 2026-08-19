@@ -1,3 +1,36 @@
+# File purpose: Verifies test api integration behavior and its regression contracts.
+# Main declarations: _NoopAdapterCapacityLease defines noop adapter capacity lease state or
+# behavior; isolate_adapter_capacity handles isolate adapter capacity; stub_queued_run_dispatch
+# handles stub queued run dispatch; parse_sse_events parses sse events;
+# test_authentication_does_not_accept_access_token_in_query_string verifies authentication does
+# not accept access token in query string; test_terminal_agent_run_event_stream_returns_and_closes
+# verifies terminal agent run event stream returns and closes; FakeStreamingAdapter defines fake
+# streaming adapter state or behavior; FakeHangingAdapter defines fake hanging adapter state or
+# behavior; FakeRawActivityAdapter defines fake raw activity adapter state or behavior;
+# FakeShortChatAdapter defines fake short chat adapter state or behavior;
+# test_register_accepts_username_without_email verifies register accepts username without email;
+# test_model_config_accepts_separate_runtime_model_name verifies model config accepts separate
+# runtime model name; test_non_stream_message_enqueues_agent_run verifies non stream message
+# enqueues agent run; test_session_permissions_and_share_access verifies session permissions and
+# share access; test_admin_can_view_all_private_sessions verifies admin can view all private
+# sessions; test_debug_json_artifacts_require_developer_mode verifies debug json artifacts require
+# developer mode; test_conversation_folder_create_assign_clear_and_public_listing verifies
+# conversation folder create assign clear and public listing;
+# test_username_login_and_admin_user_list_password_mask verifies username login and admin user
+# list password mask; test_password_update_can_refresh_jwt verifies password update can refresh
+# jwt; test_dev_auth_fallback_disabled_requires_real_jwt verifies dev auth fallback disabled
+# requires real jwt; test_artifact_discovery_persists_and_respects_permissions verifies artifact
+# discovery persists and respects permissions; test_agent_run_sse_persists_events_and_artifact
+# verifies agent run sse persists events and artifact;
+# test_raw_activity_heartbeat_does_not_create_assistant_message verifies raw activity heartbeat
+# does not create assistant message; test_cancel_agent_run_marks_cancelled verifies cancel agent
+# run marks cancelled; test_stale_running_run_recovers_as_disconnected verifies stale running run
+# recovers as disconnected; test_agent_run_stream_idle_timeout_records_diagnostics verifies agent
+# run stream idle timeout records diagnostics; test_short_chat_fast_closes_after_first_response
+# verifies short chat fast closes after first response;
+# test_public_session_read_access_but_not_owner_actions verifies public session read access but
+# not owner actions.
+
 import asyncio
 import json
 from datetime import UTC, datetime, timedelta

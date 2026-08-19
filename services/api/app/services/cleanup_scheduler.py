@@ -1,3 +1,7 @@
+# File purpose: Implements the cleanup scheduler backend service workflow.
+# Main declarations: run_configured_data_cleanup runs configured data cleanup;
+# run_periodic_data_cleanup runs periodic data cleanup; stop_cleanup_task stops cleanup task.
+
 import asyncio
 import logging
 from contextlib import suppress

@@ -1,3 +1,11 @@
+# File purpose: Verifies test agent run queue behavior and its regression contracts.
+# Main declarations: test_short_chat_request_uses_priority_queue verifies short chat request uses
+# priority queue; test_artifact_requests_stay_on_long_task_queue verifies artifact requests stay
+# on long task queue; test_short_question_about_previous_artifact_uses_priority_queue verifies
+# short question about previous artifact uses priority queue;
+# test_long_plain_request_stays_on_long_task_queue verifies long plain request stays on long task
+# queue.
+
 from app.services.agent_run_queue import is_short_chat_request, queue_for_message
 
 

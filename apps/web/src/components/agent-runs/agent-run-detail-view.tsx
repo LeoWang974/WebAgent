@@ -1,3 +1,13 @@
+/**
+ * File purpose: Renders and coordinates the agent run detail view user-interface feature.
+ * Main declarations: isTerminalStatus handles is terminal status; formatDuration handles format
+ * duration; stringifyJson handles stringify json; getDisplayValue handles get display value;
+ * getArtifactSummary handles get artifact summary; eventBadgeClass handles event badge class;
+ * statusBadgeClass handles status badge class; latestMeaningfulEvents handles latest meaningful
+ * events; DiagnosticsPanel handles diagnostics panel; AgentRunDetailView handles agent run detail
+ * view.
+ */
+
 "use client";
 
 import Link from "next/link";

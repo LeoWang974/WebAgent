@@ -1,3 +1,8 @@
+# File purpose: Verifies test pptx preview behavior and its regression contracts.
+# Main declarations: test_find_soffice_uses_configured_binary verifies find soffice uses
+# configured binary; test_render_pptx_preview_builds_and_reuses_cache verifies render pptx preview
+# builds and reuses cache.
+
 from pathlib import Path
 
 from app.core.config import settings

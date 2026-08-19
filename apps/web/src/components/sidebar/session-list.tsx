@@ -1,3 +1,10 @@
+/**
+ * File purpose: Renders and coordinates the session list user-interface feature.
+ * Main declarations: CollapsibleSection handles collapsible section; isSameDay handles is same
+ * day; getSessionGroup handles get session group; formatUpdatedLabel handles format updated label;
+ * SessionList handles session list.
+ */
+
 "use client";
 
 import { ChevronDown, ChevronRight, FolderPlus, Trash2 } from "lucide-react";
