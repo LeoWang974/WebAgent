@@ -90,6 +90,28 @@ class HermesAdapter:
                     if item.get("source_dir") is not None
                     else None
                 ),
+                title=(str(item.get("title")) if item.get("title") is not None else None),
+                entry_id=(
+                    str(item.get("entry_id")) if item.get("entry_id") is not None else None
+                ),
+                role=str(item.get("role")) if item.get("role") is not None else None,
+                status=str(item.get("status")) if item.get("status") is not None else None,
+                discovered_by=(
+                    str(item.get("discovered_by"))
+                    if item.get("discovered_by") is not None
+                    else None
+                ),
+                size_bytes=(
+                    int(item.get("size_bytes"))
+                    if isinstance(item.get("size_bytes"), int)
+                    else None
+                ),
+                sha256=str(item.get("sha256")) if item.get("sha256") is not None else None,
+                manifest_schema=(
+                    str(item.get("manifest_schema"))
+                    if item.get("manifest_schema") is not None
+                    else None
+                ),
             )
             for item in self.cli.last_artifacts
             if item.get("artifact_path")
@@ -97,3 +119,11 @@ class HermesAdapter:
 
     def get_last_diagnostics(self) -> dict[str, object]:
         return dict(self.cli.last_diagnostics)
+
+    def get_last_artifact_manifest(self) -> dict[str, object] | None:
+        recorder = self.cli.artifact_manifest_recorder
+        return recorder.snapshot() if recorder is not None else None
+
+    def get_last_artifact_manifest_path(self) -> str | None:
+        recorder = self.cli.artifact_manifest_recorder
+        return str(recorder.path) if recorder is not None else None

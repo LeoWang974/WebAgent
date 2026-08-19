@@ -14,6 +14,11 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
+from app.services.artifact_manifest import (
+    ARTIFACT_MANIFEST_FILENAME,
+    ArtifactManifestRecorder,
+)
+
 from .process_registry import (
     register_run_process,
     terminate_processes_by_marker,
@@ -53,6 +58,7 @@ IGNORED_ARTIFACT_PATH_PARTS = {
 }
 IGNORED_ARTIFACT_PATH_SUFFIXES = (".dist-info", ".egg-info")
 IGNORED_ARTIFACT_FILENAMES = {
+    ARTIFACT_MANIFEST_FILENAME,
     "package-lock.json",
     "package.json",
     "readme.md",
@@ -92,7 +98,7 @@ class HermesStreamEvent:
     event_type: str
     content: str
     artifact_paths: list[str] = field(default_factory=list)
-    artifacts: list[dict[str, str | None]] = field(default_factory=list)
+    artifacts: list[dict[str, object]] = field(default_factory=list)
     raw_log_path: str | None = None
     completion_detected: bool = False
     payload: dict[str, object] = field(default_factory=dict)
@@ -144,8 +150,9 @@ class HermesCliWrapper:
             "no",
         }
         self.last_artifact_paths: list[str] = []
-        self.last_artifacts: list[dict[str, str | None]] = []
+        self.last_artifacts: list[dict[str, object]] = []
         self.last_diagnostics: dict[str, object] = {}
+        self.artifact_manifest_recorder: ArtifactManifestRecorder | None = None
         self.active_processes: dict[str, asyncio.subprocess.Process] = {}
         self.cancelled_run_ids: set[str] = set()
 
@@ -417,19 +424,82 @@ class HermesCliWrapper:
             return str(PureWindowsPath(path).parent)
         return str(PurePosixPath(path.replace("\\", "/")).parent)
 
-    def _remember_artifact_path(self, path: str) -> bool:
-        if path in self.last_artifact_paths:
-            return False
-        self.last_artifact_paths.append(path)
-        self.last_artifacts.append(
-            {
-                "artifact_path": path,
-                "artifact_type": self._artifact_type_from_path(path),
-                "run_id": None,
-                "source_dir": self._source_dir_from_path(path),
-            }
+    def _artifact_host_path(self, path: str) -> Path:
+        normalized = path.replace("\\", "/")
+        if os.name == "nt" and normalized.startswith("/home/"):
+            distro = self.wsl_distribution.strip() or "Ubuntu"
+            return Path(f"\\\\wsl.localhost\\{distro}") / normalized.lstrip("/").replace(
+                "/", "\\"
+            )
+        return self._host_visible_path(path)
+
+    @staticmethod
+    def _manifest_artifact_role(path: str, artifact_type: str) -> str:
+        normalized = path.replace("\\", "/").lower()
+        filename = PurePosixPath(normalized).name
+        if artifact_type == "debug_json":
+            return "intermediate"
+        if artifact_type == "html_page" and "/pages/" in normalized and filename.startswith(
+            "page_"
+        ):
+            return "preview_fallback"
+        return "primary"
+
+    def _remember_artifact_path(
+        self,
+        path: str,
+        *,
+        discovered_by: str = "terminal_output",
+    ) -> bool:
+        is_new = path not in self.last_artifact_paths
+        if is_new:
+            self.last_artifact_paths.append(path)
+
+        artifact_type = self._artifact_type_from_path(path)
+        source_dir = self._source_dir_from_path(path)
+        item: dict[str, object] = {
+            "artifact_path": path,
+            "artifact_type": artifact_type,
+            "run_id": None,
+            "source_dir": source_dir,
+            "title": PurePosixPath(path.replace("\\", "/")).stem,
+        }
+        if self.artifact_manifest_recorder is not None:
+            host_path = self._artifact_host_path(path)
+            entry = self.artifact_manifest_recorder.record(
+                path=path,
+                artifact_type=artifact_type,
+                title=str(item["title"]),
+                role=self._manifest_artifact_role(path, artifact_type),
+                discovered_by=discovered_by,
+                source_dir=source_dir,
+                source_file=host_path if host_path.is_file() else None,
+            )
+            item.update(
+                {
+                    "entry_id": entry.entry_id,
+                    "role": entry.role,
+                    "status": entry.status,
+                    "discovered_by": entry.discovered_by,
+                    "size_bytes": entry.size_bytes,
+                    "sha256": entry.sha256,
+                    "manifest_schema": "webagent.artifacts.v2",
+                }
+            )
+
+        existing_index = next(
+            (
+                index
+                for index, existing in enumerate(self.last_artifacts)
+                if existing.get("artifact_path") == path
+            ),
+            None,
         )
-        return True
+        if existing_index is None:
+            self.last_artifacts.append(item)
+        else:
+            self.last_artifacts[existing_index] = item
+        return is_new
 
     def _remember_artifact_paths(self, text: str) -> None:
         cleaned_text = ANSI_RE.sub("", text).replace("\r", "\n")
@@ -517,6 +587,14 @@ class HermesCliWrapper:
             if root.exists() and root not in roots:
                 roots.append(root)
 
+        # A terminal-declared artifact may live outside the managed run root.
+        # Its containing directory is a bounded recovery scope for sibling
+        # outputs such as PPTX plus HTML slide fallbacks.
+        for artifact_path in tuple(self.last_artifact_paths):
+            parent = self._artifact_host_path(artifact_path).parent
+            if parent.is_dir() and parent not in roots:
+                roots.append(parent)
+
         threshold = started_at.timestamp() - 2
         for root in roots:
             for candidate in root.rglob("*"):
@@ -527,7 +605,10 @@ class HermesCliWrapper:
                         and not self._is_runtime_dependency_path(candidate)
                         and candidate.stat().st_mtime >= threshold
                     ):
-                        self._remember_artifact_path(str(candidate.resolve()))
+                        self._remember_artifact_path(
+                            str(candidate.resolve()),
+                            discovered_by="recovery_scan",
+                        )
                 except OSError:
                     continue
 
@@ -601,8 +682,9 @@ class HermesCliWrapper:
         completion_detected: bool,
         artifact_found: bool = False,
         payload: dict[str, object] | None = None,
+        event_type_override: str | None = None,
     ) -> HermesStreamEvent:
-        artifacts: list[dict[str, str | None]] = []
+        artifacts: list[dict[str, object]] = []
         for item in self.last_artifacts:
             artifact = dict(item)
             if run_id and not artifact.get("run_id"):
@@ -610,11 +692,21 @@ class HermesCliWrapper:
             artifacts.append(artifact)
 
         raw_event_type = "completion_signal" if completion_detected else "stage_update"
-        event_type = self._classify_stream_event_type(
-            content,
-            completion_detected=completion_detected,
-            artifact_found=artifact_found,
+        event_type = event_type_override or self._classify_stream_event_type(
+            content, completion_detected=completion_detected, artifact_found=artifact_found
         )
+        event_payload: dict[str, object] = {
+            "rawHermesEventType": raw_event_type,
+            **(payload or {}),
+        }
+        if self.artifact_manifest_recorder is not None:
+            event_payload.update(
+                {
+                    "artifactManifestPath": str(self.artifact_manifest_recorder.path),
+                    "artifactManifestSchema": "webagent.artifacts.v2",
+                    "artifactManifestStatus": self.artifact_manifest_recorder.manifest.status,
+                }
+            )
         return HermesStreamEvent(
             event_type=event_type,
             content=content,
@@ -622,7 +714,7 @@ class HermesCliWrapper:
             artifacts=artifacts,
             raw_log_path=str(raw_log_path) if raw_log_path else None,
             completion_detected=completion_detected,
-            payload={"rawHermesEventType": raw_event_type, **(payload or {})},
+            payload=event_payload,
         )
 
     @staticmethod
@@ -836,6 +928,7 @@ class HermesCliWrapper:
     ) -> AsyncGenerator[HermesStreamEvent, None]:
         self.last_artifact_paths = []
         self.last_artifacts = []
+        self.artifact_manifest_recorder = None
         stream_started_at = datetime.now()
         process_cwd: str | None = None
         managed_environment_keys = (
@@ -877,7 +970,13 @@ class HermesCliWrapper:
             self._env["WEBAGENT_CONVERSATION_ID"] = conversation_id
         if run_id:
             self._env["WEBAGENT_RUN_ID"] = run_id
-        self._env["WEBAGENT_RUNTIME_POLICY"] = "managed-artifacts-v1"
+        self._env["WEBAGENT_RUNTIME_POLICY"] = "managed-artifacts-v2"
+        if run_id and artifacts_dir:
+            self.artifact_manifest_recorder = ArtifactManifestRecorder(
+                Path(artifacts_dir).expanduser() / ARTIFACT_MANIFEST_FILENAME,
+                run_id=run_id,
+                conversation_id=conversation_id,
+            )
         self.last_diagnostics = {
             "artifact_paths": [],
             "artifacts": [],
@@ -889,8 +988,18 @@ class HermesCliWrapper:
             "working_dir": working_dir,
             "artifacts_dir": artifacts_dir,
             "conversation_id": conversation_id,
-            "runtime_policy": "managed-artifacts-v1",
+            "runtime_policy": "managed-artifacts-v2",
             "runtime_instruction_injected": False,
+            "artifact_manifest_path": (
+                str(self.artifact_manifest_recorder.path)
+                if self.artifact_manifest_recorder is not None
+                else None
+            ),
+            "artifact_manifest_schema": (
+                "webagent.artifacts.v2"
+                if self.artifact_manifest_recorder is not None
+                else None
+            ),
         }
 
         logger.info(
@@ -1192,6 +1301,11 @@ class HermesCliWrapper:
         except asyncio.CancelledError:
             if run_id:
                 self.cancelled_run_ids.add(run_id)
+            if self.artifact_manifest_recorder is not None:
+                self.artifact_manifest_recorder.finalize(
+                    failed=True,
+                    error="Hermes run was cancelled before manifest finalization.",
+                )
             await self._terminate_process_tree(process)
             raise
 
@@ -1244,6 +1358,21 @@ class HermesCliWrapper:
             )
             for artifact in self.last_artifacts:
                 artifact["run_id"] = run_id
+            manifest_snapshot: dict[str, object] | None = None
+            if self.artifact_manifest_recorder is not None:
+                manifest_failed = bool(
+                    process.returncode != 0
+                    and not completion_detected
+                    and not self.last_artifact_paths
+                )
+                manifest_error = (
+                    f"Hermes exited with code {process.returncode}." if manifest_failed else None
+                )
+                self.artifact_manifest_recorder.finalize(
+                    failed=manifest_failed,
+                    error=manifest_error,
+                )
+                manifest_snapshot = self.artifact_manifest_recorder.snapshot()
             self.last_diagnostics.update(
                 {
                     "artifact_paths": list(self.last_artifact_paths),
@@ -1254,6 +1383,7 @@ class HermesCliWrapper:
                     "last_stage": self.last_diagnostics.get("last_stage"),
                     "stderr_tail": stderr_tail[-2000:],
                     "stdout_tail": stdout_tail[-2000:],
+                    "artifact_manifest": manifest_snapshot,
                 }
             )
             logger.info("Hermes stream process exited: returncode=%s", process.returncode)
@@ -1275,6 +1405,27 @@ class HermesCliWrapper:
                 payload={"finalDiscovery": True},
             )
 
+        if self.artifact_manifest_recorder is not None:
+            yield self._build_stream_event(
+                content=(
+                    "Artifact manifest finalized with "
+                    f"{len(self.artifact_manifest_recorder.manifest.artifacts)} artifact(s)."
+                ),
+                raw_log_path=raw_log_path,
+                run_id=run_id,
+                completion_detected=False,
+                artifact_found=False,
+                event_type_override="artifact_manifest_finalized",
+                payload={
+                    "artifactManifestFinalized": True,
+                    "artifactManifestEntryCount": len(
+                        self.artifact_manifest_recorder.manifest.artifacts
+                    ),
+                    "artifactManifestRecoveryUsed": (
+                        self.artifact_manifest_recorder.manifest.recovery_used
+                    ),
+                },
+            )
         if (
             recovered_assistant_content
             and not completion_message_emitted

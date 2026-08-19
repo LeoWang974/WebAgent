@@ -27,7 +27,11 @@ from app.services.agent_run_artifact_service import (
     raise_for_fatal_runtime_diagnostics,
     validate_explicit_output_artifact,
 )
-from app.services.session_artifacts import metadata_path_key, organize_artifact_schema
+from app.services.session_artifacts import (
+    _artifact_match_keys,
+    metadata_path_key,
+    organize_artifact_schema,
+)
 
 
 class _Adapter:
@@ -138,6 +142,17 @@ def test_filter_preexisting_artifacts_excludes_staged_input_by_hash(tmp_path):
 
     assert filtered == [output_artifact]
     assert excluded == [str(source)]
+
+
+def test_manifest_entry_identity_does_not_use_cross_run_content_hash():
+    metadata = {
+        "adapterProtocol": "webagent.artifacts.v2",
+        "manifestEntryId": "entry-1",
+        "contentHash": "same-content-as-an-older-run",
+        "originalPath": "/reports/report.md",
+    }
+
+    assert _artifact_match_keys(metadata) == {"manifest:entry-1"}
 
 
 def test_organize_artifact_schema_keeps_metadata_path_existing(tmp_path):

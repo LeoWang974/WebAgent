@@ -342,7 +342,7 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
                     last_run_touch_monotonic = now_monotonic
                 continue
 
-            if event_type == "artifact_found":
+            if event_type in {"artifact_found", "artifact_manifest_finalized"}:
                 await record_db_agent_run_event(
                     db,
                     run,

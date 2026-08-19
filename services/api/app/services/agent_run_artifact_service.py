@@ -17,11 +17,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import schemas
 from app.models import AgentRun, AgentRunEvent, Artifact, Message, UserSettings
+from app.schemas.artifact_manifest import ArtifactManifest
 from app.services.artifact_discovery import (
     discover_artifacts_with_retry,
     discover_related_artifact_paths,
     extract_artifact_path_strings,
 )
+from app.services.artifact_storage import store_protocol_artifact_manifest
 from app.services.persistence import persist_message
 from app.services.session_artifacts import (
     artifact_display_priority,
@@ -114,6 +116,41 @@ def _adapter_artifact_paths(adapter: object) -> tuple[list[str], list[object]]:
             if getattr(artifact, "path", "")
         ]
     return list(dict.fromkeys(paths)), list(artifacts)
+
+
+def _adapter_artifact_manifest(adapter: object) -> ArtifactManifest | None:
+    if not hasattr(adapter, "get_last_artifact_manifest"):
+        return None
+    payload = adapter.get_last_artifact_manifest()
+    if not payload:
+        return None
+    return ArtifactManifest.model_validate(payload)
+
+
+def _manifest_artifact_refs(
+    manifest: ArtifactManifest,
+    *,
+    persisted_manifest_path: str,
+) -> list[dict[str, object]]:
+    return [
+        {
+            "path": entry.path,
+            "artifact_type": entry.artifact_type,
+            "run_id": manifest.run_id,
+            "source_dir": entry.source_dir,
+            "title": entry.title,
+            "entry_id": entry.entry_id,
+            "role": entry.role,
+            "status": entry.status,
+            "discovered_by": entry.discovered_by,
+            "size_bytes": entry.size_bytes,
+            "sha256": entry.sha256,
+            "manifest_schema": manifest.schema_version,
+            "manifest_path": persisted_manifest_path,
+        }
+        for entry in manifest.artifacts
+        if entry.status == "ready"
+    ]
 
 
 def filter_preexisting_artifact_schemas(
@@ -209,25 +246,70 @@ async def discover_and_persist_run_artifacts(
     """
 
     run_id = run.id
-    explicit_paths, explicit_artifacts = _adapter_artifact_paths(adapter)
-    for path in await _event_artifact_paths(db, run_id):
-        if path not in explicit_paths:
-            explicit_paths.append(path)
+    manifest = _adapter_artifact_manifest(adapter)
+    if manifest is not None:
+        if manifest.run_id != run_id:
+            raise RuntimeError(
+                f"Artifact manifest run mismatch: expected {run_id}, got {manifest.run_id}."
+            )
+        if manifest.status == "collecting":
+            raise RuntimeError("Artifact manifest was not finalized before Agent Run completion.")
+        if manifest.status == "failed":
+            detail = "; ".join(manifest.errors) or "unknown manifest failure"
+            raise RuntimeError(f"Artifact manifest failed: {detail}")
+        missing_entries = [entry for entry in manifest.artifacts if entry.status == "missing"]
+        if missing_entries:
+            missing_paths = ", ".join(entry.path for entry in missing_entries[:5])
+            raise RuntimeError(f"Artifact manifest contains unavailable files: {missing_paths}")
+        persisted_manifest_path = await asyncio.to_thread(
+            store_protocol_artifact_manifest,
+            manifest.model_dump(mode="json", by_alias=True),
+            user_id=user_id,
+            conversation_id=conversation_id,
+            run_id=run_id,
+        )
+        explicit_artifacts = _manifest_artifact_refs(
+            manifest,
+            persisted_manifest_path=str(persisted_manifest_path),
+        )
+        explicit_paths = [entry.path for entry in manifest.artifacts]
+        referenced_paths: list[str] = []
+        related_paths: list[str] = []
+        artifact_discovery_summary["manifest"] = {
+            "schema": manifest.schema_version,
+            "status": manifest.status,
+            "producer": manifest.producer,
+            "entry_count": len(manifest.artifacts),
+            "recovery_used": manifest.recovery_used,
+            "errors": list(manifest.errors),
+            "persisted_path": str(persisted_manifest_path),
+        }
+    else:
+        explicit_paths, explicit_artifacts = _adapter_artifact_paths(adapter)
+        for path in await _event_artifact_paths(db, run_id):
+            if path not in explicit_paths:
+                explicit_paths.append(path)
 
-    referenced_paths = extract_artifact_path_strings(content)
-    referenced_paths.extend(
-        path
-        for path in extract_artifact_path_strings(assistant_output)
-        if path not in referenced_paths
-    )
-    related_paths = await asyncio.to_thread(
-        discover_related_artifact_paths,
-        referenced_paths,
-        run_started_at,
-    )
-    for path in related_paths:
-        if path not in explicit_paths:
-            explicit_paths.append(path)
+        referenced_paths = extract_artifact_path_strings(content)
+        referenced_paths.extend(
+            path
+            for path in extract_artifact_path_strings(assistant_output)
+            if path not in referenced_paths
+        )
+        related_paths = await asyncio.to_thread(
+            discover_related_artifact_paths,
+            referenced_paths,
+            run_started_at,
+        )
+        for path in related_paths:
+            if path not in explicit_paths:
+                explicit_paths.append(path)
+        artifact_discovery_summary["manifest"] = {
+            "schema": None,
+            "status": "legacy_fallback",
+            "entry_count": len(explicit_artifacts),
+            "recovery_used": True,
+        }
 
     artifact_discovery_summary.update(
         {
@@ -248,16 +330,17 @@ async def discover_and_persist_run_artifacts(
     else:
         discovered = []
 
-    existing_hashes, existing_paths = await _existing_conversation_artifact_fingerprints(
-        db,
-        conversation_id,
-        run_id,
-    )
-    discovered, excluded_context_paths = filter_preexisting_artifact_schemas(
-        discovered,
-        existing_hashes=existing_hashes,
-        existing_paths=existing_paths,
-    )
+    if manifest is None:
+        existing_hashes, existing_paths = await _existing_conversation_artifact_fingerprints(
+            db, conversation_id, run_id
+        )
+        discovered, excluded_context_paths = filter_preexisting_artifact_schemas(
+            discovered,
+            existing_hashes=existing_hashes,
+            existing_paths=existing_paths,
+        )
+    else:
+        excluded_context_paths = []
     artifact_discovery_summary["excluded_context_artifact_paths"] = excluded_context_paths
 
     stored = await persist_discovered_artifacts(db, conversation_id, discovered, run_id)

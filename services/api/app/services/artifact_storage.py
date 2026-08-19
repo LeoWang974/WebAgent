@@ -17,6 +17,7 @@ from pathlib import Path
 from app.core.config import settings
 
 MANIFEST_SCHEMA = "webagent.artifacts.v1"
+PROTOCOL_MANIFEST_FILENAME = "artifact-manifest.json"
 
 
 def safe_storage_segment(value: str, fallback: str) -> str:
@@ -136,3 +137,25 @@ def update_artifact_manifest(run_dir: Path, entry: dict[str, object]) -> Path:
     finally:
         temporary.unlink(missing_ok=True)
     return manifest_path
+
+
+def store_protocol_artifact_manifest(
+    payload: dict[str, object],
+    *,
+    user_id: str,
+    conversation_id: str,
+    run_id: str,
+) -> Path:
+    """Persist the adapter-owned v2 manifest beside the archived run outputs."""
+    run_dir = artifact_run_storage_dir(user_id, conversation_id, run_id)
+    destination = run_dir / PROTOCOL_MANIFEST_FILENAME
+    temporary = destination.with_suffix(".json.tmp")
+    try:
+        temporary.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(destination)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return destination

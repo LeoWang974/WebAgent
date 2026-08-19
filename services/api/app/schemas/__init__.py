@@ -4,6 +4,7 @@
 
 from app.schemas.agent_run import AgentRun, AgentRunCreate, AgentRunEvent, AgentRunStep
 from app.schemas.artifact import Artifact, ArtifactSlides, FileAsset, SlidePreview
+from app.schemas.artifact_manifest import ArtifactManifest, ArtifactManifestEntry
 from app.schemas.auth import AdminUserCreate, AuthResult, LoginInput, RegisterInput
 from app.schemas.message import Message, MessageCreate, SendMessageResult
 from app.schemas.model import ModelConfig
@@ -35,6 +36,8 @@ __all__ = [
     "AdminUserCreate",
     "Artifact",
     "ArtifactSlides",
+    "ArtifactManifest",
+    "ArtifactManifestEntry",
     "AuthResult",
     "DataContextSettings",
     "InterfaceSettings",

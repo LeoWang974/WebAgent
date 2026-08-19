@@ -263,6 +263,15 @@ def organize_artifact_schema(
 
 
 def _artifact_match_keys(metadata: dict) -> set[str]:
+    manifest_entry_id = metadata.get("manifestEntryId")
+    if (
+        metadata.get("adapterProtocol") == "webagent.artifacts.v2"
+        and isinstance(manifest_entry_id, str)
+        and manifest_entry_id
+    ):
+        # Manifest entries are run-scoped outputs. Reusing a content hash or an
+        # original path from an older run must never suppress this association.
+        return {f"manifest:{manifest_entry_id}"}
     content_hash, candidate_paths = artifact_dedupe_keys(metadata)
     keys = {f"path:{metadata_path_key(path)}" for path in candidate_paths}
     if content_hash:

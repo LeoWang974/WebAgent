@@ -66,6 +66,7 @@ IGNORED_PARTS = {
 }
 IGNORED_PART_SUFFIXES = (".dist-info", ".egg-info")
 IGNORED_FILENAMES = {
+    "artifact-manifest.json",
     "package-lock.json",
     "package.json",
     "readme.md",
@@ -859,6 +860,48 @@ def create_artifacts_from_refs(
             if not isinstance(artifact_ref, dict)
             else artifact_ref.get("title")
         )
+        entry_id = (
+            getattr(artifact_ref, "entry_id", None)
+            if not isinstance(artifact_ref, dict)
+            else artifact_ref.get("entry_id") or artifact_ref.get("entryId")
+        )
+        role = (
+            getattr(artifact_ref, "role", None)
+            if not isinstance(artifact_ref, dict)
+            else artifact_ref.get("role")
+        )
+        ref_status = (
+            getattr(artifact_ref, "status", None)
+            if not isinstance(artifact_ref, dict)
+            else artifact_ref.get("status")
+        )
+        discovered_by = (
+            getattr(artifact_ref, "discovered_by", None)
+            if not isinstance(artifact_ref, dict)
+            else artifact_ref.get("discovered_by") or artifact_ref.get("discoveredBy")
+        )
+        expected_size = (
+            getattr(artifact_ref, "size_bytes", None)
+            if not isinstance(artifact_ref, dict)
+            else artifact_ref.get("size_bytes") or artifact_ref.get("sizeBytes")
+        )
+        expected_sha256 = (
+            getattr(artifact_ref, "sha256", None)
+            if not isinstance(artifact_ref, dict)
+            else artifact_ref.get("sha256")
+        )
+        manifest_schema = (
+            getattr(artifact_ref, "manifest_schema", None)
+            if not isinstance(artifact_ref, dict)
+            else artifact_ref.get("manifest_schema") or artifact_ref.get("manifestSchema")
+        )
+        manifest_path = (
+            getattr(artifact_ref, "manifest_path", None)
+            if not isinstance(artifact_ref, dict)
+            else artifact_ref.get("manifest_path") or artifact_ref.get("manifestPath")
+        )
+        if ref_status and ref_status != "ready":
+            continue
 
         path = _normalize_path(path_value)
         if _is_non_artifact_path(path_value) or _is_non_artifact_path(path):
@@ -870,17 +913,40 @@ def create_artifacts_from_refs(
             continue
         readable_path, temp_dir = _materialize_wsl_artifact(path)
         try:
+            if isinstance(expected_size, int) and readable_path.stat().st_size != expected_size:
+                raise RuntimeError(
+                    f"Artifact manifest size mismatch for {path}: "
+                    f"expected {expected_size}, got {readable_path.stat().st_size}."
+                )
+            actual_sha256 = _file_sha256(readable_path)
+            if (
+                isinstance(expected_sha256, str)
+                and expected_sha256
+                and actual_sha256 != expected_sha256
+            ):
+                raise RuntimeError(f"Artifact manifest checksum mismatch for {path}.")
             archived_path = _archive_artifact_path(readable_path, run_id)
             artifact = _artifact_from_path(
                 session_id,
                 archived_path,
                 artifact_type_override=artifact_type,
                 metadata_extra={
-                    "adapterProtocol": "hermes.artifact.v1",
+                    "adapterProtocol": manifest_schema or "hermes.artifact.v1",
                     "adapterRunId": ref_run_id,
                     "adapterSourceDir": source_dir,
                     "adapterTitle": title,
                     "adapterType": artifact_type,
+                    "artifactRole": role,
+                    "manifestEntryId": entry_id,
+                    "manifestDiscoveredBy": discovered_by,
+                    "manifestExpectedSize": expected_size,
+                    "manifestExpectedSha256": expected_sha256,
+                    "manifestIntegrityVerified": bool(
+                        manifest_schema == "webagent.artifacts.v2"
+                        and actual_sha256
+                        and actual_sha256 == expected_sha256
+                    ),
+                    "protocolManifestPath": manifest_path,
                 },
                 original_path=str(path),
                 title_override=title if isinstance(title, str) and title else None,
@@ -892,7 +958,13 @@ def create_artifacts_from_refs(
             continue
 
         artifacts.append(artifact)
-    artifacts = dedupe_discovered_artifacts(artifacts)
+    manifest_artifacts = [
+        artifact
+        for artifact in artifacts
+        if (artifact.metadata or {}).get("adapterProtocol") == "webagent.artifacts.v2"
+    ]
+    legacy_artifacts = [artifact for artifact in artifacts if artifact not in manifest_artifacts]
+    artifacts = manifest_artifacts + dedupe_discovered_artifacts(legacy_artifacts)
     artifacts.sort(
         key=lambda artifact: str((artifact.metadata or {}).get("updatedAt", "")),
         reverse=True,

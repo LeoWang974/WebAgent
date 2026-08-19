@@ -255,13 +255,25 @@ async def test_hermes_emits_artifact_found_after_final_output_discovery(
     ]
 
     artifact_event = next(event for event in events if event.event_type == "artifact_found")
+    manifest_event = next(
+        event for event in events if event.event_type == "artifact_manifest_finalized"
+    )
     assert artifact_event.artifact_paths == [str(pptx_path.resolve())]
     assert artifact_event.payload["finalDiscovery"] is True
     assert wrapper._env["WEBAGENT_CONVERSATION_ID"] == "conversation-1"
     assert wrapper._env["WEBAGENT_RUN_ID"] == "run-1"
-    assert wrapper._env["WEBAGENT_RUNTIME_POLICY"] == "managed-artifacts-v1"
+    assert wrapper._env["WEBAGENT_RUNTIME_POLICY"] == "managed-artifacts-v2"
     assert wrapper._env["WEBAGENT_OUTPUT_DIR"] == wrapper._env["WEBAGENT_ARTIFACTS_DIR"]
     assert wrapper.last_diagnostics["runtime_instruction_injected"] is False
+    manifest_path = tmp_path / "artifacts" / "artifact-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["schema"] == "webagent.artifacts.v2"
+    assert manifest["status"] == "finalized"
+    assert manifest["run_id"] == "run-1"
+    assert manifest["artifacts"][0]["sha256"]
+    assert artifact_event.payload["artifactManifestSchema"] == "webagent.artifacts.v2"
+    assert manifest_event.payload["artifactManifestFinalized"] is True
+    assert manifest_event.payload["artifactManifestEntryCount"] == 1
 
 
 @pytest.mark.asyncio

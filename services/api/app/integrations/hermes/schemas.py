@@ -37,12 +37,28 @@ class AgentArtifactRef:
         run_id: str | None = None,
         source_dir: str | None = None,
         title: str | None = None,
+        entry_id: str | None = None,
+        role: str | None = None,
+        status: str | None = None,
+        discovered_by: str | None = None,
+        size_bytes: int | None = None,
+        sha256: str | None = None,
+        manifest_schema: str | None = None,
+        manifest_path: str | None = None,
     ):
         self.path = path
         self.artifact_type = artifact_type
         self.run_id = run_id
         self.source_dir = source_dir
         self.title = title
+        self.entry_id = entry_id
+        self.role = role
+        self.status = status
+        self.discovered_by = discovered_by
+        self.size_bytes = size_bytes
+        self.sha256 = sha256
+        self.manifest_schema = manifest_schema
+        self.manifest_path = manifest_path
 
 
 class AgentRunEvent:
