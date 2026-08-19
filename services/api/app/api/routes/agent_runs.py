@@ -6,28 +6,23 @@ from fastapi.responses import StreamingResponse
 from app import schemas
 from app.api.dependencies import CurrentUser, DbSession
 from app.core.config import settings
+from app.integrations.hermes.process_registry import terminate_registered_run_process
+from app.services.agent_run_dispatcher import enqueue_agent_run_message
 from app.services.agent_runs import (
     TERMINAL_RUN_STATUSES,
     AgentRunEventCursor,
-    create_db_agent_run,
     create_hermes_adapter,
     finish_db_agent_run,
     get_db_agent_run,
     list_agent_runs_for_user,
     list_new_run_events,
     list_run_events,
-    record_db_agent_run_event,
     to_agent_run_event_schema,
     to_agent_run_schema,
 )
 from app.services.model_runtime_config import model_runtime_config_builder
 from app.services.persistence import get_conversation_or_404
 from app.services.stream_protocol import SSE_HEADERS, sse
-
-try:
-    from agent_runtime.adapters.process_registry import terminate_registered_run_process
-except ImportError:
-    terminate_registered_run_process = None
 
 router = APIRouter()
 
@@ -48,37 +43,13 @@ async def create_agent_run(
     current_user: CurrentUser,
 ) -> schemas.AgentRun:
     await get_conversation_or_404(db, input_data.session_id, current_user, require_write=True)
-    model_runtime_config = await model_runtime_config_builder.build_for_user(
-        db,
-        current_user,
-        input_data.model_id,
-    )
-    run = await create_db_agent_run(
+    _, run = await enqueue_agent_run_message(
         db,
         input_data.session_id,
-        title="Hermes Agent Run",
-        status="queued",
-        progress=0,
-        adapter_key="hermes",
-        model_runtime_config=model_runtime_config,
+        schemas.MessageCreate(content=input_data.content, model_id=input_data.model_id),
+        current_user,
     )
-    event = await record_db_agent_run_event(
-        db,
-        run,
-        event_type="queued",
-        label="Queued agent run",
-        status="queued",
-        progress=0,
-        step_status="pending",
-        payload={
-            "content": input_data.content,
-            "modelId": input_data.model_id,
-            "modelConfigId": run.model_config_id,
-            "modelProvider": run.model_provider,
-            "modelName": run.model_name,
-        },
-    )
-    return to_agent_run_schema(run, [event])
+    return to_agent_run_schema(run, await list_run_events(db, run.id))
 
 
 @router.get("/{run_id}", response_model=schemas.AgentRun)
@@ -105,11 +76,10 @@ async def cancel_agent_run(
         return to_agent_run_schema(run, events)
     adapter_cancelled = False
     adapter_error = None
-    if terminate_registered_run_process is not None:
-        try:
-            adapter_cancelled = await terminate_registered_run_process(run_id)
-        except Exception as error:
-            adapter_error = str(error)
+    try:
+        adapter_cancelled = await terminate_registered_run_process(run_id)
+    except Exception as error:
+        adapter_error = str(error)
     model_runtime_config = model_runtime_config_builder.build_for_run(run)
     adapter = None
     try:
@@ -127,12 +97,11 @@ async def cancel_agent_run(
             adapter_cancelled = True
         except Exception as error:
             adapter_error = str(error)
-    if terminate_registered_run_process is not None:
-        try:
-            await asyncio.sleep(1)
-            adapter_cancelled = await terminate_registered_run_process(run_id) or adapter_cancelled
-        except Exception as error:
-            adapter_error = str(error) if adapter_error is None else adapter_error
+    try:
+        await asyncio.sleep(1)
+        adapter_cancelled = await terminate_registered_run_process(run_id) or adapter_cancelled
+    except Exception as error:
+        adapter_error = str(error) if adapter_error is None else adapter_error
     event = await finish_db_agent_run(
         db,
         run,

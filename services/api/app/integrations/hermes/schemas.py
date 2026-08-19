@@ -1,5 +1,3 @@
-
-
 class AgentRunStep:
     def __init__(self, id: str, label: str, status: str, timestamp: str | None = None):
         self.id = id

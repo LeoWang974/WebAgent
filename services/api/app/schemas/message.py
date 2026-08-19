@@ -22,4 +22,5 @@ class MessageCreate(ApiModel):
 
 class SendMessageResult(ApiModel):
     messages: list[Message]
+    run_id: str | None = None
     session: Session

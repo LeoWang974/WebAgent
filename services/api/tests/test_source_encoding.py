@@ -4,7 +4,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SOURCE_ROOTS = (
     PROJECT_ROOT / "apps" / "web" / "src",
     PROJECT_ROOT / "services" / "api" / "app",
-    PROJECT_ROOT / "services" / "agent-runtime" / "agent_runtime",
 )
 SOURCE_SUFFIXES = {".js", ".mjs", ".py", ".ts", ".tsx"}
 MOJIBAKE_MARKERS = (
@@ -34,3 +33,13 @@ def test_production_source_contains_no_known_mojibake() -> None:
                 if marker in content:
                     matches.append(f"{path.relative_to(PROJECT_ROOT)}: {marker}")
     assert not matches, "Known mojibake found:\n" + "\n".join(matches)
+
+
+def test_production_source_uses_utf8_without_bom() -> None:
+    matches: list[str] = []
+    for root in SOURCE_ROOTS:
+        for path in root.rglob("*"):
+            if path.is_file() and path.suffix in SOURCE_SUFFIXES:
+                if path.read_bytes().startswith(b"\xef\xbb\xbf"):
+                    matches.append(str(path.relative_to(PROJECT_ROOT)))
+    assert not matches, "UTF-8 BOM found:\n" + "\n".join(matches)

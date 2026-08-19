@@ -2,6 +2,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import schemas
 from app.core.config import settings
+from app.models import Conversation
 from app.services.agent_run_queue import estimated_queue_position, queue_for_message
 from app.services.agent_runs import create_db_agent_run, record_db_agent_run_event
 from app.services.model_runtime_config import model_runtime_config_builder
@@ -15,7 +16,13 @@ async def enqueue_agent_run_message(
     current_user,
 ):
     """Persist a user message and queue an isolated Hermes run."""
-    user_message = await persist_message(db, session_id, "user", input_data.content)
+    user_message = await persist_message(
+        db,
+        session_id,
+        "user",
+        input_data.content,
+        commit=False,
+    )
     model_runtime_config = await model_runtime_config_builder.build_for_user(
         db,
         current_user,
@@ -29,9 +36,13 @@ async def enqueue_agent_run_message(
         progress=0,
         adapter_key="hermes",
         model_runtime_config=model_runtime_config,
+        commit=False,
     )
     queue_name, queue_reason = queue_for_message(input_data.content)
     queue_position = await estimated_queue_position(queue_name)
+    conversation = await db.get(Conversation, session_id)
+    if conversation is not None:
+        conversation.status = "running"
     await record_db_agent_run_event(
         db,
         run,

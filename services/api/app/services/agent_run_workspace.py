@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import shutil
 from pathlib import Path
@@ -56,6 +57,14 @@ def run_artifacts_dir(
     return path
 
 
+def _stage_artifact_file(source: Path, destination: Path) -> None:
+    """Prefer a hard link so repeated run context staging does not duplicate files."""
+    try:
+        os.link(source, destination)
+    except OSError:
+        shutil.copy2(source, destination)
+
+
 async def stage_conversation_artifacts(
     db: AsyncSession,
     conversation_id: str,
@@ -103,7 +112,7 @@ async def stage_conversation_artifacts(
                 continue
             if destination.exists():
                 destination = destination_dir / f"{artifact.id[:8]}-{filename}"
-            shutil.copy2(source, destination)
+            _stage_artifact_file(source, destination)
             if destination_dir == context_dir:
                 primary_destination = destination
         if primary_destination is not None:

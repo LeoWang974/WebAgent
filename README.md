@@ -16,7 +16,7 @@ replacement reports, HTML pages, or PPTX files when Hermes does not produce one.
 ```text
 apps/web                 Next.js workspace UI
 services/api             FastAPI, SQLAlchemy, Celery, PostgreSQL, Redis
-services/agent-runtime   Hermes CLI adapter
+services/api/app/integrations/hermes   Hermes CLI integration
 scripts                  Local and CCI process scripts
 docs                     Operations and testing notes
 ```

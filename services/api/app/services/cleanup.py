@@ -85,29 +85,6 @@ def _expired_raw_logs(repo_root: Path, cutoff: datetime) -> list[Path]:
     ]
 
 
-def _obsolete_runtime_targets(root: Path) -> list[Path]:
-    names = (
-        "openclaw-skills.tmp",
-        "openclaw-gateway.log",
-        "openclaw-gateway.err.log",
-        "openclaw_tasks_snapshot.json",
-        "openclaw_long_task_smoke.log",
-        "openclaw_long_task_smoke.err.log",
-        "openclaw_long_task_smoke.out.log",
-        "openclaw_long_task_smoke.py",
-        "start-openclaw-gateway.sh",
-        "hermes_long_task_smoke.log",
-        "hermes_long_task_smoke.py",
-        "qa-ppt-render",
-        "qa-ppt.pptx",
-        "api.out.log",
-        "api.err.log",
-    )
-    targets = [root / name for name in names if (root / name).exists()]
-    targets.extend(root.glob("acceptance-*"))
-    return targets
-
-
 def cleanup_expired_runtime_files(
     *,
     max_age_days: int = 14,
@@ -122,7 +99,6 @@ def cleanup_expired_runtime_files(
     deleted = 0
 
     targets = _expired_runtime_targets(root, configured_user_root, cutoff)
-    targets.extend(_obsolete_runtime_targets(root))
     targets.extend(_expired_raw_logs(repository, cutoff))
     for target in targets:
         try:

@@ -2,9 +2,8 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from agent_runtime.adapters.hermes_adapter import HermesAdapter
-from agent_runtime.adapters.hermes_cli import HermesCliWrapper, HermesStreamEvent
-from agent_runtime.schemas import AgentRunCreate
+from app.integrations.hermes import AgentRunCreate, HermesAdapter
+from app.integrations.hermes.cli import HermesCliWrapper, HermesStreamEvent
 
 
 def test_hermes_adapter_has_no_skill_mapping_helpers():

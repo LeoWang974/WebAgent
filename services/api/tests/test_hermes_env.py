@@ -1,6 +1,6 @@
 from os import name as os_name
 
-from agent_runtime.adapters.hermes_cli import HermesCliWrapper
+from app.integrations.hermes import HermesCliWrapper
 
 
 def test_hermes_marks_serper_as_configured_from_runtime_settings():

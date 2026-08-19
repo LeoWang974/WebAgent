@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_runtime.adapters.hermes_cli import HermesCliWrapper
+from app.integrations.hermes import HermesCliWrapper
 
 
 def test_hermes_recovers_latest_assistant_message_from_session(tmp_path: Path):

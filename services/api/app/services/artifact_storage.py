@@ -76,7 +76,7 @@ def store_artifact_file(
         f"{safe_storage_segment(source.stem, 'artifact')}-{content_hash[:12]}"
         f"{source.suffix.lower()}"
     )
-    if not destination.exists() or file_sha256(destination) != content_hash:
+    if not destination.exists():
         temporary = destination.with_suffix(f"{destination.suffix}.tmp")
         try:
             shutil.copy2(source, temporary)

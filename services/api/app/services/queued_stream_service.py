@@ -42,8 +42,12 @@ async def stream_queued_agent_run(
     assistant_done_sent = False
     run_id = run.id
     while True:
-        db.expire_all()
-        run = await db.get(AgentRun, run_id)
+        run_result = await db.execute(
+            select(AgentRun)
+            .where(AgentRun.id == run_id)
+            .execution_options(populate_existing=True)
+        )
+        run = run_result.scalar_one_or_none()
         if run is None:
             raise RuntimeError("Queued agent run disappeared before completion.")
         events = await list_new_run_events(db, run.id, event_cursor)
@@ -87,7 +91,11 @@ async def stream_queued_agent_run(
             if not assistant_done_sent:
                 message_result = await db.execute(
                     select(Message)
-                    .where(Message.conversation_id == session_id, Message.role == "assistant")
+                    .where(
+                        Message.conversation_id == session_id,
+                        Message.role == "assistant",
+                        Message.created_at >= run.created_at,
+                    )
                     .order_by(Message.created_at.desc())
                     .limit(1)
                 )
@@ -145,10 +153,13 @@ async def build_assistant_done_payload(
 
 async def _queued_event_payload(db: AsyncSession, run_id: str) -> dict:
     result = await db.execute(
-        select(AgentRunEvent).where(
+        select(AgentRunEvent.payload)
+        .where(
             AgentRunEvent.run_id == run_id,
             AgentRunEvent.event_type == "queued",
         )
+        .order_by(AgentRunEvent.created_at.asc())
+        .limit(1)
     )
-    event = result.scalars().first()
-    return event.payload if event is not None and isinstance(event.payload, dict) else {}
+    payload = result.scalar_one_or_none()
+    return payload if isinstance(payload, dict) else {}

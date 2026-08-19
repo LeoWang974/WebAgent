@@ -188,6 +188,8 @@ async def persist_message(
     role: str,
     content: str,
     artifact_ids: list[str] | None = None,
+    *,
+    commit: bool = True,
 ) -> Message:
     message = Message(
         conversation_id=session_id,
@@ -196,7 +198,10 @@ async def persist_message(
         artifact_ids=artifact_ids,
     )
     db.add(message)
-    await db.commit()
+    if commit:
+        await db.commit()
+    else:
+        await db.flush()
     await db.refresh(message)
     return message
 

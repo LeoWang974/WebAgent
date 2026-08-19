@@ -1,3 +1,4 @@
+import asyncio
 import re
 from datetime import datetime
 
@@ -102,15 +103,15 @@ async def _existing_conversation_artifact_fingerprints(
     run_id: str,
 ) -> tuple[set[str], set[str]]:
     result = await db.execute(
-        select(Artifact).where(
+        select(Artifact.artifact_metadata).where(
             Artifact.conversation_id == conversation_id,
             or_(Artifact.run_id.is_(None), Artifact.run_id != run_id),
         )
     )
     hashes: set[str] = set()
     paths: set[str] = set()
-    for artifact in result.scalars().all():
-        metadata = artifact.artifact_metadata or {}
+    for metadata_value in result.scalars().all():
+        metadata = metadata_value or {}
         content_hash = metadata.get("contentHash")
         if isinstance(content_hash, str) and content_hash:
             hashes.add(content_hash)
@@ -126,13 +127,16 @@ async def _existing_conversation_artifact_fingerprints(
 
 
 async def _event_artifact_paths(db: AsyncSession, run_id: str) -> list[str]:
-    result = await db.execute(select(AgentRunEvent).where(AgentRunEvent.run_id == run_id))
-    paths: list[str] = []
-    for event in result.scalars().all():
-        for path in extract_artifact_path_strings(event.payload or {}):
-            if path not in paths:
-                paths.append(path)
-    return paths
+    result = await db.execute(
+        select(AgentRunEvent.payload).where(AgentRunEvent.run_id == run_id)
+    )
+    return list(
+        dict.fromkeys(
+            path
+            for payload in result.scalars().all()
+            for path in extract_artifact_path_strings(payload or {})
+        )
+    )
 
 
 async def discover_and_persist_run_artifacts(
@@ -165,7 +169,11 @@ async def discover_and_persist_run_artifacts(
         for path in extract_artifact_path_strings(assistant_output)
         if path not in referenced_paths
     )
-    related_paths = discover_related_artifact_paths(referenced_paths, run_started_at)
+    related_paths = await asyncio.to_thread(
+        discover_related_artifact_paths,
+        referenced_paths,
+        run_started_at,
+    )
     for path in related_paths:
         if path not in explicit_paths:
             explicit_paths.append(path)
@@ -250,7 +258,7 @@ async def final_assistant_message(
         assistant_message = assistant_messages[-1]
         if response_artifacts:
             assistant_message.artifact_ids = [artifact.id for artifact in response_artifacts]
-            await db.commit()
+            await db.flush()
             await db.refresh(assistant_message)
         return assistant_message
     return await persist_message(
@@ -263,20 +271,13 @@ async def final_assistant_message(
             else "Hermes completed without a visible status update."
         ),
         [artifact.id for artifact in response_artifacts] or None,
+        commit=False,
     )
 
 
 async def user_developer_mode_by_id(db: AsyncSession, user_id: str) -> bool:
-    result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
-    user_settings = result.scalar_one_or_none()
-    if user_settings is None:
-        user_settings = UserSettings(
-            user_id=user_id,
-            data_context={},
-            interface=DEFAULT_INTERFACE,
-        )
-        db.add(user_settings)
-        await db.commit()
-        await db.refresh(user_settings)
-    interface = user_settings.interface or {}
+    result = await db.execute(
+        select(UserSettings.interface).where(UserSettings.user_id == user_id)
+    )
+    interface = result.scalar_one_or_none() or DEFAULT_INTERFACE
     return bool(interface.get("developer_mode", interface.get("developerMode", False)))

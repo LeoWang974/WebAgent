@@ -31,6 +31,7 @@ from app.services.agent_runs import (
     create_hermes_adapter,
     finish_db_agent_run,
     record_db_agent_run_event,
+    touch_db_agent_run,
 )
 from app.services.model_runtime_config import model_runtime_config_builder
 from app.services.persistence import persist_message, to_artifact, to_message, to_session
@@ -129,6 +130,7 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
     adapter_capacity_lease = None
     user_runtime_context = None
     run_started_monotonic = asyncio.get_running_loop().time()
+    last_run_touch_monotonic = run_started_monotonic
     model_runtime_config = None
 
     try:
@@ -237,7 +239,7 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
         if await is_agent_run_cancelled(db, run_id_value):
             raise AgentRunCancelled()
 
-        from agent_runtime.schemas import AgentRunCreate as AdapterAgentRunCreate
+        from app.integrations.hermes import AgentRunCreate as AdapterAgentRunCreate
 
         adapter_input = AdapterAgentRunCreate(
             content=content,
@@ -275,9 +277,9 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
                 else "idle_timeout"
             )
             try:
-                logger.info("Waiting for adapter stream chunk: run_id=%s", run_id_value)
+                logger.debug("Waiting for adapter stream chunk: run_id=%s", run_id_value)
                 chunk = await asyncio.wait_for(stream.__anext__(), timeout=wait_timeout)
-                logger.info("Received adapter stream chunk: run_id=%s", run_id_value)
+                logger.debug("Received adapter stream chunk: run_id=%s", run_id_value)
             except StopAsyncIteration:
                 break
             except TimeoutError as error:
@@ -322,19 +324,13 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
             )
             last_stage_bubble_key = stage_key
             if should_suppress:
-                await record_db_agent_run_event(
-                    db,
-                    run,
-                    event_type="raw_activity",
-                    label=message_content,
-                    status="running",
-                    progress=progress,
-                    payload={
-                        **event_payload,
-                        "stageKey": stage_key,
-                        "suppressedStageBubble": True,
-                    },
-                )
+                now_monotonic = asyncio.get_running_loop().time()
+                if (
+                    event_payload.get("rawActivityHeartbeat")
+                    or now_monotonic - last_run_touch_monotonic >= 15
+                ):
+                    await touch_db_agent_run(db, run, progress=progress)
+                    last_run_touch_monotonic = now_monotonic
                 continue
 
             if event_type == "artifact_found":
@@ -354,6 +350,7 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
                 conversation_id,
                 "assistant",
                 message_content,
+                commit=False,
             )
             assistant_output_parts.append(message_content)
             assistant_messages.append(assistant_message)
@@ -426,7 +423,11 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
                     "sessionId": conversation_id,
                     "title": artifact.title,
                 },
+                commit=False,
             )
+        if response_artifacts:
+            await db.commit()
+            await db.refresh(run)
 
         await _complete_run(
             db,
@@ -545,7 +546,6 @@ async def _complete_run(
         label="Agent run completed",
         output=assistant_message_content,
     )
-    await db.commit()
     conversation = await refresh_conversation(db, conversation_id)
     await record_db_agent_run_event(
         db,
@@ -570,10 +570,15 @@ async def _fail_conversation(
     conversation_id: str,
     message: str,
 ) -> None:
-    error_message = await persist_message(db, conversation_id, "assistant", message)
+    error_message = await persist_message(
+        db,
+        conversation_id,
+        "assistant",
+        message,
+        commit=False,
+    )
     conversation = await refresh_conversation(db, conversation_id)
     conversation.status = "failed"
-    await db.commit()
     await record_db_agent_run_event(
         db,
         run,

@@ -5,7 +5,7 @@ GROUP="${1:-unit}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 API_DIR="$ROOT_DIR/services/api"
 PYTHON_BIN="${PYTHON_BIN:-$API_DIR/.venv/bin/python}"
-export PYTHONPATH="$API_DIR:$ROOT_DIR/services/agent-runtime${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH="$API_DIR${PYTHONPATH:+:$PYTHONPATH}"
 
 if [ ! -x "$PYTHON_BIN" ]; then
   echo "Backend venv not found or not executable: $PYTHON_BIN" >&2

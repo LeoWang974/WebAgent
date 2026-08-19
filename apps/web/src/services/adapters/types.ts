@@ -53,6 +53,7 @@ export interface SendMessageInput {
 
 export interface SendMessageResult {
   messages: Message[];
+  runId?: string;
   session: Session;
 }
 

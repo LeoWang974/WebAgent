@@ -1,8 +1,8 @@
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from agent_runtime.schemas import AgentArtifactRef
 from app.core.config import settings
+from app.integrations.hermes import AgentArtifactRef
 from app.services.artifact_discovery import (
     _candidate_roots,
     _configured_hermes_home_candidates,

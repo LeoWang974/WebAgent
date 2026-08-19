@@ -63,16 +63,10 @@ function startAgentRunPolling(
     if (!run) {
       return;
     }
-    if (run.sessionId === get().currentSessionId) {
+    if (isTerminalRunStatus(run.status) && run.sessionId === get().currentSessionId) {
       const backendMessages = await webAgentApi.listMessages(run.sessionId);
       set((state) => {
         const existingById = new Map(state.messages.map((message) => [message.id, message]));
-        const currentPending = state.messages.filter(
-          (message) =>
-            message.sessionId === run.sessionId &&
-            message.role === "assistant" &&
-            message.isPending,
-        );
         return {
           messages: [
             ...state.messages.filter((message) => message.sessionId !== run.sessionId),
@@ -80,7 +74,6 @@ function startAgentRunPolling(
               ...message,
               waitStartedAt: existingById.get(message.id)?.waitStartedAt,
             })),
-            ...(isTerminalRunStatus(run.status) ? [] : currentPending),
           ],
         };
       });
@@ -112,7 +105,7 @@ function startAgentRunPolling(
         });
       })
       .finally(() => agentRunPollsInFlight.delete(runId));
-  }, 5000);
+  }, 10_000);
   agentRunPollers.set(runId, poller);
 }
 

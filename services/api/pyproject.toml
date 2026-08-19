@@ -4,7 +4,6 @@ version = "0.1.0"
 description = "FastAPI backend for WebAgent."
 requires-python = ">=3.11"
 dependencies = [
-  "agent-runtime @ file:../agent-runtime",
   "alembic>=1.13.0",
   "asyncpg>=0.29.0",
   "celery[redis]>=5.3.0",
@@ -31,7 +30,7 @@ dev = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["app"]
+include = ["app", "app.*"]
 
 [tool.ruff]
 line-length = 100
@@ -41,4 +40,4 @@ target-version = "py311"
 select = ["E", "F", "I", "UP", "B"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["agent_runtime", "app"]
+known-first-party = ["app"]

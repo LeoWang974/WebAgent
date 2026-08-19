@@ -1,5 +1,6 @@
 $ErrorActionPreference = "Continue"
 
+$repoRoot = (Split-Path -Parent $PSScriptRoot).ToLowerInvariant()
 $ports = @(3002, 8010)
 
 foreach ($port in $ports) {
@@ -11,4 +12,18 @@ foreach ($port in $ports) {
     Write-Host "Stopping process tree on port $port (PID $processId)"
     taskkill /PID $processId /T /F | Out-Null
   }
+}
+
+$workerProcesses = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+  Where-Object {
+    $_.ProcessId -ne $PID -and
+    $_.CommandLine -and
+    $_.CommandLine.ToLowerInvariant().Contains($repoRoot) -and
+    $_.CommandLine -match "-m\s+celery"
+  } |
+  Sort-Object ProcessId -Descending
+
+foreach ($workerProcess in $workerProcesses) {
+  Write-Host "Stopping Celery worker process tree (PID $($workerProcess.ProcessId))"
+  taskkill /PID $workerProcess.ProcessId /T /F | Out-Null
 }

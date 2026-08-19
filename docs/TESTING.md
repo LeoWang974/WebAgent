@@ -57,14 +57,14 @@ Compile check:
 
 ```powershell
 cd services\api
-.\.venv\Scripts\python.exe -m compileall -q app ..\agent-runtime\agent_runtime
+.\.venv\Scripts\python.exe -m compileall -q app
 ```
 
 Full Ruff check:
 
 ```powershell
 cd services\api
-.\.venv\Scripts\python.exe -m ruff check app ..\agent-runtime\agent_runtime tests
+.\.venv\Scripts\python.exe -m ruff check app tests
 ```
 
 ## Frontend
@@ -117,8 +117,8 @@ Before committing a stable checkpoint:
 .\scripts\test-api.ps1 -Group integration
 
 cd services\api
-.\.venv\Scripts\python.exe -m compileall -q app ..\agent-runtime\agent_runtime
-.\.venv\Scripts\python.exe -m ruff check app ..\agent-runtime\agent_runtime tests
+.\.venv\Scripts\python.exe -m compileall -q app
+.\.venv\Scripts\python.exe -m ruff check app tests
 
 cd ..\..
 pnpm --filter web test

@@ -1,8 +1,8 @@
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 
-from ..schemas import AgentArtifactRef, AgentRunCreate, AgentRunEvent, AgentRunStep
-from .hermes_cli import HermesCliWrapper
+from .cli import HermesCliWrapper
+from .schemas import AgentArtifactRef, AgentRunCreate, AgentRunEvent, AgentRunStep
 
 
 def now_iso() -> str:

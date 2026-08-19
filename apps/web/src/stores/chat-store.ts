@@ -1,30 +1,24 @@
-﻿"use client";
+"use client";
 
 import { create } from "zustand";
 import { selectPreferredArtifact } from "@/lib/artifact-selection";
 import { settingsApi, webAgentApi } from "@/services";
 import { ApiError } from "@/services/api-client";
-import { applyBackendRunIdBinding, bindBackendRunId } from "./agent-run-binding";
-import { applyAgentRunEventState, applySendMessageStreamEventState } from "./event-handlers";
+import { applyAgentRunEventState } from "./event-handlers";
 import {
-  createId,
-  createPendingAssistantMessage,
-  generateSessionTitle,
   hasPendingAssistantMessage,
-  isDefaultSessionTitle,
   isTerminalRunStatus,
   pendingMessageForRun,
 } from "./chat-store-helpers";
 import {
   abortSessionRequest,
-  createRequestAbortController,
   loadSessionWorkspace,
-  releaseRequestAbortController,
   resetChatRuntime,
   setSwitchingState,
   subscribeAgentRunEvents,
   unsubscribeAgentRun,
 } from "./chat-runtime";
+import { sendMessageFlow } from "./send-message-flow";
 import type {
   AgentRun,
   AgentRunEvent,
@@ -540,239 +534,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
     }
   },
-  sendMessage: async (content) => {
-    const trimmed = content.trim();
-    if (!trimmed) {
-      return;
-    }
-
-    const modelId = get().selectedModelId;
-    const modelName = get().models.find((model) => model.id === modelId)?.name ?? "Agent";
-    let sessionId = get().currentSessionId;
-    if (!sessionId) {
-      const session = await get().createSession();
-      if (!session) {
-        return;
-      }
-      sessionId = session.id;
-    }
-
-    const currentSession = get().sessions.find((session) => session.id === sessionId);
-    const shouldAutoRename = Boolean(
-      currentSession && isDefaultSessionTitle(currentSession.title),
-    );
-    const autoTitle = generateSessionTitle(trimmed);
-
-    const now = new Date().toISOString();
-    const runId = createId("run");
-    let currentRunId = runId;
-    const optimisticUserMessage: Message = {
-      id: createId("message_user"),
-      sessionId,
-      role: "user",
-      content: trimmed,
-      createdAt: now,
-    };
-    const pendingAssistantMessage = createPendingAssistantMessage(
-      sessionId,
-      modelName,
-      undefined,
-    );
-    const run: AgentRun = {
-      id: runId,
-      hasAssistantResponse: false,
-      isPlainChat: false,
-      progress: 0,
-      sessionId,
-      startedAt: now,
-      status: "running",
-      steps: [],
-      title: "Hermes request",
-    };
-
-    const requestAbortController = createRequestAbortController(sessionId);
-
-    set((state) => ({
-      activeAgentRunId: runId,
-      agentRuns: [run, ...state.agentRuns],
-      error: undefined,
-      messages: [...state.messages, optimisticUserMessage, pendingAssistantMessage],
-      selectedArtifactId: state.selectedArtifactId,
-      sessions: state.sessions.map((session) =>
-        session.id === sessionId
-          ? {
-              ...session,
-              status: "running",
-              title: shouldAutoRename ? autoTitle : session.title,
-              updatedAt: now,
-            }
-          : session,
-      ),
-    }));
-
-    if (shouldAutoRename) {
-      void webAgentApi.updateSession(sessionId, { title: autoTitle }).then((session) => {
-        set((state) => ({
-          sessions: state.sessions.map((item) => (item.id === sessionId ? session : item)),
-        }));
-      }).catch((error) => {
-        set({ error: error instanceof Error ? error.message : "Failed to rename session." });
-      });
-    }
-
-    let backendRunDiscoveryTimer: number | undefined;
-    const stopBackendRunDiscovery = () => {
-      if (backendRunDiscoveryTimer !== undefined) {
-        window.clearInterval(backendRunDiscoveryTimer);
-        backendRunDiscoveryTimer = undefined;
-      }
-    };
-
-    {
-      const startedAtMs = Date.parse(now);
-      backendRunDiscoveryTimer = window.setInterval(() => {
-        void webAgentApi.listAgentRuns(sessionId).then((runs) => {
-          if (currentRunId !== runId) {
-            stopBackendRunDiscovery();
-            return;
-          }
-          const backendRun = runs.find((candidate) => {
-            if (
-              candidate.id.startsWith("run_") ||
-              candidate.sessionId !== sessionId ||
-              isTerminalRunStatus(candidate.status)
-            ) {
-              return false;
-            }
-            return Date.parse(candidate.startedAt) >= startedAtMs - 10_000;
-          });
-          if (!backendRun) {
-            return;
-          }
-
-          const previousRunId = currentRunId;
-          currentRunId = bindBackendRunId(currentRunId, backendRun.id);
-          set((state) => {
-            const boundState = {
-              ...state,
-              ...applyBackendRunIdBinding(state, previousRunId, currentRunId),
-            };
-            return {
-              activeAgentRunId:
-                boundState.activeAgentRunId === runId
-                  ? currentRunId
-                  : boundState.activeAgentRunId,
-              agentRuns: boundState.agentRuns.map((runItem) =>
-                runItem.id === currentRunId
-                  ? {
-                      ...runItem,
-                      adapterKey: backendRun.adapterKey,
-                      completedAt: backendRun.completedAt,
-                      error: backendRun.error,
-                      progress: backendRun.progress,
-                      queueName: backendRun.queueName,
-                      queuePosition: backendRun.queuePosition,
-                      queueReason: backendRun.queueReason,
-                      startedAt: backendRun.startedAt,
-                      status: backendRun.status,
-                      steps: backendRun.steps,
-                    }
-                  : runItem,
-              ),
-            };
-          });
-          subscribeAgentRunEvents(get, set, backendRun.id);
-          stopBackendRunDiscovery();
-        }).catch(() => {
-          // The streaming request still owns visible error reporting.
-        });
-      }, 1500);
-    }
-
-    try {
-      await webAgentApi.sendMessageStream(
-        {
-          content: trimmed,
-          modelId,
-          signal: requestAbortController.signal,
-          sessionId,
-        },
-      (event) => {
-          const previousRunId = currentRunId;
-          currentRunId = bindBackendRunId(
-            currentRunId,
-            "runId" in event ? event.runId : undefined,
-          );
-
-          if (event.type === "run_started") {
-            subscribeAgentRunEvents(get, set, event.runId);
-          }
-          set((state) => {
-            const boundState = {
-              ...state,
-              ...applyBackendRunIdBinding(state, previousRunId, currentRunId),
-            };
-            return applySendMessageStreamEventState(boundState, event, {
-                currentRunId,
-                modelName,
-                sessionId,
-            });
-          });
-        },
-      );
-      if (
-        !currentRunId.startsWith("run_") &&
-        get().agentRuns.some(
-          (runItem) => runItem.id === currentRunId && !isTerminalRunStatus(runItem.status),
-        )
-      ) {
-        const refreshedRun = await webAgentApi.getAgentRun(currentRunId);
-        set((state) => ({
-          activeAgentRunId: isTerminalRunStatus(refreshedRun.status)
-            ? undefined
-            : state.activeAgentRunId,
-          agentRuns: state.agentRuns.map((runItem) =>
-            runItem.id === refreshedRun.id ? refreshedRun : runItem,
-          ),
-        }));
-      }
-    } catch (error) {
-      const aborted = error instanceof DOMException && error.name === "AbortError";
-      set({
-        activeAgentRunId: undefined,
-        agentRuns: get().agentRuns.map((runItem) =>
-          runItem.id === currentRunId
-            ? {
-                ...runItem,
-                completedAt: new Date().toISOString(),
-                error: aborted
-                  ? undefined
-                  : error instanceof Error
-                    ? error.message
-                    : "Failed to send message.",
-                status: aborted ? "cancelled" : "failed",
-              }
-            : runItem,
-        ),
-        error: aborted
-          ? undefined
-          : error instanceof Error
-            ? error.message
-            : "Failed to send message.",
-        messages: get().messages.filter(
-          (message) =>
-            !(
-              message.sessionId === sessionId &&
-              message.role === "assistant" &&
-              message.isPending
-            ),
-        ),
-      });
-    } finally {
-      stopBackendRunDiscovery();
-      releaseRequestAbortController(sessionId, requestAbortController);
-    }
-  },
+  sendMessage: (content) => sendMessageFlow(get, set, content),
   setDefaultModel: async (modelId) => {
     try {
       const models = await settingsApi.setDefaultModel(modelId);

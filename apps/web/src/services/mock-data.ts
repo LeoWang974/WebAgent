@@ -261,7 +261,7 @@ export const mockArtifacts: Artifact[] = [
         {
           eyebrow: "Roadmap",
           title: "From mock UI to connected runtime",
-          subtitle: "FastAPI, Hermes runtime, renderer, and storage.",
+          subtitle: "FastAPI, Hermes runtime, artifact previews, and storage.",
           bullets: ["API adapter", "Agent runs", "File rendering", "Skill versioning"],
         },
       ],

@@ -2,22 +2,18 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import schemas
 from app.core.config import settings
+from app.integrations.hermes import HermesAdapter
 from app.models import AgentRun as DBAgentRun
 from app.models import AgentRunEvent as DBAgentRunEvent
 from app.models import Conversation, ConversationShare, User
 from app.services.model_runtime_config import ModelRuntimeConfig
 from app.services.persistence import get_conversation_or_404
 from app.services.runtime_environment import build_user_runtime_context
-
-try:
-    from agent_runtime.adapters import HermesAdapter
-except ImportError:
-    HermesAdapter = None
 
 ACTIVE_RUN_STATUSES = {"queued", "running", "tool_calling", "rendering"}
 TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled", "disconnected"}
@@ -63,8 +59,6 @@ def create_hermes_adapter(
         run_id=run_id,
         model_runtime_config=model_runtime_config,
     )
-    if HermesAdapter is None:
-        return None
     return HermesAdapter(
         hermes_path=settings.hermes_cli_path,
         hermes_home=runtime_context.hermes_home_for_shell(),
@@ -168,7 +162,18 @@ async def list_new_run_events(
 ) -> list[DBAgentRunEvent]:
     query = select(DBAgentRunEvent).where(DBAgentRunEvent.run_id == run_id)
     if cursor.created_at is not None:
-        query = query.where(DBAgentRunEvent.created_at >= cursor.created_at)
+        same_timestamp = DBAgentRunEvent.created_at == cursor.created_at
+        if cursor.event_ids_at_timestamp:
+            same_timestamp = and_(
+                same_timestamp,
+                DBAgentRunEvent.id.not_in(cursor.event_ids_at_timestamp),
+            )
+        query = query.where(
+            or_(
+                DBAgentRunEvent.created_at > cursor.created_at,
+                same_timestamp,
+            )
+        )
     result = await db.execute(
         query.order_by(DBAgentRunEvent.created_at.asc(), DBAgentRunEvent.id.asc())
     )
@@ -302,6 +307,7 @@ async def create_db_agent_run(
     progress: int = 0,
     adapter_key: str | None = None,
     model_runtime_config: ModelRuntimeConfig | None = None,
+    commit: bool = True,
 ) -> DBAgentRun:
     model_snapshot = model_runtime_config.snapshot() if model_runtime_config is not None else {}
     run = DBAgentRun(
@@ -313,7 +319,10 @@ async def create_db_agent_run(
         **model_snapshot,
     )
     db.add(run)
-    await db.commit()
+    if commit:
+        await db.commit()
+    else:
+        await db.flush()
     await db.refresh(run)
     return run
 
@@ -329,6 +338,7 @@ async def record_db_agent_run_event(
     step_status: str = "completed",
     payload: dict | None = None,
     _refresh_run: bool = True,
+    commit: bool = True,
 ) -> DBAgentRunEvent:
     if _refresh_run:
         await db.refresh(run)
@@ -358,10 +368,30 @@ async def record_db_agent_run_event(
     }
     event = DBAgentRunEvent(run_id=run.id, event_type=event_type, payload=event_payload)
     db.add(event)
+    if commit:
+        await db.commit()
+        await db.refresh(run)
+        await db.refresh(event)
+    else:
+        await db.flush()
+    return event
+
+
+async def touch_db_agent_run(
+    db: AsyncSession,
+    run: DBAgentRun,
+    *,
+    progress: int | None = None,
+) -> None:
+    """Refresh an active run heartbeat without adding a low-value event row."""
+    await db.refresh(run)
+    if run.status not in ACTIVE_RUN_STATUSES:
+        return
+    run.updated_at = datetime.now(UTC)
+    if progress is not None:
+        run.progress = max(run.progress, progress)
     await db.commit()
     await db.refresh(run)
-    await db.refresh(event)
-    return event
 
 
 async def finish_db_agent_run(

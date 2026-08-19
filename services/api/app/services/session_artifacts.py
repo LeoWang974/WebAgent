@@ -1,9 +1,9 @@
-﻿import hashlib
+import hashlib
 import re
 from datetime import datetime
 from pathlib import Path
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -250,58 +250,26 @@ def organize_artifact_schema(
     return artifact_schema
 
 
-async def find_existing_artifact(
-    db: AsyncSession,
-    session_id: str,
-    artifact_type: str,
-    metadata: dict,
-    run_id: str | None = None,
-) -> Artifact | None:
+def _artifact_match_keys(metadata: dict) -> set[str]:
     content_hash, candidate_paths = artifact_dedupe_keys(metadata)
-    conditions = [Artifact.conversation_id == session_id]
-    if run_id:
-        conditions.append(Artifact.run_id == run_id)
+    keys = {f"path:{metadata_path_key(path)}" for path in candidate_paths}
     if content_hash:
-        result = await db.execute(
-            select(Artifact).where(
-                *conditions,
-                Artifact.artifact_metadata["contentHash"].as_string() == content_hash,
-            )
-        )
-        existing_artifact = result.scalar_one_or_none()
-        if existing_artifact is not None:
-            return existing_artifact
+        keys.add(f"hash:{content_hash}")
+    return keys
 
-    if candidate_paths:
-        result = await db.execute(
-            select(Artifact).where(
-                *conditions,
-                or_(
-                    Artifact.artifact_metadata["path"].as_string().in_(candidate_paths),
-                    Artifact.artifact_metadata["originalPath"].as_string().in_(candidate_paths),
-                    Artifact.artifact_metadata["normalizedPath"].as_string().in_(candidate_paths),
-                    Artifact.artifact_metadata["originalNormalizedPath"]
-                    .as_string()
-                    .in_(candidate_paths),
-                ),
-            )
-        )
-        existing_artifact = result.scalar_one_or_none()
-        if existing_artifact is not None:
-            return existing_artifact
 
-    if content_hash:
-        result = await db.execute(
-            select(Artifact).where(
-                *conditions,
-                Artifact.type == artifact_type,
-            )
-        )
-        for candidate_artifact in result.scalars().all():
-            if artifact_content_hash(candidate_artifact) == content_hash:
-                return candidate_artifact
-
-    return None
+def _index_existing_artifacts(artifacts: list[Artifact]) -> dict[str, Artifact]:
+    index: dict[str, Artifact] = {}
+    for artifact in artifacts:
+        metadata = artifact.artifact_metadata or {}
+        keys = _artifact_match_keys(metadata)
+        if not any(key.startswith("hash:") for key in keys):
+            content_hash = artifact_content_hash(artifact)
+            if content_hash:
+                keys.add(f"hash:{content_hash}")
+        for key in keys:
+            index.setdefault(key, artifact)
+    return index
 
 
 async def refresh_conversation(db: AsyncSession, session_id: str) -> Conversation:
@@ -323,16 +291,19 @@ async def persist_discovered_artifacts(
 ) -> list[Artifact]:
     stored_artifacts: list[Artifact] = []
     conversation = await refresh_conversation(db, session_id)
+    conditions = [Artifact.conversation_id == session_id]
+    if run_id:
+        conditions.append(Artifact.run_id == run_id)
+    existing_result = await db.execute(select(Artifact).where(*conditions))
+    existing_index = _index_existing_artifacts(list(existing_result.scalars().all()))
 
     for artifact_schema in discovered_artifacts:
         artifact_schema = organize_artifact_schema(artifact_schema, conversation, run_id)
         metadata = artifact_schema.metadata or {}
-        existing_artifact = await find_existing_artifact(
-            db,
-            session_id,
-            artifact_schema.type,
-            metadata,
-            run_id,
+        match_keys = _artifact_match_keys(metadata)
+        existing_artifact = next(
+            (existing_index[key] for key in match_keys if key in existing_index),
+            None,
         )
         if existing_artifact is not None:
             existing_artifact.type = artifact_schema.type
@@ -356,6 +327,8 @@ async def persist_discovered_artifacts(
         )
         db.add(artifact)
         stored_artifacts.append(artifact)
+        for key in match_keys:
+            existing_index[key] = artifact
 
     if stored_artifacts:
         await db.commit()

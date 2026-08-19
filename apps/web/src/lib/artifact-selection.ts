@@ -1,4 +1,4 @@
-﻿import type { Artifact } from "@/types";
+import type { Artifact } from "@/types";
 
 export function artifactDisplayPriority(artifact?: Artifact) {
   if (!artifact) {

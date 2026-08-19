@@ -8,9 +8,9 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from agent_runtime.schemas import AgentArtifactRef, AgentRunEvent, AgentRunStep
 from app.core.config import settings
 from app.core.security import create_access_token
+from app.integrations.hermes import AgentArtifactRef, AgentRunEvent, AgentRunStep
 from app.models import AgentRun, Artifact, Conversation, Message, ModelConfig, User
 from app.models import AgentRunEvent as DBAgentRunEvent
 from app.services.artifact_discovery import create_artifacts_from_paths
@@ -35,6 +35,21 @@ def isolate_adapter_capacity(monkeypatch: pytest.MonkeyPatch):
         "app.services.agent_run_executor.acquire_adapter_capacity",
         acquire_noop_capacity,
     )
+
+
+@pytest.fixture
+def stub_queued_run_dispatch(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    queued_run_ids: list[str] = []
+    monkeypatch.setattr(settings, "agent_run_queue_enabled", True)
+
+    def fake_apply_async(args, **kwargs):
+        queued_run_ids.append(args[0])
+
+    monkeypatch.setattr(
+        "app.workers.agent_run_tasks.execute_agent_run_task.apply_async",
+        fake_apply_async,
+    )
+    return queued_run_ids
 
 
 def parse_sse_events(payload: str) -> list[tuple[str, dict]]:
@@ -71,6 +86,7 @@ async def test_terminal_agent_run_event_stream_returns_and_closes(
     api_client: AsyncClient,
     auth_headers: dict[str, dict[str, str]],
     db_sessionmaker: async_sessionmaker[AsyncSession],
+    stub_queued_run_dispatch: list[str],
 ):
     session_response = await api_client.post(
         "/api/sessions",
@@ -333,9 +349,8 @@ async def test_non_stream_message_enqueues_agent_run(
     assert response.status_code == 200
     payload = response.json()
     assert payload["session"]["status"] == "running"
-    assert payload["messages"][0]["role"] == "user"
-    assert payload["messages"][1]["role"] == "assistant"
-    assert payload["messages"][1]["content"].startswith("Agent run queued. Run ID:")
+    assert [message["role"] for message in payload["messages"]] == ["user"]
+    assert payload["runId"] == queued_run_ids[0]
     assert len(queued_run_ids) == 1
 
     async with db_sessionmaker() as db:
@@ -834,7 +849,8 @@ async def test_raw_activity_heartbeat_does_not_create_assistant_message(
             .scalars()
             .all()
         )
-        assert any(event.event_type == "raw_activity" for event in run_events)
+        assert not any(event.event_type == "raw_activity" for event in run_events)
+        assert any(event.event_type == "completed" for event in run_events)
 
 
 @pytest.mark.asyncio
@@ -842,6 +858,7 @@ async def test_cancel_agent_run_marks_cancelled(
     api_client: AsyncClient,
     auth_headers: dict[str, dict[str, str]],
     db_sessionmaker: async_sessionmaker[AsyncSession],
+    stub_queued_run_dispatch: list[str],
 ):
     session_response = await api_client.post(
         "/api/sessions",
@@ -882,6 +899,7 @@ async def test_stale_running_run_recovers_as_disconnected(
     api_client: AsyncClient,
     auth_headers: dict[str, dict[str, str]],
     db_sessionmaker: async_sessionmaker[AsyncSession],
+    stub_queued_run_dispatch: list[str],
 ):
     session_response = await api_client.post(
         "/api/sessions",

@@ -65,21 +65,3 @@ def test_cleanup_expired_runtime_files_removes_run_homes_and_old_logs(tmp_path: 
     assert not old_log.exists()
     assert recent_log.exists()
     assert not unrelated_log.exists()
-
-
-def test_cleanup_expired_runtime_files_removes_retired_runtime_data(tmp_path: Path):
-    runtime_dir = tmp_path / "runtime"
-    obsolete_skills = runtime_dir / "openclaw-skills.tmp"
-    obsolete_skills.mkdir(parents=True)
-    (obsolete_skills / "skill.md").write_text("obsolete", encoding="utf-8")
-    acceptance_log = runtime_dir / "acceptance-api.log"
-    acceptance_log.write_text("obsolete", encoding="utf-8")
-    retained_skills = runtime_dir / "sensenova-skills"
-    retained_skills.mkdir()
-
-    deleted = cleanup_expired_runtime_files(max_age_days=7, repo_root=tmp_path)
-
-    assert deleted == 2
-    assert not obsolete_skills.exists()
-    assert not acceptance_log.exists()
-    assert retained_skills.exists()
