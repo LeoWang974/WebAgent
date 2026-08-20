@@ -23,6 +23,17 @@ test("stream assistant delta dedupes repeated run steps", () => {
 
 test("assistant done removes a duplicate terminal stage bubble", () => {
   assert.match(source, /normalizeMessageContent\(event\.message\.content\)/);
-  assert.match(source, /duplicateStageIndex/);
+  assert.match(source, /duplicateStageEntry/);
   assert.match(source, /message\.id\s*!==\s*event\.message\.id/);
+});
+
+test("assistant done preserves the previous wait interval when terminal timestamps collapse", () => {
+  assert.match(source, /completedMessageWaitStartedAt/);
+  assert.match(source, /deliveredAtMs\s*-\s*explicitStartedAtMs\s*>=\s*1000/);
+  assert.match(source, /previousMessage\?\.createdAt\s*\?\?\s*message\.waitStartedAt/);
+  assert.match(source, /duplicateStageEntry\.message\.createdAt/);
+  assert.match(
+    source,
+    /completedMessageWaitStartedAt\(\s*state\.messages,\s*duplicateStageEntry\.message/,
+  );
 });

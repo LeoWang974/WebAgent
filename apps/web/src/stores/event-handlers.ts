@@ -361,6 +361,27 @@ function applyStreamArtifactCreated(
   };
 }
 
+function completedMessageWaitStartedAt(messages: Message[], message: Message) {
+  const deliveredAtMs = Date.parse(message.createdAt);
+  const explicitStartedAtMs = message.waitStartedAt
+    ? Date.parse(message.waitStartedAt)
+    : Number.NaN;
+  if (
+    Number.isFinite(deliveredAtMs) &&
+    Number.isFinite(explicitStartedAtMs) &&
+    deliveredAtMs - explicitStartedAtMs >= 1000
+  ) {
+    return message.waitStartedAt;
+  }
+
+  const messageIndex = messages.findIndex((candidate) => candidate.id === message.id);
+  const previousMessage = messages
+    .slice(0, messageIndex < 0 ? messages.length : messageIndex)
+    .reverse()
+    .find((candidate) => candidate.sessionId === message.sessionId && !candidate.isPending);
+  return previousMessage?.createdAt ?? message.waitStartedAt;
+}
+
 function applyStreamAssistantDone(
   state: SendMessageStreamEventState,
   event: Extract<SendMessageStreamEvent, { type: "assistant_done" }>,
@@ -385,7 +406,7 @@ function applyStreamAssistantDone(
   );
 
   const normalizedFinalContent = normalizeMessageContent(event.message.content);
-  const duplicateStageIndex = [...messages]
+  const duplicateStageEntry = [...messages]
     .map((message, index) => ({ message, index }))
     .reverse()
     .find(
@@ -394,9 +415,9 @@ function applyStreamAssistantDone(
         message.role === "assistant" &&
         message.id !== event.message.id &&
         normalizeMessageContent(message.content) === normalizedFinalContent,
-    )?.index;
-  if (duplicateStageIndex !== undefined) {
-    messages = messages.filter((_, index) => index !== duplicateStageIndex);
+    );
+  if (duplicateStageEntry) {
+    messages = messages.filter((_, index) => index !== duplicateStageEntry.index);
   }
 
   if (existingMessage) {
@@ -405,10 +426,24 @@ function applyStreamAssistantDone(
         ? {
             ...event.message,
             createdAt: existingMessage.createdAt,
-            waitStartedAt: existingMessage.waitStartedAt,
+            waitStartedAt: completedMessageWaitStartedAt(messages, existingMessage),
           }
         : message,
     );
+  } else if (duplicateStageEntry) {
+    const finalMessage = {
+      ...event.message,
+      createdAt: duplicateStageEntry.message.createdAt,
+      waitStartedAt: completedMessageWaitStartedAt(
+        state.messages,
+        duplicateStageEntry.message,
+      ),
+    };
+    messages = [
+      ...messages.slice(0, duplicateStageEntry.index),
+      finalMessage,
+      ...messages.slice(duplicateStageEntry.index),
+    ];
   } else if (pendingIndex >= 0) {
     messages = [
       ...state.messages.slice(0, pendingIndex),

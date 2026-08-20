@@ -161,6 +161,7 @@ class HermesCliWrapper:
         self.last_diagnostics: dict[str, object] = {}
         self.artifact_manifest_recorder: ArtifactManifestRecorder | None = None
         self.artifact_watcher: RunArtifactWatcher | None = None
+        self.stream_started_at: datetime | None = None
         self.active_processes: dict[str, asyncio.subprocess.Process] = {}
         self.cancelled_run_ids: set[str] = set()
 
@@ -260,6 +261,106 @@ class HermesCliWrapper:
                 if isinstance(content, str) and content.strip():
                     return content.strip()
         return None
+
+    def _session_message_counts(self) -> dict[Path, int]:
+        """Capture message cursors before a resumed Hermes process starts."""
+
+        sessions_dir = self._host_visible_path(self.hermes_home) / "sessions"
+        if not sessions_dir.is_dir():
+            return {}
+
+        counts: dict[Path, int] = {}
+        for path in sessions_dir.glob("session_*.json"):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                continue
+            messages = payload.get("messages")
+            if isinstance(messages, list):
+                counts[path.resolve()] = len(messages)
+        return counts
+
+    @staticmethod
+    def _iter_session_text(value: object) -> list[str]:
+        texts: list[str] = []
+        if isinstance(value, str):
+            texts.append(value)
+        elif isinstance(value, dict):
+            for item in value.values():
+                texts.extend(HermesCliWrapper._iter_session_text(item))
+        elif isinstance(value, list):
+            for item in value:
+                texts.extend(HermesCliWrapper._iter_session_text(item))
+        return texts
+
+    def _recover_session_updates(
+        self,
+        *,
+        started_at: datetime,
+        message_cursors: dict[Path, int],
+    ) -> tuple[list[str], list[str]]:
+        """Read only messages appended by the current Run from Hermes session files."""
+
+        sessions_dir = self._host_visible_path(self.hermes_home) / "sessions"
+        if not sessions_dir.is_dir():
+            return [], []
+
+        started_timestamp = started_at.timestamp() - 5
+        assistant_updates: list[str] = []
+        artifact_paths: list[str] = []
+        for path in sorted(sessions_dir.glob("session_*.json"), key=lambda item: str(item)):
+            try:
+                resolved_path = path.resolve()
+                if path.stat().st_mtime < started_timestamp:
+                    continue
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                logger.debug("Unable to read Hermes session update: %s", path, exc_info=True)
+                continue
+            messages = payload.get("messages")
+            if not isinstance(messages, list):
+                continue
+            start_index = min(message_cursors.get(resolved_path, 0), len(messages))
+            new_messages = messages[start_index:]
+            message_cursors[resolved_path] = len(messages)
+            for message in new_messages:
+                if not isinstance(message, dict):
+                    continue
+                content = message.get("content")
+                if (
+                    message.get("role") == "assistant"
+                    and isinstance(content, str)
+                    and content.strip()
+                ):
+                    assistant_updates.append(content.strip())
+                for text in self._iter_session_text(message):
+                    for match in ARTIFACT_PATH_RE.finditer(text):
+                        candidate = self._normalize_artifact_path(match.group("path"))
+                        if candidate not in artifact_paths:
+                            artifact_paths.append(candidate)
+        return assistant_updates, artifact_paths
+
+    @staticmethod
+    def _is_primary_completion_artifact(path: Path) -> bool:
+        """Exclude planning files and slide fragments from early Run completion."""
+
+        suffix = path.suffix.lower()
+        if suffix not in {".md", ".htm", ".html", ".pptx"}:
+            return False
+        lower_parts = {part.lower() for part in path.parts}
+        if lower_parts.intersection({"sub_reports", "sub-reports", "pages", "slides"}):
+            return False
+        lower_name = path.name.lower()
+        if lower_name in {
+            "briefing.md",
+            "request.md",
+            "synthesis.md",
+            "task.md",
+        }:
+            return False
+        if suffix in {".htm", ".html"} and lower_name.startswith("page_"):
+            return False
+        return True
 
     def _build_chat_exec_args(
         self,
@@ -468,6 +569,18 @@ class HermesCliWrapper:
             logger.debug("Ignoring unsupported artifact path: %s", path)
             return False
         host_path = self._artifact_host_path(path)
+        if (
+            self.stream_started_at is not None
+            and status == "ready"
+            and discovered_by == "terminal_output"
+        ):
+            try:
+                file_stat = host_path.stat()
+            except OSError:
+                return False
+            if file_stat.st_mtime < self.stream_started_at.timestamp() - 5:
+                logger.debug("Ignoring stale artifact path from Hermes output: %s", path)
+                return False
         if (
             status == "ready"
             and discovered_by != "file_watcher"
@@ -909,7 +1022,7 @@ class HermesCliWrapper:
         return any(marker in lower for marker in content_markers)
 
     @staticmethod
-    def _should_emit_box(text: str) -> bool:
+    def _should_emit_box(text: str, *, confirmed_hermes_box: bool = False) -> bool:
         lines = [line.strip() for line in text.splitlines() if line.strip()]
         if not lines:
             return False
@@ -927,6 +1040,9 @@ class HermesCliWrapper:
         ]
         if any(marker in lower for marker in noisy_markers):
             return False
+
+        if confirmed_hermes_box:
+            return True
 
         return HermesCliWrapper._has_user_visible_signal(text)
 
@@ -976,6 +1092,7 @@ class HermesCliWrapper:
         self.artifact_manifest_recorder = None
         self.artifact_watcher = None
         stream_started_at = datetime.now()
+        self.stream_started_at = stream_started_at
         process_cwd: str | None = None
         managed_environment_keys = (
             "WEBAGENT_RUN_WORKSPACE",
@@ -1063,6 +1180,7 @@ class HermesCliWrapper:
             len(question),
             session_id or "",
         )
+        session_message_cursors = self._session_message_counts()
         raw_log_path = self._raw_log_path(run_id)
         self.last_diagnostics["raw_log_path"] = str(raw_log_path)
         raw_log_path.write_text(
@@ -1110,6 +1228,10 @@ class HermesCliWrapper:
         raw_activity_interval_seconds = 60
         should_stop_on_completion_signal = True
         last_artifact_poll_monotonic = 0.0
+        last_session_poll_monotonic = 0.0
+        last_session_activity_monotonic = asyncio.get_running_loop().time()
+        session_artifact_candidates: set[str] = set()
+        session_artifact_observations: dict[str, tuple[int, int, float, int]] = {}
 
         async def stop_after_completion() -> None:
             if process.returncode is not None:
@@ -1122,7 +1244,10 @@ class HermesCliWrapper:
         async def flush_box() -> str | None:
             text = "\n".join(box_lines).strip()
             box_lines.clear()
-            if not text or not self._should_emit_box(text):
+            if not text or not self._should_emit_box(
+                text,
+                confirmed_hermes_box=True,
+            ):
                 return None
             return self._summarize_box_text(text)
 
@@ -1212,6 +1337,67 @@ class HermesCliWrapper:
                 return []
             last_artifact_poll_monotonic = now_monotonic
             return artifact_watcher.poll()
+
+        def poll_session_recovery() -> tuple[list[str], list[str]]:
+            nonlocal last_session_activity_monotonic, last_session_poll_monotonic
+
+            now_monotonic = asyncio.get_running_loop().time()
+            if now_monotonic - last_session_poll_monotonic < 1.0:
+                return [], []
+            last_session_poll_monotonic = now_monotonic
+            assistant_updates, artifact_paths = self._recover_session_updates(
+                started_at=stream_started_at,
+                message_cursors=session_message_cursors,
+            )
+            if assistant_updates or artifact_paths:
+                last_session_activity_monotonic = now_monotonic
+            session_artifact_candidates.update(artifact_paths)
+
+            stable_paths: list[str] = []
+            for candidate in sorted(session_artifact_candidates):
+                host_path = self._artifact_host_path(candidate)
+                if not self._is_primary_completion_artifact(host_path):
+                    continue
+                try:
+                    file_stat = host_path.stat()
+                except OSError:
+                    continue
+                if file_stat.st_mtime < stream_started_at.timestamp() - 5:
+                    continue
+                previous = session_artifact_observations.get(candidate)
+                signature = (file_stat.st_size, file_stat.st_mtime_ns)
+                if previous is None or previous[:2] != signature:
+                    session_artifact_observations[candidate] = (
+                        file_stat.st_size,
+                        file_stat.st_mtime_ns,
+                        now_monotonic,
+                        1,
+                    )
+                    continue
+                unchanged_since = previous[2]
+                unchanged_samples = previous[3] + 1
+                session_artifact_observations[candidate] = (
+                    file_stat.st_size,
+                    file_stat.st_mtime_ns,
+                    unchanged_since,
+                    unchanged_samples,
+                )
+                if (
+                    unchanged_samples < 2
+                    or now_monotonic - unchanged_since < 1.5
+                    or now_monotonic - last_session_activity_monotonic < 20
+                ):
+                    continue
+                self._remember_artifact_path(
+                    candidate,
+                    discovered_by="recovery_scan",
+                    status="ready",
+                    size_bytes=file_stat.st_size,
+                    mtime_ns=file_stat.st_mtime_ns,
+                    stable_at=datetime.now(),
+                )
+                stable_paths.append(candidate)
+            return assistant_updates, stable_paths
 
         def parse_box_line(raw_line: str) -> tuple[bool, bool, str | None]:
             cleaned = self._clean_line(raw_line)
@@ -1310,6 +1496,44 @@ class HermesCliWrapper:
                             poll_artifact_watcher()
                         ):
                             yield artifact_event
+                    session_updates, stable_session_paths = poll_session_recovery()
+                    for session_update in session_updates:
+                        if not self._should_emit_box(session_update):
+                            continue
+                        summarized_update = self._summarize_box_text(session_update)
+                        if not summarized_update or summarized_update == last_emitted:
+                            continue
+                        emitted_output = True
+                        last_emitted = summarized_update
+                        self.last_diagnostics["last_stage"] = summarized_update
+                        yield self._build_stream_event(
+                            content=summarized_update,
+                            raw_log_path=raw_log_path,
+                            run_id=run_id,
+                            completion_detected=False,
+                            artifact_found=False,
+                            payload={"sessionTail": True},
+                        )
+                    if stable_session_paths:
+                        completion_detected = True
+                        completion_message_emitted = True
+                        emitted_artifact_count = len(self.last_artifact_paths)
+                        completed_names = ", ".join(
+                            self._artifact_host_path(path).name
+                            for path in stable_session_paths
+                        )
+                        completion_content = f"Hermes generated {completed_names}."
+                        self.last_diagnostics["last_stage"] = completion_content
+                        yield self._build_stream_event(
+                            content=completion_content,
+                            raw_log_path=raw_log_path,
+                            run_id=run_id,
+                            completion_detected=True,
+                            artifact_found=True,
+                            payload={"sessionArtifactCompletion": True},
+                        )
+                        await stop_after_completion()
+                        break
                     if completion_detected and should_stop_on_completion_signal:
                         await stop_after_completion()
                         break

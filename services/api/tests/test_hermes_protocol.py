@@ -39,6 +39,26 @@ def test_hermes_ignores_unknown_artifact_suffix_instead_of_recording_invalid_typ
     assert wrapper.last_artifacts == []
 
 
+def test_hermes_confirmed_box_accepts_exact_ascii_reply_but_raw_line_does_not():
+    wrapper = HermesCliWrapper()
+
+    assert wrapper._should_emit_box("QA-A-FINAL-SHORT-OK") is False
+    assert (
+        wrapper._should_emit_box(
+            "QA-A-FINAL-SHORT-OK",
+            confirmed_hermes_box=True,
+        )
+        is True
+    )
+    assert (
+        wrapper._should_emit_box(
+            "browser: browser_navigate",
+            confirmed_hermes_box=True,
+        )
+        is False
+    )
+
+
 def test_hermes_recovers_latest_assistant_message_from_session(tmp_path: Path):
     hermes_home = tmp_path / "hermes-home"
     sessions_dir = hermes_home / "sessions"
@@ -80,6 +100,98 @@ def test_hermes_session_recovery_ignores_sessions_from_before_run(tmp_path: Path
     assert wrapper._recover_latest_session_assistant_content(
         started_at=datetime.now()
     ) is None
+
+
+def test_hermes_session_updates_only_return_messages_appended_after_baseline(
+    tmp_path: Path,
+):
+    hermes_home = tmp_path / "hermes-home"
+    sessions_dir = hermes_home / "sessions"
+    sessions_dir.mkdir(parents=True)
+    session_path = sessions_dir / "session_resumed.json"
+    session_path.write_text(
+        json.dumps(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": "Old report: /tmp/old-report.md",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    wrapper = HermesCliWrapper(hermes_home=str(hermes_home))
+    cursors = wrapper._session_message_counts()
+    session_path.write_text(
+        json.dumps(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": "Old report: /tmp/old-report.md",
+                    },
+                    {
+                        "role": "assistant",
+                        "content": "Writing the final HTML report.",
+                        "tool_calls": [
+                            {
+                                "function": {
+                                    "name": "write_file",
+                                    "arguments": '{"path":"/tmp/new-report.html"}',
+                                }
+                            }
+                        ],
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    updates, paths = wrapper._recover_session_updates(
+        started_at=datetime.now(),
+        message_cursors=cursors,
+    )
+
+    assert updates == ["Writing the final HTML report."]
+    assert paths == [wrapper._normalize_artifact_path("/tmp/new-report.html")]
+
+
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [
+        ("/tmp/report.md", True),
+        ("/tmp/topic.html", True),
+        ("/tmp/topic.pptx", True),
+        ("/tmp/request.md", False),
+        ("/tmp/sub_reports/d1.md", False),
+        ("/tmp/pages/page_001.html", False),
+        ("/tmp/plan.json", False),
+    ],
+)
+def test_hermes_primary_completion_artifact_filter(path: str, expected: bool):
+    assert HermesCliWrapper._is_primary_completion_artifact(Path(path)) is expected
+
+
+def test_hermes_terminal_output_does_not_attach_stale_or_missing_artifacts(
+    tmp_path: Path,
+):
+    stale_report = tmp_path / "stale-report.md"
+    stale_report.write_text("old", encoding="utf-8")
+    stale_timestamp = datetime.now().timestamp() - 60
+    os.utime(stale_report, (stale_timestamp, stale_timestamp))
+    wrapper = HermesCliWrapper()
+    wrapper.stream_started_at = datetime.now()
+
+    assert wrapper._remember_artifact_path(str(stale_report)) is False
+    assert wrapper._remember_artifact_path(str(tmp_path / "missing.md")) is False
+    assert wrapper.last_artifact_paths == []
+
+    fresh_report = tmp_path / "fresh-report.md"
+    fresh_report.write_text("new", encoding="utf-8")
+    assert wrapper._remember_artifact_path(str(fresh_report)) is True
 
 
 def test_hermes_completion_signal_accepts_chinese_and_mojibake():

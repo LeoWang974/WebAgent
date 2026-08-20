@@ -1,18 +1,20 @@
 /**
- * File purpose: Renders and coordinates the file artifact viewer user-interface feature.
- * Main declarations: iconForType handles icon for type; formatBytes handles format bytes;
- * FileArtifactViewer handles file artifact viewer.
+ * File purpose: Renders a downloadable artifact when an inline preview is unavailable.
+ * Main declarations: iconForType selects the file icon; formatBytes formats file size;
+ * FileArtifactViewer renders metadata, an optional recovery action, and download control.
  */
 
 "use client";
 
-import type { Artifact } from "@/types";
+import { Download, FileArchive, FileImage, FileText, Presentation, RotateCcw } from "lucide-react";
 import { downloadArtifact } from "@/lib/artifact-actions";
-import { Download, FileArchive, FileImage, FileText, Presentation } from "lucide-react";
+import type { Artifact } from "@/types";
 
 interface FileArtifactViewerProps {
+  actionLabel?: string;
   artifact: Artifact;
   description: string;
+  onAction?: () => void;
 }
 
 function iconForType(type: Artifact["type"]) {
@@ -41,7 +43,12 @@ function formatBytes(value: unknown) {
   return `${(value / 1024 / 1024).toFixed(1)} MB`;
 }
 
-export function FileArtifactViewer({ artifact, description }: FileArtifactViewerProps) {
+export function FileArtifactViewer({
+  actionLabel,
+  artifact,
+  description,
+  onAction,
+}: FileArtifactViewerProps) {
   const filename =
     typeof artifact.metadata?.filename === "string"
       ? artifact.metadata.filename
@@ -61,14 +68,26 @@ export function FileArtifactViewer({ artifact, description }: FileArtifactViewer
             <div className="truncate">文件：{filename}</div>
             {size ? <div>大小：{size}</div> : null}
           </div>
-          <button
-            className="mt-4 inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm hover:bg-muted"
-            onClick={() => void downloadArtifact(artifact)}
-            type="button"
-          >
-            <Download className="size-4" />
-            下载原文件
-          </button>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {onAction ? (
+              <button
+                className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm hover:bg-muted"
+                onClick={onAction}
+                type="button"
+              >
+                <RotateCcw className="size-4" />
+                {actionLabel ?? "重试"}
+              </button>
+            ) : null}
+            <button
+              className="inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm hover:bg-muted"
+              onClick={() => void downloadArtifact(artifact)}
+              type="button"
+            >
+              <Download className="size-4" />
+              下载原文件
+            </button>
+          </div>
         </div>
       </div>
     </div>

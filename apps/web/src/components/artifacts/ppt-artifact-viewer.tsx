@@ -92,6 +92,7 @@ export function PptArtifactViewer({ artifact }: PptArtifactViewerProps) {
   const [error, setError] = useState<string | undefined>();
   const [loading, setLoading] = useState(true);
   const [previewSource, setPreviewSource] = useState<string>();
+  const [retryKey, setRetryKey] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [slides, setSlides] = useState<SlidePreview[]>([]);
   const [zoom, setZoom] = useState<number | undefined>();
@@ -102,21 +103,29 @@ export function PptArtifactViewer({ artifact }: PptArtifactViewerProps) {
     async function loadSlides() {
       setError(undefined);
       setLoading(true);
-      try {
-        const result = await webAgentApi.getArtifactSlides(artifact.id);
-        if (!cancelled) {
-          setSlides(result.slides);
-          setPreviewSource(result.source);
-          setSelectedIndex(0);
+      let lastError: unknown;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          const result = await webAgentApi.getArtifactSlides(artifact.id);
+          if (!cancelled) {
+            setSlides(result.slides);
+            setPreviewSource(result.source);
+            setSelectedIndex(0);
+          }
+          lastError = undefined;
+          break;
+        } catch (loadError) {
+          lastError = loadError;
+          if (attempt === 0) {
+            await new Promise((resolve) => window.setTimeout(resolve, 350));
+          }
         }
-      } catch (loadError) {
-        if (!cancelled) {
-          setError(loadError instanceof Error ? loadError.message : "Failed to render slides.");
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
+      }
+      if (!cancelled && lastError) {
+        setError(lastError instanceof Error ? lastError.message : "Failed to render slides.");
+      }
+      if (!cancelled) {
+        setLoading(false);
       }
     }
 
@@ -124,7 +133,7 @@ export function PptArtifactViewer({ artifact }: PptArtifactViewerProps) {
     return () => {
       cancelled = true;
     };
-  }, [artifact.id]);
+  }, [artifact.id, retryKey]);
 
   const selectedSlide = slides[selectedIndex];
   const canPreview = slides.length > 0 && selectedSlide?.content;
@@ -150,12 +159,14 @@ export function PptArtifactViewer({ artifact }: PptArtifactViewerProps) {
   if (!canPreview) {
     return (
       <FileArtifactViewer
+        actionLabel="重新渲染"
         artifact={artifact}
         description={
           error
             ? `幻灯片渲染失败：${error}`
             : "PPTX 文件已就绪，但暂时无法生成浏览器预览。"
         }
+        onAction={() => setRetryKey((value) => value + 1)}
       />
     );
   }

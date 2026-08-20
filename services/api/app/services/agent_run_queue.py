@@ -1,8 +1,9 @@
-# File purpose: Implements the agent run queue backend service workflow.
-# Main declarations: is_short_chat_request checks short chat request; queue_for_message handles
-# queue for message; estimated_queue_position handles estimated queue position.
+# File purpose: Classifies messages into priority queues without altering user prompts.
+# Main declarations: is_short_chat_request classifies scheduling cost; queue_for_message selects
+# a queue; estimated_queue_position reads the current Redis queue length.
 
 import logging
+import re
 
 from redis.asyncio import Redis
 
@@ -13,16 +14,6 @@ logger = logging.getLogger(__name__)
 # Queue classification controls scheduling priority only. It never selects a skill
 # or changes the prompt delivered to Hermes.
 LONG_TASK_MARKERS = (
-    ".html",
-    ".md",
-    ".ppt",
-    ".pptx",
-    "csv",
-    "excel",
-    "html",
-    "markdown",
-    "ppt",
-    "pptx",
     "报告",
     "调研",
     "研究",
@@ -57,6 +48,14 @@ QUESTION_MARKERS = (
     "did i",
 )
 
+# Hyphens and underscores are identifier characters here so validation tokens
+# such as ``QA-B-AFTER-PPT-OK`` do not become long artifact requests.
+_ARTIFACT_TERM_PATTERN = re.compile(
+    r"(?<![a-z0-9_-])(?:\.(?:md|html?|pptx?|csv|xlsx)|markdown|html|pptx?|csv|excel)"
+    r"(?![a-z0-9_-])",
+    re.IGNORECASE,
+)
+
 
 def is_short_chat_request(content: str) -> bool:
     normalized = " ".join(content.strip().split())
@@ -67,7 +66,9 @@ def is_short_chat_request(content: str) -> bool:
         marker in lowered for marker in QUESTION_MARKERS
     ):
         return True
-    return not any(marker in lowered for marker in LONG_TASK_MARKERS)
+    has_long_intent = any(marker in lowered for marker in LONG_TASK_MARKERS)
+    has_artifact_term = _ARTIFACT_TERM_PATTERN.search(lowered) is not None
+    return not (has_long_intent or has_artifact_term)
 
 
 def queue_for_message(content: str) -> tuple[str, str]:

@@ -1,11 +1,6 @@
-# File purpose: Verifies test agent run queue behavior and its regression contracts.
-# Main declarations: test_short_chat_request_uses_priority_queue verifies short chat request uses
-# priority queue; test_artifact_requests_stay_on_long_task_queue verifies artifact requests stay
-# on long task queue; test_short_question_about_previous_artifact_uses_priority_queue verifies
-# short question about previous artifact uses priority queue;
-# test_long_plain_request_stays_on_long_task_queue verifies long plain request stays on long task
-# queue; test_cancellation_poller_throttles_negative_database_reads verifies repeated stream
-# chunks do not query the run status every time.
+# File purpose: Verifies agent-run queue classification and cancellation polling behavior.
+# Main declarations: queue classification tests cover short, artifact, validation-token, and
+# long requests; cancellation polling test verifies database-read throttling.
 
 from types import SimpleNamespace
 
@@ -37,6 +32,13 @@ def test_artifact_requests_stay_on_long_task_queue():
 def test_short_question_about_previous_artifact_uses_priority_queue():
     assert is_short_chat_request("请只回答：我上一轮要求生成几页 PPT？") is True
     assert is_short_chat_request("How many slides did I ask for last turn?") is True
+
+
+def test_artifact_word_inside_validation_token_stays_on_short_queue():
+    prompt = "Reply with QA-B-AFTER-PPT-OK only."
+
+    assert is_short_chat_request(prompt) is True
+    assert queue_for_message(prompt)[0] == "short-chat"
 
 
 def test_long_plain_request_stays_on_long_task_queue():
