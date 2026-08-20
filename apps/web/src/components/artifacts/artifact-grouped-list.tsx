@@ -71,7 +71,12 @@ function buildGroups(
         : mode === "type"
           ? typeLabels[artifact.type]
           : timeGroupLabel(artifact, unknownTimeLabel);
-    groups.set(key, [...(groups.get(key) ?? []), artifact]);
+    const existingGroup = groups.get(key);
+    if (existingGroup) {
+      existingGroup.push(artifact);
+    } else {
+      groups.set(key, [artifact]);
+    }
   }
 
   return Array.from(groups.entries()).map(([label, items]) => ({ items, label }));

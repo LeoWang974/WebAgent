@@ -62,6 +62,124 @@ async def test_hermes_stream_forwards_prompt_verbatim():
     assert "toolsets" not in captured
 
 
+@pytest.mark.asyncio
+async def test_hermes_retries_stalled_resumed_session_once_with_same_prompt():
+    attempts: list[dict[str, object]] = []
+
+    class FakeCli:
+        last_artifact_paths: list[str] = []
+        last_artifacts: list[dict] = []
+        last_diagnostics: dict[str, object] = {}
+
+        async def ask_stream_events(self, **kwargs):
+            attempts.append(kwargs)
+            if len(attempts) == 1:
+                yield HermesStreamEvent(
+                    event_type="tool_call",
+                    content=(
+                        "Stream stalled mid tool-call (write_file); "
+                        "the action was not executed."
+                    ),
+                )
+                return
+            yield HermesStreamEvent(event_type="completed", content="PPTX 已生成")
+
+    adapter = HermesAdapter(resume_session_id="damaged-session")
+    adapter.cli = FakeCli()
+    prompt = "生成 PPTX"
+
+    events = [
+        event
+        async for event in adapter.stream_response_events(
+            AgentRunCreate(content=prompt, session_id="session_1", run_id="run_1")
+        )
+    ]
+
+    assert [attempt["question"] for attempt in attempts] == [prompt, prompt]
+    assert [attempt["session_id"] for attempt in attempts] == ["damaged-session", None]
+    assert [event.step.label for event in events] == [
+        "Hermes 工具输出中断，正在使用干净会话重试一次...",
+        "PPTX 已生成",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_hermes_does_not_retry_stall_after_artifact_exists():
+    attempts = 0
+
+    class FakeCli:
+        last_artifact_paths = ["/tmp/report.pptx"]
+        last_artifacts: list[dict] = []
+        last_diagnostics: dict[str, object] = {}
+
+        async def ask_stream_events(self, **kwargs):
+            nonlocal attempts
+            del kwargs
+            attempts += 1
+            yield HermesStreamEvent(
+                event_type="tool_call",
+                content=(
+                    "Stream stalled mid tool-call (cleanup); "
+                    "the action was not executed."
+                ),
+            )
+
+    adapter = HermesAdapter(resume_session_id="session-with-artifact")
+    adapter.cli = FakeCli()
+
+    events = [
+        event
+        async for event in adapter.stream_response_events(
+            AgentRunCreate(content="finish", session_id="session_1", run_id="run_1")
+        )
+    ]
+
+    assert attempts == 1
+    assert len(events) == 1
+
+
+@pytest.mark.asyncio
+async def test_hermes_retries_incomplete_artifact_handoff_without_rewriting_prompt():
+    attempts: list[dict[str, object]] = []
+
+    class FakeCli:
+        last_artifact_paths: list[str] = []
+        last_artifacts: list[dict] = []
+        last_diagnostics: dict[str, object] = {}
+
+        async def ask_stream_events(self, **kwargs):
+            attempts.append(kwargs)
+            if len(attempts) == 1:
+                self.last_diagnostics = {
+                    "last_stage": "gen_pptx.js 已写入，执行脚本即可生成 .pptx。"
+                }
+                yield HermesStreamEvent(
+                    event_type="completed",
+                    content="gen_pptx.js 已写入，执行脚本即可生成 .pptx。",
+                )
+                return
+            self.last_diagnostics = {"last_stage": "PPTX 已生成"}
+            yield HermesStreamEvent(event_type="completed", content="PPTX 已生成")
+
+    adapter = HermesAdapter(resume_session_id="incomplete-session")
+    adapter.cli = FakeCli()
+    prompt = "生成并导出 .pptx 文件"
+
+    events = [
+        event
+        async for event in adapter.stream_response_events(
+            AgentRunCreate(content=prompt, session_id="session_1", run_id="run_1")
+        )
+    ]
+
+    assert [attempt["question"] for attempt in attempts] == [prompt, prompt]
+    assert [attempt["session_id"] for attempt in attempts] == ["incomplete-session", None]
+    assert any(
+        event.payload.get("recoveryReason") == "incomplete_artifact_handoff"
+        for event in events
+    )
+
+
 def test_final_discovery_scans_the_run_runtime_root(tmp_path):
     runtime_root = tmp_path / "runtime-run"
     hermes_home = runtime_root / "hermes-home"

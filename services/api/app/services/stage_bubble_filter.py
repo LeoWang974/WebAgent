@@ -15,14 +15,29 @@ def runtime_stage_key(content: str, event_payload: dict) -> str:
         return "heartbeat"
     normalized = normalize_runtime_update(content)
     stage_patterns = [
-        ("complete", ("complete", "completed", "succeeded", "done", "generated")),
-        ("export", ("export", "convert", "pptx", "html", "deck")),
-        ("verify", ("validate", "verify", "check", "quality")),
-        ("write", ("write", "writing", "report", "markdown", "draft")),
-        ("plan", ("plan", "outline", "briefing", "blueprint")),
-        ("fetch", ("fetch", "crawl", "browser", "scrape", "download")),
-        ("search", ("search", "serper", "query")),
-        ("file_io", ("read_file", "write_file", "reading file", "writing file")),
+        (
+            "complete",
+            ("complete", "completed", "succeeded", "done", "generated", "已完成", "已生成", "成功"),
+        ),
+        (
+            "export",
+            ("export", "convert", "pptx", "html", "deck", "导出", "转换", "幻灯片", "演示文稿"),
+        ),
+        ("verify", ("validate", "verify", "check", "quality", "验证", "校验", "检查")),
+        (
+            "write",
+            ("write", "writing", "report", "markdown", "draft", "写作", "撰写", "写报告"),
+        ),
+        ("plan", ("plan", "outline", "briefing", "blueprint", "规划", "计划", "大纲")),
+        (
+            "fetch",
+            ("fetch", "crawl", "browser", "scrape", "download", "抓取", "下载", "读取网页"),
+        ),
+        ("search", ("search", "serper", "query", "搜索", "检索", "查询")),
+        (
+            "file_io",
+            ("read_file", "write_file", "reading file", "writing file", "读取文件", "写入文件"),
+        ),
     ]
     for key, markers in stage_patterns:
         if any(marker in normalized for marker in markers):
@@ -39,6 +54,10 @@ def is_low_value_runtime_update(content: str, event_payload: dict) -> bool:
         "writing intermediate files...",
         "finding related files and artifacts...",
         "preparing task configuration files...",
+        "正在读取相关文件...",
+        "正在写入中间文件...",
+        "正在查找相关文件和产物...",
+        "正在准备任务配置文件...",
     }
     return normalized in low_value_messages
 

@@ -11,7 +11,6 @@
 # persist_discovered_artifacts persists discovered artifacts.
 
 import hashlib
-import re
 from datetime import datetime
 from pathlib import Path
 
@@ -24,6 +23,7 @@ from app.core.config import settings
 from app.models import Artifact, Conversation, ConversationShare, RunArtifact
 from app.schemas.artifact_manifest import SUPPORTED_ARTIFACT_MANIFEST_SCHEMAS
 from app.services.agent_run_workspace import run_workspace_dir
+from app.services.artifact_path_utils import canonical_artifact_path_key
 from app.services.artifact_storage import (
     artifact_storage_root,
     store_artifact_file,
@@ -122,8 +122,6 @@ def artifact_content_hash(artifact: Artifact) -> str | None:
     for path in artifact_metadata_paths(metadata):
         content_hash = file_sha256(path)
         if content_hash:
-            metadata["contentHash"] = content_hash
-            artifact.artifact_metadata = metadata
             return content_hash
     return None
 
@@ -144,16 +142,7 @@ def artifact_dedupe_keys(metadata: dict) -> tuple[str, list[str]]:
 
 
 def metadata_path_key(path: str | Path) -> str:
-    value = str(path).strip().strip(".,;:)]}\"'").replace("\\", "/")
-    lower_value = value.lower()
-    if lower_value.startswith("//wsl.localhost/ubuntu/"):
-        return "/" + value.split("/Ubuntu/", maxsplit=1)[1].lower()
-    if lower_value.startswith("//wsl$/ubuntu/"):
-        return "/" + value.split("/Ubuntu/", maxsplit=1)[1].lower()
-    match = re.match(r"^([a-zA-Z]):/(.*)$", value)
-    if match:
-        return f"/mnt/{match.group(1).lower()}/{match.group(2).lower()}"
-    return lower_value
+    return canonical_artifact_path_key(path)
 
 
 def _path_is_within(path: Path, parent: Path) -> bool:

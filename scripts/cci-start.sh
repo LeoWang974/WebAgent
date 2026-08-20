@@ -21,6 +21,7 @@ API_PORT="${API_PORT:-8010}"
 WORKER_POOL="${WORKER_POOL:-solo}"
 WORKER_CONCURRENCY="${WORKER_CONCURRENCY:-1}"
 WORKER_INSTANCES="${WORKER_INSTANCES:-4}"
+SHORT_CHAT_WORKER_INSTANCES="${SHORT_CHAT_WORKER_INSTANCES:-2}"
 SHORT_CHAT_QUEUE_NAME="${SHORT_CHAT_QUEUE_NAME:-short-chat}"
 AGENT_RUN_QUEUE_NAME="${AGENT_RUN_QUEUE_NAME:-agent-runs}"
 CCI_MANAGE_LOCAL_INFRA="${CCI_MANAGE_LOCAL_INFRA:-true}"
@@ -242,11 +243,14 @@ nohup "$PYTHON_BIN" -m uvicorn app.main:app --host 0.0.0.0 --port "$API_PORT" \
   >> "$LOG_DIR/webagent-api.log" 2>&1 &
 echo "$!" > "$RUN_DIR/webagent-api.pid"
 
-nohup "$PYTHON_BIN" -m celery -A app.workers.celery_app.celery_app worker \
-  --hostname="webagent-worker-short@%h" --loglevel=INFO -Q "$SHORT_CHAT_QUEUE_NAME" \
-  --pool="$WORKER_POOL" --concurrency=1 \
-  >> "$LOG_DIR/webagent-worker.log" 2>&1 &
-echo "$!" > "$RUN_DIR/webagent-worker-short.pid"
+for short_worker_index in $(seq 1 "$SHORT_CHAT_WORKER_INSTANCES"); do
+  nohup "$PYTHON_BIN" -m celery -A app.workers.celery_app.celery_app worker \
+    --hostname="webagent-worker-short-${short_worker_index}@%h" \
+    --loglevel=INFO -Q "$SHORT_CHAT_QUEUE_NAME" \
+    --pool="$WORKER_POOL" --concurrency=1 \
+    >> "$LOG_DIR/webagent-worker.log" 2>&1 &
+  echo "$!" > "$RUN_DIR/webagent-worker-short-${short_worker_index}.pid"
+done
 
 for worker_index in $(seq 1 "$WORKER_INSTANCES"); do
   worker_name="webagent-worker-${worker_index}@%h"

@@ -15,6 +15,7 @@ from datetime import datetime
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from app.core.config import settings
+from app.schemas.artifact import ArtifactType
 from app.schemas.artifact_manifest import ARTIFACT_MANIFEST_SCHEMA
 from app.services.artifact_manifest import (
     ARTIFACT_MANIFEST_FILENAME,
@@ -409,21 +410,20 @@ class HermesCliWrapper:
         return cleaned
 
     @staticmethod
-    def _artifact_type_from_path(path: str) -> str:
-        suffix = Path(path).suffix.lower()
-        if suffix == ".md":
-            return "markdown_report"
-        if suffix in {".html", ".htm"}:
-            return "html_page"
-        if suffix == ".pptx":
-            return "ppt_deck"
-        if suffix in {".png", ".jpg", ".jpeg"}:
-            return "image_result"
-        if suffix in {".csv", ".xlsx"}:
-            return "data_table"
-        if suffix == ".json":
-            return "debug_json"
-        return "file"
+    def _artifact_type_from_path(path: str) -> ArtifactType | None:
+        artifact_types: dict[str, ArtifactType] = {
+            ".md": "markdown_report",
+            ".html": "html_page",
+            ".htm": "html_page",
+            ".pptx": "ppt_deck",
+            ".png": "image_result",
+            ".jpg": "image_result",
+            ".jpeg": "image_result",
+            ".csv": "data_table",
+            ".xlsx": "data_table",
+            ".json": "debug_json",
+        }
+        return artifact_types.get(Path(path).suffix.lower())
 
     @staticmethod
     def _source_dir_from_path(path: str) -> str:
@@ -463,6 +463,10 @@ class HermesCliWrapper:
         stable_at: datetime | None = None,
         error: str | None = None,
     ) -> bool:
+        artifact_type = self._artifact_type_from_path(path)
+        if artifact_type is None:
+            logger.debug("Ignoring unsupported artifact path: %s", path)
+            return False
         host_path = self._artifact_host_path(path)
         if (
             status == "ready"
@@ -478,7 +482,6 @@ class HermesCliWrapper:
         if status == "ready" and is_new:
             self.last_artifact_paths.append(path)
 
-        artifact_type = self._artifact_type_from_path(path)
         source_dir = self._source_dir_from_path(path)
         item: dict[str, object] = {
             "artifact_path": path,
@@ -825,9 +828,12 @@ class HermesCliWrapper:
 
     @staticmethod
     def _is_completion_signal(text: str) -> bool:
-        normalized = re.sub(r"\s+", "", text.lower())
+        # Hermes commonly wraps file extensions in Markdown backticks. Match
+        # completion semantics independently of whitespace and punctuation so
+        # a verified final artifact can close the run promptly.
+        normalized = "".join(char for char in text.lower() if char.isalnum())
         completion_markers = [
-            "duration:",
+            "duration",
             "\u62a5\u544a\u5df2\u5b8c\u6210",
             "\u62a5\u544a\u5df2\u751f\u6210",
             "\u62a5\u544a\u5b8c\u6210",
@@ -841,6 +847,10 @@ class HermesCliWrapper:
             "pptx\u5df2\u751f\u6210",
             "pptxissaved",
             "pptxhasbeensaved",
+            "pptxfilehasbeengeneratedandverified",
+            "pptxhasbeengeneratedandverified",
+            "htmlfilehasbeengeneratedandverified",
+            "markdownreporthasbeengeneratedandverified",
             "ppt\u5df2\u751f\u6210",
             "\u8f6c\u6362\u5b8c\u6210",
             "finalreportcompleted",

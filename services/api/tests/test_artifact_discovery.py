@@ -59,10 +59,36 @@ from app.services.artifact_discovery import (
     _wsl_artifact_mtime,
     create_artifacts_from_paths,
     create_artifacts_from_refs,
+    discover_artifacts_since,
     discover_artifacts_with_retry,
     discover_related_artifact_paths,
     extract_artifact_path_strings,
 )
+
+
+def test_discover_artifacts_since_uses_supplied_archive_directory(
+    monkeypatch,
+    tmp_path: Path,
+):
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    report = source_dir / "report.md"
+    report.write_text("# Report\n", encoding="utf-8")
+    archive_dir = tmp_path / "archive"
+    monkeypatch.setattr(
+        "app.services.artifact_discovery._candidate_roots",
+        lambda: [source_dir],
+    )
+
+    artifacts = discover_artifacts_since(
+        "session-1",
+        datetime.now() - timedelta(seconds=5),
+        archive_dir=archive_dir,
+    )
+
+    assert len(artifacts) == 1
+    assert artifacts[0].metadata
+    assert Path(str(artifacts[0].metadata["path"])).parent == archive_dir.resolve()
 
 
 def test_create_artifacts_archives_into_supplied_run_directory(tmp_path: Path):
@@ -117,6 +143,33 @@ async def test_authoritative_manifest_discovery_skips_related_directory_scan(
     )
 
     assert [artifact.title for artifact in artifacts] == ["Manifest report"]
+
+
+@pytest.mark.asyncio
+async def test_legacy_discovery_merges_partial_refs_and_explicit_paths(tmp_path: Path):
+    report = tmp_path / "report.md"
+    deck = tmp_path / "deck.pptx"
+    report.write_text("# Report\n", encoding="utf-8")
+    deck.write_bytes(b"pptx-placeholder")
+
+    artifacts = await discover_artifacts_with_retry(
+        "session-1",
+        datetime.now(),
+        [str(report), str(deck)],
+        "run-1",
+        [
+            AgentArtifactRef(
+                path=str(report),
+                artifact_type="markdown_report",
+                run_id="run-1",
+                source_dir=str(tmp_path),
+                title="Report",
+            )
+        ],
+        archive_dir=tmp_path / "archive",
+    )
+
+    assert {artifact.type for artifact in artifacts} == {"markdown_report", "ppt_deck"}
 
 
 def test_windows_path_to_wsl_normalizes_backslashes(monkeypatch):

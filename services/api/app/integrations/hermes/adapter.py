@@ -2,11 +2,21 @@
 # Main declarations: now_iso handles now iso; HermesAdapter defines hermes adapter state or
 # behavior.
 
+import re
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 
 from .cli import HermesCliWrapper
 from .schemas import AgentArtifactRef, AgentRunCreate, AgentRunEvent, AgentRunStep
+
+RECOVERABLE_TOOL_STALL_MARKERS = (
+    "stream stalled mid tool-call",
+    "the action was not executed",
+)
+EXPLICIT_ARTIFACT_SUFFIX_RE = re.compile(
+    r"\.(?:md|html?|pptx|png|jpe?g|csv|xlsx)\b",
+    re.IGNORECASE,
+)
 
 
 def now_iso() -> str:
@@ -38,39 +48,112 @@ class HermesAdapter:
         input_data: AgentRunCreate,
     ) -> AsyncGenerator[AgentRunEvent, None]:
         event_index = 0
+        run_id = input_data.run_id or input_data.session_id
+        requested_suffix = self._explicit_artifact_suffix(input_data.content)
 
-        async for event in self.cli.ask_stream_events(
-            question=input_data.content,
-            session_id=self.resume_session_id,
-            run_id=input_data.run_id,
-            conversation_id=input_data.session_id,
-            working_dir=input_data.working_dir,
-            artifacts_dir=input_data.artifacts_dir,
-        ):
-            if hasattr(event, "content"):
-                content = str(event.content or "").strip()
-                event_type = str(getattr(event, "event_type", "stage_update") or "stage_update")
-                payload = event.to_payload() if hasattr(event, "to_payload") else {}
-            else:
-                content = str(event.get("content") or "").strip()
-                event_type = str(event.get("event_type") or "stage_update")
-                payload = dict(event.get("payload") or {})
-            if not content:
-                continue
-            event_index += 1
-            yield AgentRunEvent(
-                run_id=input_data.run_id or input_data.session_id,
-                event_type=event_type,
-                status="running",
-                progress=min(90, 10 + event_index * 8),
-                payload=payload,
-                step=AgentRunStep(
-                    id=f"{input_data.run_id or input_data.session_id}_stage_{event_index}",
-                    label=content,
-                    status="completed",
-                    timestamp=now_iso(),
-                ),
+        for attempt in range(2):
+            recoverable_stall = False
+            async for event in self.cli.ask_stream_events(
+                question=input_data.content,
+                session_id=self.resume_session_id if attempt == 0 else None,
+                run_id=input_data.run_id,
+                conversation_id=input_data.session_id,
+                working_dir=input_data.working_dir,
+                artifacts_dir=input_data.artifacts_dir,
+            ):
+                if hasattr(event, "content"):
+                    content = str(event.content or "").strip()
+                    event_type = str(
+                        getattr(event, "event_type", "stage_update") or "stage_update"
+                    )
+                    payload = event.to_payload() if hasattr(event, "to_payload") else {}
+                else:
+                    content = str(event.get("content") or "").strip()
+                    event_type = str(event.get("event_type") or "stage_update")
+                    payload = dict(event.get("payload") or {})
+                if not content:
+                    continue
+                if self._is_recoverable_tool_stall(content):
+                    recoverable_stall = True
+                    if attempt == 0 and not self.cli.last_artifact_paths:
+                        continue
+                event_index += 1
+                yield AgentRunEvent(
+                    run_id=run_id,
+                    event_type=event_type,
+                    status="running",
+                    progress=min(90, 10 + event_index * 8),
+                    payload=payload,
+                    step=AgentRunStep(
+                        id=f"{run_id}_stage_{event_index}",
+                        label=content,
+                        status="completed",
+                        timestamp=now_iso(),
+                    ),
+                )
+
+            diagnostics = self.cli.last_diagnostics or {}
+            diagnostic_text = "\n".join(
+                str(diagnostics.get(key) or "")
+                for key in ("last_stage", "stdout_tail", "stderr_tail")
             )
+            incomplete_handoff = self._is_incomplete_artifact_handoff(
+                diagnostic_text,
+                requested_suffix,
+            )
+            should_retry = (
+                attempt == 0
+                and not self.cli.last_artifact_paths
+                and (recoverable_stall or incomplete_handoff)
+            )
+            if should_retry:
+                event_index += 1
+                yield AgentRunEvent(
+                    run_id=run_id,
+                    event_type="stage_started",
+                    status="running",
+                    progress=min(90, 10 + event_index * 8),
+                    payload={
+                        "protocol": "hermes.stream.v1",
+                        "recoveryAttempt": 1,
+                        "recoveryReason": (
+                            "stalled_tool_call"
+                            if recoverable_stall
+                            else "incomplete_artifact_handoff"
+                        ),
+                    },
+                    step=AgentRunStep(
+                        id=f"{run_id}_stage_{event_index}",
+                        label="Hermes 工具输出中断，正在使用干净会话重试一次...",
+                        status="completed",
+                        timestamp=now_iso(),
+                    ),
+                )
+                continue
+            break
+
+    @staticmethod
+    def _is_recoverable_tool_stall(content: str) -> bool:
+        normalized = " ".join(content.lower().split())
+        return all(marker in normalized for marker in RECOVERABLE_TOOL_STALL_MARKERS)
+
+    @staticmethod
+    def _explicit_artifact_suffix(content: str) -> str | None:
+        matches = list(EXPLICIT_ARTIFACT_SUFFIX_RE.finditer(content))
+        return matches[-1].group(0).lower() if matches else None
+
+    @staticmethod
+    def _is_incomplete_artifact_handoff(
+        content: str,
+        requested_suffix: str | None,
+    ) -> bool:
+        if not requested_suffix or requested_suffix not in content.lower():
+            return False
+        normalized = " ".join(content.lower().split())
+        return (
+            ("执行" in normalized and "即可生成" in normalized)
+            or ("run " in normalized and "to generate" in normalized)
+        )
 
     def get_last_artifact_paths(self) -> list[str]:
         return list(self.cli.last_artifact_paths)

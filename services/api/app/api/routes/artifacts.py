@@ -23,7 +23,9 @@ from sqlalchemy import exists, or_, select, true
 
 from app import schemas
 from app.api.dependencies import CurrentUser, DbSession
+from app.core.config import settings
 from app.models import Artifact, Conversation, ConversationShare, RunArtifact
+from app.services.artifact_path_utils import artifact_path_for_host
 from app.services.persistence import (
     get_conversation_or_404,
     require_owner,
@@ -123,15 +125,10 @@ def is_deck_slide_artifact(artifact: Artifact) -> bool:
 
 
 def normalize_artifact_path(raw_path: str) -> Path:
-    cleaned = raw_path.strip().strip(".,;:)]}\"'")
-    normalized = cleaned.replace("\\", "/")
-    if normalized.startswith("/mnt/") and len(normalized) > 6 and normalized[6] == "/":
-        drive = normalized[5].upper()
-        rest = normalized[7:].replace("/", "\\")
-        return Path(f"{drive}:\\{rest}")
-    if normalized.startswith("/home/"):
-        return Path(r"\\wsl.localhost\Ubuntu") / normalized.lstrip("/").replace("/", "\\")
-    return Path(cleaned)
+    return artifact_path_for_host(
+        raw_path,
+        wsl_distribution=settings.hermes_wsl_distribution,
+    )
 
 
 def deck_slide_directories(artifact: Artifact) -> list[Path]:

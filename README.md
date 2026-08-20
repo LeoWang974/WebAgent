@@ -90,7 +90,11 @@ The scripts start:
 
 - Next.js on `0.0.0.0:3000`.
 - FastAPI on `127.0.0.1:8010`.
-- A Celery worker consuming `short-chat` and `agent-runs`.
+- Two `short-chat` Celery workers and two independent `agent-runs` workers.
+
+The CCI launcher defaults to two short-chat workers and four long-task workers.
+Override `SHORT_CHAT_WORKER_INSTANCES`, `WORKER_INSTANCES`, or
+`WORKER_CONCURRENCY` in the CCI environment when capacity requirements change.
 
 Use the following command to stop all three processes:
 

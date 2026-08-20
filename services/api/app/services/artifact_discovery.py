@@ -34,7 +34,7 @@ import subprocess
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 from app import schemas
 from app.core.config import settings
@@ -42,6 +42,10 @@ from app.schemas.artifact import ArtifactType
 from app.schemas.artifact_manifest import SUPPORTED_ARTIFACT_MANIFEST_SCHEMAS
 from app.services.agent_run_workspace import run_artifacts_dir
 from app.services.artifact_dedupe import dedupe_discovered_artifacts
+from app.services.artifact_path_utils import (
+    artifact_path_for_host,
+    canonical_artifact_path_key,
+)
 
 SUPPORTED_SUFFIXES = {
     ".csv",
@@ -124,13 +128,19 @@ async def discover_artifacts_with_retry(
             run_id,
             archive_dir=archive_dir,
         )
-        if not discovered_artifacts:
-            discovered_artifacts = await asyncio.to_thread(
+        # A legacy adapter may return rich refs for only some outputs while
+        # exposing the remaining files through artifact_paths. Merge both
+        # sources so one valid ref cannot hide another generated artifact.
+        if not authoritative_manifest or not discovered_artifacts:
+            path_artifacts = await asyncio.to_thread(
                 create_artifacts_from_paths,
                 session_id,
                 explicit_artifact_paths,
                 run_id,
                 archive_dir=archive_dir,
+            )
+            discovered_artifacts = dedupe_discovered_artifacts(
+                [*discovered_artifacts, *path_artifacts]
             )
         if discovered_artifacts and not authoritative_manifest:
             related_paths = await asyncio.to_thread(
@@ -168,6 +178,7 @@ async def discover_artifacts_with_retry(
                 session_id,
                 since,
                 run_id,
+                archive_dir=archive_dir,
             )
         if discovered_artifacts or attempt == attempt_count - 1:
             return dedupe_discovered_artifacts(discovered_artifacts)
@@ -473,15 +484,7 @@ def _file_sha256(path: Path) -> str | None:
 
 
 def _normalized_path_key(path: str | Path) -> str:
-    value = str(path).strip().strip(".,;:)]}\"'").replace("\\", "/")
-    lower_value = value.lower()
-    wsl_match = re.match(r"^//(?:wsl\.localhost|wsl\$)/[^/]+/(.*)$", value, re.IGNORECASE)
-    if wsl_match:
-        return "/" + wsl_match.group(1).lower()
-    match = re.match(r"^([a-zA-Z]):/(.*)$", value)
-    if match:
-        return f"/mnt/{match.group(1).lower()}/{match.group(2).lower()}"
-    return lower_value
+    return canonical_artifact_path_key(path)
 
 
 def _artifact_type(path: Path) -> ArtifactType:
@@ -550,7 +553,7 @@ def _artifact_role(path: Path, artifact_type: ArtifactType) -> str:
 
 
 def _valid_artifact_type(value: object, fallback: ArtifactType) -> ArtifactType:
-    supported = set(ArtifactType.__args__)
+    supported = set(get_args(ArtifactType))
     return value if isinstance(value, str) and value in supported else fallback
 
 
@@ -697,17 +700,11 @@ def _normalize_path(raw_path: str) -> Path:
         return _repo_root() / relative_match
     if "/" not in relative_match and Path(relative_match).suffix.lower() in SUPPORTED_SUFFIXES:
         return _resolve_bare_artifact_filename(relative_match) or _repo_root() / relative_match
-    if match.startswith("/mnt/") and len(match) > 6 and match[6] == "/":
-        drive = match[5].upper()
-        rest = match[7:].replace("/", "\\")
-        return Path(f"{drive}:\\{rest}")
-    if match.startswith("/home/"):
-        if os.name == "nt":
-            distro = settings.hermes_wsl_distribution.strip() or "Ubuntu"
-            return Path(f"\\\\wsl.localhost\\{distro}") / match.lstrip("/").replace(
-                "/", "\\"
-            )
-        return Path(match)
+    if match.startswith(("/mnt/", "/home/")):
+        return artifact_path_for_host(
+            match,
+            wsl_distribution=settings.hermes_wsl_distribution,
+        )
     return Path(raw_path.strip().strip(".,;:)]}\"'"))
 
 
@@ -716,12 +713,16 @@ def _archive_artifact_path(
     run_id: str | None,
     archive_dir: Path | None = None,
 ) -> Path:
-    if not run_id:
+    if not run_id and archive_dir is None:
         return path
     if not _is_regular_artifact_candidate(path):
         return path
 
-    artifact_dir = (archive_dir or _runtime_artifacts_dir(run_id)).expanduser().resolve()
+    artifact_dir = (
+        archive_dir
+        if archive_dir is not None
+        else _runtime_artifacts_dir(str(run_id))
+    ).expanduser().resolve()
     artifact_dir.mkdir(parents=True, exist_ok=True)
     try:
         path.resolve().relative_to(artifact_dir)
@@ -1074,6 +1075,8 @@ def discover_artifacts_since(
     session_id: str,
     since: datetime,
     run_id: str | None = None,
+    *,
+    archive_dir: Path | None = None,
 ) -> list[schemas.Artifact]:
     since = _as_local_naive(since)
     discovered: list[schemas.Artifact] = []
@@ -1098,7 +1101,7 @@ def discover_artifacts_since(
                 continue
             readable_path, temp_dir = _materialize_wsl_artifact(path)
             try:
-                archived_path = _archive_artifact_path(readable_path, run_id)
+                archived_path = _archive_artifact_path(readable_path, run_id, archive_dir)
                 artifact = _artifact_from_path(
                     session_id,
                     archived_path,

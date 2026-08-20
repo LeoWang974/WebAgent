@@ -24,6 +24,7 @@ from app.services.agent_run_artifact_service import (
     final_assistant_message,
 )
 from app.services.agent_run_control import (
+    AgentRunCancellationPoller,
     AgentRunCancelled,
     AgentRunTimeout,
     is_agent_run_cancelled,
@@ -142,10 +143,11 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
     last_run_touch_monotonic = run_started_monotonic
     model_runtime_config = None
     adapter_lock_scope_value = runtime_adapter_lock_scope(user_id, conversation_id)
+    cancellation_poller = AgentRunCancellationPoller()
 
     try:
         async def on_adapter_capacity_wait(elapsed_seconds: float) -> None:
-            if await is_agent_run_cancelled(db, run_id_value):
+            if await cancellation_poller.is_cancelled(db, run_id_value):
                 raise AgentRunCancelled()
             await record_db_agent_run_event(
                 db,
@@ -205,7 +207,7 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
             run_id=run_id_value,
             model_runtime_config=model_runtime_config,
         )
-        if await is_agent_run_cancelled(db, run_id_value):
+        if await cancellation_poller.is_cancelled(db, run_id_value, force=True):
             raise AgentRunCancelled()
         run.adapter_key = current_adapter_key
         logger.info(
@@ -247,7 +249,7 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
                 "adapterLockScope": user_runtime_context.adapter_lock_scope(),
             },
         )
-        if await is_agent_run_cancelled(db, run_id_value):
+        if await cancellation_poller.is_cancelled(db, run_id_value, force=True):
             raise AgentRunCancelled()
 
         from app.integrations.hermes import AgentRunCreate as AdapterAgentRunCreate
@@ -309,7 +311,7 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
                     ),
                 ) from error
 
-            if await is_agent_run_cancelled(db, run_id_value):
+            if await cancellation_poller.is_cancelled(db, run_id_value):
                 raise AgentRunCancelled()
 
             if hasattr(chunk, "step"):
@@ -396,7 +398,7 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
                 },
             )
 
-        if await is_agent_run_cancelled(db, run_id_value):
+        if await cancellation_poller.is_cancelled(db, run_id_value, force=True):
             diagnostics = (
                 adapter.get_last_diagnostics()
                 if hasattr(adapter, "get_last_diagnostics")

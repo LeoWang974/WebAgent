@@ -53,6 +53,10 @@ EXPLICIT_OUTPUT_PATH_RE = re.compile(
     r"\s*[`\"']?(?P<path>[^`\"'\r\n]+?\.(?:md|html?|pptx|png|jpe?g|csv|xlsx))",
     re.IGNORECASE,
 )
+EXPLICIT_ARTIFACT_SUFFIX_RE = re.compile(
+    r"(?P<path>\.(?:md|html?|pptx|png|jpe?g|csv|xlsx))\b",
+    re.IGNORECASE,
+)
 ARTIFACT_TYPE_BY_SUFFIX = {
     ".md": "markdown_report",
     ".html": "html_page",
@@ -64,6 +68,15 @@ ARTIFACT_TYPE_BY_SUFFIX = {
     ".csv": "data_table",
     ".xlsx": "data_table",
 }
+# JSON is intentionally absent: debug/intermediate JSON remains discoverable
+# as debug_json, but it is not a user-facing primary output contract.
+ARTIFACT_EVENT_TYPES = {
+    "artifact_found",
+    "artifact_manifest_finalized",
+    "artifact_state",
+    "completed",
+}
+
 
 def _diagnostic_text(adapter: object, assistant_output: str) -> str:
     diagnostics = getattr(adapter, "last_diagnostics", {}) or {}
@@ -86,8 +99,15 @@ def raise_for_fatal_runtime_diagnostics(adapter: object, assistant_output: str) 
 def explicit_requested_artifact_type(content: str) -> str | None:
     matches = list(EXPLICIT_OUTPUT_PATH_RE.finditer(content))
     if not matches:
+        matches = list(EXPLICIT_ARTIFACT_SUFFIX_RE.finditer(content))
+    if not matches:
         return None
-    suffix = Path(matches[-1].group("path").strip()).suffix.lower()
+    requested_path = matches[-1].group("path").strip()
+    suffix = (
+        requested_path.lower()
+        if requested_path.lower() in ARTIFACT_TYPE_BY_SUFFIX
+        else Path(requested_path).suffix.lower()
+    )
     return ARTIFACT_TYPE_BY_SUFFIX.get(suffix)
 
 
@@ -153,7 +173,10 @@ def _manifest_artifact_refs(
 
 async def _event_artifact_paths(db: AsyncSession, run_id: str) -> list[str]:
     result = await db.execute(
-        select(AgentRunEvent.payload).where(AgentRunEvent.run_id == run_id)
+        select(AgentRunEvent.payload).where(
+            AgentRunEvent.run_id == run_id,
+            AgentRunEvent.event_type.in_(ARTIFACT_EVENT_TYPES),
+        )
     )
     return list(
         dict.fromkeys(

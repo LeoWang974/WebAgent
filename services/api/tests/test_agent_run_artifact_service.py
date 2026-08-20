@@ -19,7 +19,7 @@ import pytest
 
 from app import schemas
 from app.core.config import settings
-from app.models import Conversation
+from app.models import Artifact, Conversation
 from app.services.agent_run_artifact_service import (
     explicit_requested_artifact_type,
     raise_for_fatal_runtime_diagnostics,
@@ -27,9 +27,25 @@ from app.services.agent_run_artifact_service import (
 )
 from app.services.session_artifacts import (
     _artifact_match_keys,
+    artifact_content_hash,
     metadata_path_key,
     organize_artifact_schema,
 )
+
+
+def test_artifact_content_hash_does_not_mutate_metadata(tmp_path: Path):
+    output = tmp_path / "report.md"
+    output.write_text("# Report\n", encoding="utf-8")
+    artifact = Artifact(
+        conversation_id="conversation-1",
+        type="markdown_report",
+        title="Report",
+        status="ready",
+        artifact_metadata={"path": str(output)},
+    )
+
+    assert artifact_content_hash(artifact)
+    assert artifact.artifact_metadata == {"path": str(output)}
 
 
 class _Adapter:
@@ -88,6 +104,26 @@ def test_explicit_requested_artifact_type_uses_declared_output_path():
     content = "读取 ./reports/source.html，保存为 ./reports/final.pptx。"
 
     assert explicit_requested_artifact_type(content) == "ppt_deck"
+
+
+@pytest.mark.parametrize(
+    ("content", "expected_type"),
+    [
+        ("生成 4 页演示文稿，并真正导出为可下载的 .pptx 文件。", "ppt_deck"),
+        ("Create a real downloadable .pptx file.", "ppt_deck"),
+        ("Export a standalone .html file.", "html_page"),
+        ("输出 .md 文件。", "markdown_report"),
+    ],
+)
+def test_explicit_requested_artifact_type_accepts_standalone_extension(
+    content: str,
+    expected_type: str,
+):
+    assert explicit_requested_artifact_type(content) == expected_type
+
+
+def test_explicit_json_is_not_treated_as_a_primary_output_contract():
+    assert explicit_requested_artifact_type("Export ./reports/debug.json") is None
 
 
 def test_explicit_output_validation_rejects_missing_requested_type():

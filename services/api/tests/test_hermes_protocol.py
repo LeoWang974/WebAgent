@@ -31,6 +31,14 @@ import pytest
 from app.integrations.hermes import HermesCliWrapper
 
 
+def test_hermes_ignores_unknown_artifact_suffix_instead_of_recording_invalid_type():
+    wrapper = HermesCliWrapper()
+
+    assert wrapper._artifact_type_from_path("/tmp/output.bin") is None
+    assert wrapper._remember_artifact_path("/tmp/output.bin") is False
+    assert wrapper.last_artifacts == []
+
+
 def test_hermes_recovers_latest_assistant_message_from_session(tmp_path: Path):
     hermes_home = tmp_path / "hermes-home"
     sessions_dir = hermes_home / "sessions"
@@ -83,6 +91,18 @@ def test_hermes_completion_signal_accepts_chinese_and_mojibake():
     assert HermesCliWrapper._is_completion_signal(ppt_completed)
     assert HermesCliWrapper._is_completion_signal(report_completed)
     assert HermesCliWrapper._is_completion_signal("Duration:       18m 1s")
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "The `.pptx` file has been generated and verified.",
+        "The HTML file has been generated and verified.",
+        "The Markdown report has been generated and verified.",
+    ],
+)
+def test_hermes_completion_signal_accepts_verified_english_artifacts(message: str):
+    assert HermesCliWrapper._is_completion_signal(message)
 
 
 def test_hermes_box_parser_accepts_mojibake_box_prefixes():
