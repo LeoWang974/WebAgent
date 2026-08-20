@@ -7,7 +7,9 @@
 # persist_message persists message; to_artifact converts artifact; get_conversation_or_404
 # retrieves conversation or 404; require_owner handles require owner.
 
+import base64
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, Header, HTTPException, status
@@ -215,8 +217,47 @@ async def persist_message(
     return message
 
 
-def to_artifact(artifact: Artifact, *, include_payload: bool = True) -> schemas.Artifact:
+def to_artifact(
+    artifact: Artifact,
+    *,
+    include_payload: bool = True,
+    run_id_override: str | None = None,
+) -> schemas.Artifact:
     metadata = artifact.artifact_metadata
+    if metadata is not None and include_payload and artifact.type == "image_result":
+        metadata = dict(metadata)
+        images = metadata.get("images")
+        has_preview_url = isinstance(images, list) and any(
+            isinstance(item, dict) and isinstance(item.get("url"), str) and item.get("url")
+            for item in images
+        )
+        if not has_preview_url:
+            image_path = next(
+                (
+                    Path(value)
+                    for value in (metadata.get("path"), metadata.get("originalPath"))
+                    if isinstance(value, str) and value and Path(value).is_file()
+                ),
+                None,
+            )
+            if image_path is not None:
+                try:
+                    encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
+                except OSError:
+                    pass
+                else:
+                    mime = (
+                        "image/png"
+                        if image_path.suffix.lower() == ".png"
+                        else "image/jpeg"
+                    )
+                    metadata["images"] = [
+                        {
+                            "id": artifact.id,
+                            "prompt": artifact.title,
+                            "url": f"data:{mime};base64,{encoded}",
+                        }
+                    ]
     if metadata is not None and not include_payload:
         metadata = dict(metadata)
         metadata.pop("images", None)
@@ -227,7 +268,7 @@ def to_artifact(artifact: Artifact, *, include_payload: bool = True) -> schemas.
         id=artifact.id,
         is_primary=artifact.is_primary,
         session_id=artifact.conversation_id,
-        run_id=artifact.run_id,
+        run_id=run_id_override or artifact.run_id,
         type=artifact.type,
         title=artifact.title,
         status=artifact.status,

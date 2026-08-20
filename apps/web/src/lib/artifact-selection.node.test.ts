@@ -120,3 +120,17 @@ test("ppt deck wins over newer HTML slide fallback", () => {
 
   assert.equal(selected?.id, "deck");
 });
+
+test("pending artifacts never become the active preview", () => {
+  const pendingDeck = artifact("pending-deck", "ppt_deck", { status: "staging" });
+
+  assert.equal(selectPreferredArtifact([pendingDeck]), undefined);
+  assert.equal(
+    shouldSelectCreatedArtifact({
+      currentSelectedArtifact: undefined,
+      eventArtifact: pendingDeck,
+      selectedBelongsToTargetMessage: false,
+    }),
+    false,
+  );
+});

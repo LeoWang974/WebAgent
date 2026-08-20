@@ -14,9 +14,15 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
+from app.core.config import settings
+from app.schemas.artifact_manifest import ARTIFACT_MANIFEST_SCHEMA
 from app.services.artifact_manifest import (
     ARTIFACT_MANIFEST_FILENAME,
     ArtifactManifestRecorder,
+)
+from app.services.run_artifact_watcher import (
+    ArtifactFileTransition,
+    RunArtifactWatcher,
 )
 
 from .process_registry import (
@@ -153,6 +159,7 @@ class HermesCliWrapper:
         self.last_artifacts: list[dict[str, object]] = []
         self.last_diagnostics: dict[str, object] = {}
         self.artifact_manifest_recorder: ArtifactManifestRecorder | None = None
+        self.artifact_watcher: RunArtifactWatcher | None = None
         self.active_processes: dict[str, asyncio.subprocess.Process] = {}
         self.cancelled_run_ids: set[str] = set()
 
@@ -450,9 +457,25 @@ class HermesCliWrapper:
         path: str,
         *,
         discovered_by: str = "terminal_output",
+        status: str = "ready",
+        size_bytes: int | None = None,
+        mtime_ns: int | None = None,
+        stable_at: datetime | None = None,
+        error: str | None = None,
     ) -> bool:
+        host_path = self._artifact_host_path(path)
+        if (
+            status == "ready"
+            and discovered_by != "file_watcher"
+            and self.artifact_watcher is not None
+            and host_path.expanduser().resolve().is_relative_to(self.artifact_watcher.root)
+        ):
+            # Managed run outputs are authoritative only after the watcher has
+            # observed a stable size and mtime window.
+            self.artifact_watcher.track(host_path)
+            return False
         is_new = path not in self.last_artifact_paths
-        if is_new:
+        if status == "ready" and is_new:
             self.last_artifact_paths.append(path)
 
         artifact_type = self._artifact_type_from_path(path)
@@ -463,9 +486,9 @@ class HermesCliWrapper:
             "run_id": None,
             "source_dir": source_dir,
             "title": PurePosixPath(path.replace("\\", "/")).stem,
+            "status": status,
         }
         if self.artifact_manifest_recorder is not None:
-            host_path = self._artifact_host_path(path)
             entry = self.artifact_manifest_recorder.record(
                 path=path,
                 artifact_type=artifact_type,
@@ -473,7 +496,12 @@ class HermesCliWrapper:
                 role=self._manifest_artifact_role(path, artifact_type),
                 discovered_by=discovered_by,
                 source_dir=source_dir,
-                source_file=host_path if host_path.is_file() else None,
+                source_file=host_path if status == "ready" and host_path.is_file() else None,
+                status=status,
+                size_bytes=size_bytes,
+                mtime_ns=mtime_ns,
+                stable_at=stable_at,
+                error=error,
             )
             item.update(
                 {
@@ -481,11 +509,16 @@ class HermesCliWrapper:
                     "role": entry.role,
                     "status": entry.status,
                     "discovered_by": entry.discovered_by,
+                    "path_scope": entry.path_scope,
                     "size_bytes": entry.size_bytes,
                     "sha256": entry.sha256,
-                    "manifest_schema": "webagent.artifacts.v2",
+                    "manifest_schema": ARTIFACT_MANIFEST_SCHEMA,
                 }
             )
+            status = entry.status
+            item["status"] = status
+            if status != "ready" and path in self.last_artifact_paths:
+                self.last_artifact_paths.remove(path)
 
         existing_index = next(
             (
@@ -499,7 +532,7 @@ class HermesCliWrapper:
             self.last_artifacts.append(item)
         else:
             self.last_artifacts[existing_index] = item
-        return is_new
+        return status == "ready" and is_new
 
     def _remember_artifact_paths(self, text: str) -> None:
         cleaned_text = ANSI_RE.sub("", text).replace("\r", "\n")
@@ -570,6 +603,7 @@ class HermesCliWrapper:
         working_dir: str | None,
         artifacts_dir: str | None,
         started_at: datetime,
+        failed_paths: set[Path] | None = None,
     ) -> None:
         """Perform a final, run-scoped filesystem discovery after Hermes exits."""
 
@@ -601,6 +635,7 @@ class HermesCliWrapper:
                 try:
                     if (
                         candidate.is_file()
+                        and candidate.resolve() not in (failed_paths or set())
                         and candidate.suffix.lower() in ARTIFACT_SUFFIXES
                         and not self._is_runtime_dependency_path(candidate)
                         and candidate.stat().st_mtime >= threshold
@@ -703,7 +738,7 @@ class HermesCliWrapper:
             event_payload.update(
                 {
                     "artifactManifestPath": str(self.artifact_manifest_recorder.path),
-                    "artifactManifestSchema": "webagent.artifacts.v2",
+                    "artifactManifestSchema": ARTIFACT_MANIFEST_SCHEMA,
                     "artifactManifestStatus": self.artifact_manifest_recorder.manifest.status,
                 }
             )
@@ -929,6 +964,7 @@ class HermesCliWrapper:
         self.last_artifact_paths = []
         self.last_artifacts = []
         self.artifact_manifest_recorder = None
+        self.artifact_watcher = None
         stream_started_at = datetime.now()
         process_cwd: str | None = None
         managed_environment_keys = (
@@ -970,13 +1006,23 @@ class HermesCliWrapper:
             self._env["WEBAGENT_CONVERSATION_ID"] = conversation_id
         if run_id:
             self._env["WEBAGENT_RUN_ID"] = run_id
-        self._env["WEBAGENT_RUNTIME_POLICY"] = "managed-artifacts-v2"
+        self._env["WEBAGENT_RUNTIME_POLICY"] = "managed-artifacts-v3"
+        artifact_watcher: RunArtifactWatcher | None = None
         if run_id and artifacts_dir:
             self.artifact_manifest_recorder = ArtifactManifestRecorder(
                 Path(artifacts_dir).expanduser() / ARTIFACT_MANIFEST_FILENAME,
                 run_id=run_id,
                 conversation_id=conversation_id,
+                workspace_dir=working_dir,
+                artifacts_dir=artifacts_dir,
             )
+            artifact_watcher = RunArtifactWatcher(
+                Path(working_dir or artifacts_dir).expanduser(),
+                poll_interval_seconds=settings.artifact_watcher_poll_interval_seconds,
+                stable_seconds=settings.artifact_watcher_stable_seconds,
+                stable_samples=settings.artifact_watcher_stable_samples,
+            )
+            self.artifact_watcher = artifact_watcher
         self.last_diagnostics = {
             "artifact_paths": [],
             "artifacts": [],
@@ -988,7 +1034,7 @@ class HermesCliWrapper:
             "working_dir": working_dir,
             "artifacts_dir": artifacts_dir,
             "conversation_id": conversation_id,
-            "runtime_policy": "managed-artifacts-v2",
+            "runtime_policy": "managed-artifacts-v3",
             "runtime_instruction_injected": False,
             "artifact_manifest_path": (
                 str(self.artifact_manifest_recorder.path)
@@ -996,7 +1042,7 @@ class HermesCliWrapper:
                 else None
             ),
             "artifact_manifest_schema": (
-                "webagent.artifacts.v2"
+                ARTIFACT_MANIFEST_SCHEMA
                 if self.artifact_manifest_recorder is not None
                 else None
             ),
@@ -1053,6 +1099,7 @@ class HermesCliWrapper:
         last_raw_summary_emit = datetime.min
         raw_activity_interval_seconds = 60
         should_stop_on_completion_signal = True
+        last_artifact_poll_monotonic = 0.0
 
         async def stop_after_completion() -> None:
             if process.returncode is not None:
@@ -1090,6 +1137,71 @@ class HermesCliWrapper:
                     "stderrTail": stderr_tail[-1000:],
                 },
             )
+
+        def artifact_transition_events(
+            transitions: list[ArtifactFileTransition],
+        ) -> list[HermesStreamEvent]:
+            events: list[HermesStreamEvent] = []
+            for transition in transitions:
+                artifact_path = str(transition.path.resolve())
+                self._remember_artifact_path(
+                    artifact_path,
+                    discovered_by="file_watcher",
+                    status=transition.status,
+                    size_bytes=transition.size_bytes,
+                    mtime_ns=transition.mtime_ns,
+                    stable_at=transition.stable_at,
+                    error=transition.error,
+                )
+                artifact_item = next(
+                    (
+                        item
+                        for item in self.last_artifacts
+                        if item.get("artifact_path") == artifact_path
+                    ),
+                    {},
+                )
+                events.append(
+                    self._build_stream_event(
+                        content=f"Artifact {transition.path.name} is {transition.status}.",
+                        raw_log_path=raw_log_path,
+                        run_id=run_id,
+                        completion_detected=False,
+                        event_type_override="artifact_state",
+                        payload={
+                            "artifactState": transition.status,
+                            "artifactPath": artifact_path,
+                            "artifactType": self._artifact_type_from_path(artifact_path),
+                            "artifactTitle": transition.path.stem,
+                            "artifactRole": artifact_item.get("role"),
+                            "manifestEntryId": artifact_item.get("entry_id"),
+                            "manifestSchema": ARTIFACT_MANIFEST_SCHEMA,
+                            "pathScope": artifact_item.get("path_scope"),
+                            "sizeBytes": transition.size_bytes,
+                            "mtimeNs": transition.mtime_ns,
+                            "stableAt": (
+                                transition.stable_at.isoformat()
+                                if transition.stable_at
+                                else None
+                            ),
+                            "error": transition.error,
+                        },
+                    )
+                )
+            return events
+
+        def poll_artifact_watcher() -> list[ArtifactFileTransition]:
+            nonlocal last_artifact_poll_monotonic
+            if artifact_watcher is None:
+                return []
+            now_monotonic = asyncio.get_running_loop().time()
+            if (
+                now_monotonic - last_artifact_poll_monotonic
+                < artifact_watcher.poll_interval_seconds
+            ):
+                return []
+            last_artifact_poll_monotonic = now_monotonic
+            return artifact_watcher.poll()
 
         def parse_box_line(raw_line: str) -> tuple[bool, bool, str | None]:
             cleaned = self._clean_line(raw_line)
@@ -1173,17 +1285,31 @@ class HermesCliWrapper:
                         if completion_detected and should_stop_on_completion_signal
                         else raw_activity_interval_seconds
                     )
+                    if artifact_watcher is not None:
+                        completion_timeout = min(
+                            completion_timeout,
+                            artifact_watcher.poll_interval_seconds,
+                        )
                     raw_line = await asyncio.wait_for(
                         line_queue.get(),
                         timeout=completion_timeout,
                     )
                 except TimeoutError:
+                    if artifact_watcher is not None:
+                        for artifact_event in artifact_transition_events(
+                            poll_artifact_watcher()
+                        ):
+                            yield artifact_event
                     if completion_detected and should_stop_on_completion_signal:
                         await stop_after_completion()
                         break
                     if process.returncode is not None:
                         break
                     now = datetime.now()
+                    if (
+                        now - last_raw_activity_emit
+                    ).total_seconds() < raw_activity_interval_seconds:
+                        continue
                     last_raw_activity_emit = now
                     yield heartbeat_event(
                         "Hermes 正在执行工具调用，等待下一段运行输出...",
@@ -1194,6 +1320,12 @@ class HermesCliWrapper:
                 if raw_line is None:
                     finished_streams += 1
                     continue
+
+                if artifact_watcher is not None:
+                    for artifact_event in artifact_transition_events(
+                        poll_artifact_watcher()
+                    ):
+                        yield artifact_event
 
                 if in_hermes_box and not raw_line.strip():
                     if box_lines and box_lines[-1] != "":
@@ -1351,10 +1483,20 @@ class HermesCliWrapper:
                 working_dir=working_dir,
                 artifacts_dir=artifacts_dir,
             )
+            if artifact_watcher is not None:
+                for artifact_event in artifact_transition_events(
+                    await artifact_watcher.settle(
+                        settings.artifact_watcher_settle_timeout_seconds
+                    )
+                ):
+                    yield artifact_event
             self._discover_run_directory_artifacts(
                 working_dir=working_dir,
                 artifacts_dir=artifacts_dir,
                 started_at=stream_started_at,
+                failed_paths=(
+                    artifact_watcher.failed_paths if artifact_watcher is not None else None
+                ),
             )
             for artifact in self.last_artifacts:
                 artifact["run_id"] = run_id

@@ -44,6 +44,8 @@
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import pytest
+
 from app.core.config import settings
 from app.integrations.hermes import AgentArtifactRef
 from app.services.artifact_discovery import (
@@ -57,9 +59,64 @@ from app.services.artifact_discovery import (
     _wsl_artifact_mtime,
     create_artifacts_from_paths,
     create_artifacts_from_refs,
+    discover_artifacts_with_retry,
     discover_related_artifact_paths,
     extract_artifact_path_strings,
 )
+
+
+def test_create_artifacts_archives_into_supplied_run_directory(tmp_path: Path):
+    source = tmp_path / "external" / "report.md"
+    source.parent.mkdir()
+    source.write_text("# Report\n", encoding="utf-8")
+    archive_dir = tmp_path / "users" / "user-1" / "runs" / "run-1" / "artifacts"
+
+    artifacts = create_artifacts_from_paths(
+        "session-1",
+        [str(source)],
+        "run-1",
+        archive_dir=archive_dir,
+    )
+
+    assert len(artifacts) == 1
+    assert artifacts[0].metadata
+    assert Path(str(artifacts[0].metadata["path"])).parent == archive_dir.resolve()
+
+
+@pytest.mark.asyncio
+async def test_authoritative_manifest_discovery_skips_related_directory_scan(
+    monkeypatch,
+    tmp_path: Path,
+):
+    source = tmp_path / "report.md"
+    source.write_text("# Manifest report\n", encoding="utf-8")
+
+    def fail_related_scan(*args, **kwargs):
+        raise AssertionError("authoritative manifest must not trigger related scans")
+
+    monkeypatch.setattr(
+        "app.services.artifact_discovery.discover_related_artifact_paths",
+        fail_related_scan,
+    )
+    artifacts = await discover_artifacts_with_retry(
+        "session-1",
+        datetime.now(),
+        [str(source)],
+        "run-1",
+        [
+            AgentArtifactRef(
+                path=str(source),
+                artifact_type="markdown_report",
+                run_id="run-1",
+                source_dir=str(tmp_path),
+                title="Manifest report",
+            )
+        ],
+        archive_dir=tmp_path / "archive",
+        authoritative_manifest=True,
+    )
+
+    assert [artifact.title for artifact in artifacts] == ["Manifest report"]
 
 
 def test_windows_path_to_wsl_normalizes_backslashes(monkeypatch):
@@ -248,7 +305,7 @@ def test_create_artifacts_from_paths_accepts_run_scoped_runtime_report(
     monkeypatch.setattr("app.services.artifact_discovery._repo_root", lambda: tmp_path)
     monkeypatch.setattr(
         "app.services.artifact_discovery._archive_artifact_path",
-        lambda path, run_id: path,
+        lambda path, run_id, archive_dir=None: path,
     )
 
     artifacts = create_artifacts_from_paths("session_1", [str(report)], "run_1")
@@ -269,7 +326,7 @@ def test_create_artifacts_from_paths_accepts_agent_run_artifact(
     monkeypatch.setattr("app.services.artifact_discovery._repo_root", lambda: tmp_path)
     monkeypatch.setattr(
         "app.services.artifact_discovery._archive_artifact_path",
-        lambda path, run_id: path,
+        lambda path, run_id, archive_dir=None: path,
     )
 
     artifacts = create_artifacts_from_paths("session_1", [str(report)], "run_1")
@@ -290,7 +347,7 @@ def test_create_artifacts_from_paths_accepts_agent_run_root_artifact(
     monkeypatch.setattr("app.services.artifact_discovery._repo_root", lambda: tmp_path)
     monkeypatch.setattr(
         "app.services.artifact_discovery._archive_artifact_path",
-        lambda path, run_id: path,
+        lambda path, run_id, archive_dir=None: path,
     )
 
     artifacts = create_artifacts_from_paths("session_1", [str(deck)], "run_1")

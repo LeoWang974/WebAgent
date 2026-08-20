@@ -1,9 +1,7 @@
 # File purpose: Implements the agent run artifact service backend service workflow.
 # Main declarations: _diagnostic_text handles diagnostic text; raise_for_fatal_runtime_diagnostics
 # handles raise for fatal runtime diagnostics; _adapter_artifact_paths handles adapter artifact
-# paths; filter_preexisting_artifact_schemas handles filter preexisting artifact schemas;
-# _existing_conversation_artifact_fingerprints handles existing conversation artifact
-# fingerprints; _event_artifact_paths handles event artifact paths;
+# paths; _event_artifact_paths handles event artifact paths;
 # discover_and_persist_run_artifacts discovers and persist run artifacts; final_assistant_message
 # handles final assistant message; user_developer_mode_by_id handles user developer mode by id.
 
@@ -12,12 +10,12 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import schemas
 from app.models import AgentRun, AgentRunEvent, Artifact, Message, UserSettings
 from app.schemas.artifact_manifest import ArtifactManifest
+from app.services.agent_run_workspace import run_artifacts_dir
 from app.services.artifact_discovery import (
     discover_artifacts_with_retry,
     discover_related_artifact_paths,
@@ -28,7 +26,6 @@ from app.services.persistence import persist_message
 from app.services.session_artifacts import (
     artifact_display_priority,
     is_debug_artifact,
-    metadata_path_key,
     persist_discovered_artifacts,
 )
 from app.services.settings_service import DEFAULT_INTERFACE
@@ -52,7 +49,7 @@ FATAL_RUNTIME_PATTERNS = (
 )
 
 EXPLICIT_OUTPUT_PATH_RE = re.compile(
-    r"(?:保存为|输出(?:到|为)|导出(?:到|为)|save\s+as|write\s+to|export\s+to)"
+    r"(?:(?:保存|输出|导出)(?:文件)?(?:到|至|为)?|save\s+as|write\s+to|export\s+to)"
     r"\s*[`\"']?(?P<path>[^`\"'\r\n]+?\.(?:md|html?|pptx|png|jpe?g|csv|xlsx))",
     re.IGNORECASE,
 )
@@ -138,6 +135,7 @@ def _manifest_artifact_refs(
             "artifact_type": entry.artifact_type,
             "run_id": manifest.run_id,
             "source_dir": entry.source_dir,
+            "path_scope": entry.path_scope,
             "title": entry.title,
             "entry_id": entry.entry_id,
             "role": entry.role,
@@ -151,67 +149,6 @@ def _manifest_artifact_refs(
         for entry in manifest.artifacts
         if entry.status == "ready"
     ]
-
-
-def filter_preexisting_artifact_schemas(
-    discovered: list[schemas.Artifact],
-    *,
-    existing_hashes: set[str],
-    existing_paths: set[str],
-) -> tuple[list[schemas.Artifact], list[str]]:
-    filtered: list[schemas.Artifact] = []
-    excluded_paths: list[str] = []
-    for artifact in discovered:
-        metadata = artifact.metadata or {}
-        content_hash = str(metadata.get("contentHash") or "")
-        candidate_paths = {
-            metadata_path_key(value)
-            for value in (
-                metadata.get("path"),
-                metadata.get("originalPath"),
-                metadata.get("normalizedPath"),
-                metadata.get("originalNormalizedPath"),
-            )
-            if isinstance(value, str) and value
-        }
-        if (content_hash and content_hash in existing_hashes) or candidate_paths.intersection(
-            existing_paths
-        ):
-            excluded_paths.append(
-                str(metadata.get("originalPath") or metadata.get("path") or artifact.title)
-            )
-            continue
-        filtered.append(artifact)
-    return filtered, excluded_paths
-
-
-async def _existing_conversation_artifact_fingerprints(
-    db: AsyncSession,
-    conversation_id: str,
-    run_id: str,
-) -> tuple[set[str], set[str]]:
-    result = await db.execute(
-        select(Artifact.artifact_metadata).where(
-            Artifact.conversation_id == conversation_id,
-            or_(Artifact.run_id.is_(None), Artifact.run_id != run_id),
-        )
-    )
-    hashes: set[str] = set()
-    paths: set[str] = set()
-    for metadata_value in result.scalars().all():
-        metadata = metadata_value or {}
-        content_hash = metadata.get("contentHash")
-        if isinstance(content_hash, str) and content_hash:
-            hashes.add(content_hash)
-        for value in (
-            metadata.get("path"),
-            metadata.get("originalPath"),
-            metadata.get("normalizedPath"),
-            metadata.get("originalNormalizedPath"),
-        ):
-            if isinstance(value, str) and value:
-                paths.add(metadata_path_key(value))
-    return hashes, paths
 
 
 async def _event_artifact_paths(db: AsyncSession, run_id: str) -> list[str]:
@@ -257,10 +194,14 @@ async def discover_and_persist_run_artifacts(
         if manifest.status == "failed":
             detail = "; ".join(manifest.errors) or "unknown manifest failure"
             raise RuntimeError(f"Artifact manifest failed: {detail}")
-        missing_entries = [entry for entry in manifest.artifacts if entry.status == "missing"]
-        if missing_entries:
-            missing_paths = ", ".join(entry.path for entry in missing_entries[:5])
-            raise RuntimeError(f"Artifact manifest contains unavailable files: {missing_paths}")
+        unresolved_entries = [
+            entry for entry in manifest.artifacts if entry.status in {"pending", "staging"}
+        ]
+        if unresolved_entries:
+            unresolved_paths = ", ".join(entry.path for entry in unresolved_entries[:5])
+            raise RuntimeError(
+                f"Artifact manifest contains files that never stabilized: {unresolved_paths}"
+            )
         persisted_manifest_path = await asyncio.to_thread(
             store_protocol_artifact_manifest,
             manifest.model_dump(mode="json", by_alias=True),
@@ -272,7 +213,9 @@ async def discover_and_persist_run_artifacts(
             manifest,
             persisted_manifest_path=str(persisted_manifest_path),
         )
-        explicit_paths = [entry.path for entry in manifest.artifacts]
+        explicit_paths = [
+            entry.path for entry in manifest.artifacts if entry.status == "ready"
+        ]
         referenced_paths: list[str] = []
         related_paths: list[str] = []
         artifact_discovery_summary["manifest"] = {
@@ -280,6 +223,12 @@ async def discover_and_persist_run_artifacts(
             "status": manifest.status,
             "producer": manifest.producer,
             "entry_count": len(manifest.artifacts),
+            "ready_count": sum(
+                entry.status == "ready" for entry in manifest.artifacts
+            ),
+            "failed_count": sum(
+                entry.status in {"failed", "missing"} for entry in manifest.artifacts
+            ),
             "recovery_used": manifest.recovery_used,
             "errors": list(manifest.errors),
             "persisted_path": str(persisted_manifest_path),
@@ -326,25 +275,18 @@ async def discover_and_persist_run_artifacts(
             explicit_paths,
             run_id,
             explicit_artifacts,
+            archive_dir=run_artifacts_dir(run_id, conversation_id, user_id),
+            authoritative_manifest=manifest is not None,
         )
     else:
         discovered = []
 
-    if manifest is None:
-        existing_hashes, existing_paths = await _existing_conversation_artifact_fingerprints(
-            db, conversation_id, run_id
-        )
-        discovered, excluded_context_paths = filter_preexisting_artifact_schemas(
-            discovered,
-            existing_hashes=existing_hashes,
-            existing_paths=existing_paths,
-        )
-    else:
-        excluded_context_paths = []
-    artifact_discovery_summary["excluded_context_artifact_paths"] = excluded_context_paths
+    # A path or content hash seen in an older Run must never suppress the
+    # current Run's ownership. Current-run dedupe happens during persistence.
+    artifact_discovery_summary["excluded_context_artifact_paths"] = []
 
     stored = await persist_discovered_artifacts(db, conversation_id, discovered, run_id)
-    current_run_artifacts = [artifact for artifact in stored if artifact.run_id == run_id]
+    current_run_artifacts = stored
     external_artifacts = [
         artifact
         for artifact in current_run_artifacts

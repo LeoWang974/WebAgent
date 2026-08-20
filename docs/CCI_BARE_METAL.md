@@ -62,6 +62,8 @@ HERMES_CLI_PATH=$WEBAGENT_ROOT/runtime/agent-home/.local/bin/hermes
 HERMES_HOME=$WEBAGENT_ROOT/runtime/agent-home/.hermes
 HERMES_SKILLS_DIR=$WEBAGENT_ROOT/runtime/agent-home/.hermes/skills
 
+ARTIFACT_STORAGE_ENABLED=true
+ARTIFACT_STORAGE_ROOT=/mnt/afs/tj_share/webagent-cci/artifacts
 ARTIFACT_PREVIEW_CACHE_ROOT=$WEBAGENT_ROOT/runtime/artifact-previews
 LIBREOFFICE_PATH=/usr/bin/soffice
 
@@ -72,6 +74,11 @@ BACKEND_CORS_ORIGINS=http://127.0.0.1:3000,http://localhost:3000
 
 Do not commit real keys. Preserve `secrets/model-config.key`; historical user
 model credentials cannot be decrypted without it.
+
+`scripts/cci-start.sh` defaults `ARTIFACT_STORAGE_ROOT` to `$WEBAGENT_ROOT/artifacts` and creates
+the directory before migrations and workers start. On the current CCI deployment,
+`WEBAGENT_ROOT=/mnt/afs/tj_share/webagent-cci`, so original artifacts and both manifest files remain
+on AFS across application restarts.
 
 ## Operations
 

@@ -5,6 +5,7 @@
 
 "use client";
 
+import { useCallback } from "react";
 import { useUiStore } from "@/stores";
 
 export const translations = {
@@ -20,6 +21,15 @@ export const translations = {
       "\u4e0a\u4f20\u6570\u636e\u96c6\uff0c\u5206\u6790\u8d8b\u52bf\u3001\u56fe\u8868\u548c\u6458\u8981\u3002",
     analyzeDataTitle: "\u5206\u6790\u6570\u636e",
     artifact: "\u4ea7\u7269",
+    artifactGroupRun: "Run",
+    artifactGroupTime: "\u65f6\u95f4",
+    artifactGroupType: "\u7c7b\u578b",
+    artifactList: "\u4ea7\u7269\u5217\u8868",
+    artifactTimeUnknown: "\u65f6\u95f4\u672a\u77e5",
+    artifactTypeChart: "\u56fe\u8868",
+    artifactTypeImage: "\u56fe\u7247",
+    artifactTypeTable: "\u8868\u683c",
+    artifactUnlinkedRun: "\u672a\u5173\u8054 Run",
     addModel: "\u6dfb\u52a0\u6a21\u578b",
     addModelDescription:
       "\u6dfb\u52a0 OpenAI compatible \u6216\u81ea\u5b9a\u4e49\u6a21\u578b\uff0cAPI Key \u4f1a\u7531\u540e\u7aef\u52a0\u5bc6\u4fdd\u5b58\u3002",
@@ -147,6 +157,7 @@ export const translations = {
     renderedMarkdownArtifact: "Markdown \u4ea7\u7269\u6e32\u67d3",
     reloginAfterPasswordChange: "\u4fee\u6539\u5bc6\u7801\u540e\u81ea\u52a8\u91cd\u65b0\u767b\u5f55\u5e76\u5237\u65b0\u4ee4\u724c",
     rendering: "\u6e32\u67d3\u4e2d",
+    staging: "\u6b63\u5728\u7b49\u5f85\u6587\u4ef6\u7a33\u5b9a",
     rollback: "\u56de\u6eda",
     running: "\u8fd0\u884c\u4e2d",
     search: "\u641c\u7d22",
@@ -244,6 +255,15 @@ export const translations = {
     analyzeDataDescription: "Upload a dataset and ask for trends, charts, and summaries.",
     analyzeDataTitle: "Analyze data",
     artifact: "Artifact",
+    artifactGroupRun: "Run",
+    artifactGroupTime: "Time",
+    artifactGroupType: "Type",
+    artifactList: "Artifacts",
+    artifactTimeUnknown: "Unknown time",
+    artifactTypeChart: "Chart",
+    artifactTypeImage: "Image",
+    artifactTypeTable: "Table",
+    artifactUnlinkedRun: "Unlinked run",
     addModel: "Add model",
     addModelDescription:
       "Add an OpenAI-compatible or custom model. API keys are encrypted by the backend.",
@@ -369,6 +389,7 @@ export const translations = {
     renderedMarkdownArtifact: "Rendered Markdown artifact",
     reloginAfterPasswordChange: "Automatically sign in again and refresh the token after changing password",
     rendering: "Rendering",
+    staging: "Waiting for file stability",
     rollback: "Rollback",
     running: "Running",
     search: "Search",
@@ -466,9 +487,10 @@ export type TranslationKey = keyof (typeof translations)["zh-CN"];
 export function useI18n() {
   const language = useUiStore((state) => state.language);
   const dictionary = translations[language];
+  const t = useCallback((key: TranslationKey) => dictionary[key], [dictionary]);
 
   return {
     language,
-    t: (key: TranslationKey) => dictionary[key],
+    t,
   };
 }

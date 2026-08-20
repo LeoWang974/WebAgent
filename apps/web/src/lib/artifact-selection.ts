@@ -12,6 +12,9 @@ export function artifactDisplayPriority(artifact?: Artifact) {
   if (!artifact) {
     return -1;
   }
+  if (artifact.status !== "ready") {
+    return -1;
+  }
 
   const metadata = artifact.metadata ?? {};
   if (metadata.developerOnly === true || metadata.artifactRole === "intermediate") {
@@ -77,7 +80,10 @@ export function selectPreferredArtifact(
   sessionId?: string,
 ): Artifact | undefined {
   return [...artifacts]
-    .filter((artifact) => !sessionId || artifact.sessionId === sessionId)
+    .filter(
+      (artifact) =>
+        artifact.status === "ready" && (!sessionId || artifact.sessionId === sessionId),
+    )
     .sort(compareArtifactsForPreview)[0];
 }
 
@@ -86,6 +92,9 @@ export function shouldSelectCreatedArtifact({
   eventArtifact,
   selectedBelongsToTargetMessage,
 }: ResolveArtifactSelectionInput) {
+  if (artifactDisplayPriority(eventArtifact) < 0) {
+    return false;
+  }
   if (!currentSelectedArtifact) {
     return true;
   }

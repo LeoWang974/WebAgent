@@ -48,9 +48,13 @@ def should_suppress_stage_bubble(
     event_payload: dict,
     stage_counts: dict[str, int],
     last_stage_key: str | None,
+    last_emitted_content: str | None = None,
 ) -> tuple[bool, str]:
     stage_key = runtime_stage_key(content, event_payload)
     if is_low_value_runtime_update(content, event_payload):
+        return True, stage_key
+    normalized_content = normalize_runtime_update(content)
+    if normalized_content and normalized_content == last_emitted_content:
         return True, stage_key
     protocol = str(event_payload.get("protocol") or "")
     event_type = str(event_payload.get("hermesEventType") or "")

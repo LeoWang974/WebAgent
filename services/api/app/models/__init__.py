@@ -3,7 +3,7 @@
 # callable declarations.
 
 from app.models.agent_run import AgentRun, AgentRunEvent
-from app.models.artifact import Artifact, FileAsset
+from app.models.artifact import Artifact, FileAsset, RunArtifact
 from app.models.conversation import Conversation, ConversationFolder, ConversationShare, Message
 from app.models.model_config import ModelConfig
 from app.models.settings import UserSettings
@@ -20,6 +20,7 @@ __all__ = [
     "FileAsset",
     "Message",
     "ModelConfig",
+    "RunArtifact",
     "SkillConfig",
     "SkillVersion",
     "User",

@@ -11,6 +11,7 @@ export type UnifiedStatus =
   | AgentRunStatus
   | SessionStatus
   | "pending"
+  | "staging"
   | "active"
   | "ready";
 
@@ -34,6 +35,7 @@ export function getStatusDotClass(status: UnifiedStatus) {
   if (
     status === "queued" ||
     status === "pending" ||
+    status === "staging" ||
     status === "running" ||
     status === "rendering" ||
     status === "tool_calling"

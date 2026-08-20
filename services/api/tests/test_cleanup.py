@@ -2,7 +2,8 @@
 # Main declarations: test_cleanup_expired_runtime_files_keeps_recent_files verifies cleanup
 # expired runtime files keeps recent files;
 # test_cleanup_expired_runtime_files_removes_run_homes_and_old_logs verifies cleanup expired
-# runtime files removes run homes and old logs.
+# runtime files removes run homes and old logs; structured workspace cleanup never removes an
+# entire user tree because only one nested Run expired.
 
 import os
 import time
@@ -71,3 +72,24 @@ def test_cleanup_expired_runtime_files_removes_run_homes_and_old_logs(tmp_path: 
     assert not old_log.exists()
     assert recent_log.exists()
     assert not unrelated_log.exists()
+
+
+def test_cleanup_structured_workspaces_removes_only_expired_runs(tmp_path: Path):
+    user_root = tmp_path / "runtime" / "agent-runs" / "user-1"
+    old_run = user_root / "conversation-1" / "old-run"
+    recent_run = user_root / "conversation-2" / "recent-run"
+    old_run.mkdir(parents=True)
+    recent_run.mkdir(parents=True)
+    (old_run / "package.json").write_text("{}", encoding="utf-8")
+    (recent_run / "package.json").write_text("{}", encoding="utf-8")
+
+    old_timestamp = time.time() - 10 * 24 * 60 * 60
+    os.utime(old_run, (old_timestamp, old_timestamp))
+    os.utime(user_root, (old_timestamp, old_timestamp))
+
+    deleted = cleanup_expired_runtime_files(max_age_days=7, repo_root=tmp_path)
+
+    assert deleted == 1
+    assert not old_run.exists()
+    assert recent_run.exists()
+    assert user_root.exists()

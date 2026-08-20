@@ -4,7 +4,6 @@
 # file; stage_conversation_artifacts handles stage conversation artifacts.
 
 import json
-import os
 import re
 import shutil
 from pathlib import Path
@@ -63,18 +62,13 @@ def run_artifacts_dir(
 
 
 def _stage_artifact_file(source: Path, destination: Path) -> None:
-    """Prefer a hard link so repeated run context staging does not duplicate files."""
+    """Copy context into the Run so an agent cannot mutate the durable source artifact."""
     if destination.exists():
         return
     try:
-        os.link(source, destination)
+        shutil.copy2(source, destination)
     except FileExistsError:
         return
-    except OSError:
-        try:
-            shutil.copy2(source, destination)
-        except FileExistsError:
-            return
 
 
 async def stage_conversation_artifacts(

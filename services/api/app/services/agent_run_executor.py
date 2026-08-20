@@ -39,6 +39,7 @@ from app.services.agent_runs import (
     record_db_agent_run_event,
     touch_db_agent_run,
 )
+from app.services.artifact_state_service import sync_run_artifact_state
 from app.services.model_runtime_config import model_runtime_config_builder
 from app.services.persistence import persist_message, to_artifact, to_message, to_session
 from app.services.runtime_environment import (
@@ -47,7 +48,7 @@ from app.services.runtime_environment import (
     scrub_runtime_credentials,
 )
 from app.services.session_artifacts import artifact_display_priority, refresh_conversation
-from app.services.stage_bubble_filter import should_suppress_stage_bubble
+from app.services.stage_bubble_filter import normalize_runtime_update, should_suppress_stage_bubble
 from app.services.stream_protocol import runtime_diagnostics
 
 logger = logging.getLogger(__name__)
@@ -132,6 +133,7 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
     assistant_event_count = 0
     stage_bubble_counts: dict[str, int] = {}
     last_stage_bubble_key: str | None = None
+    last_stage_bubble_content: str | None = None
     artifact_discovery_summary: dict[str, object] = {}
     adapter = None
     adapter_capacity_lease = None
@@ -325,11 +327,25 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
                 continue
 
             progress = progress or min(90, 10 + assistant_event_count * 8)
+            if event_type == "artifact_state":
+                await sync_run_artifact_state(db, run, event_payload)
+                await record_db_agent_run_event(
+                    db,
+                    run,
+                    event_type=event_type,
+                    label=message_content,
+                    status="running",
+                    progress=progress,
+                    payload=event_payload,
+                )
+                continue
+
             should_suppress, stage_key = should_suppress_stage_bubble(
                 message_content,
                 event_payload,
                 stage_bubble_counts,
                 last_stage_bubble_key,
+                last_stage_bubble_content,
             )
             last_stage_bubble_key = stage_key
             if should_suppress:
@@ -341,6 +357,7 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
                     await touch_db_agent_run(db, run, progress=progress)
                     last_run_touch_monotonic = now_monotonic
                 continue
+            last_stage_bubble_content = normalize_runtime_update(message_content)
 
             if event_type in {"artifact_found", "artifact_manifest_finalized"}:
                 await record_db_agent_run_event(

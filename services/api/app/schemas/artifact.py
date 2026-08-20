@@ -16,7 +16,7 @@ ArtifactType = Literal[
     "chart",
     "debug_json",
 ]
-ArtifactStatus = Literal["pending", "rendering", "ready", "failed"]
+ArtifactStatus = Literal["pending", "staging", "rendering", "ready", "failed"]
 
 
 class Artifact(ApiModel):

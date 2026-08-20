@@ -3,7 +3,7 @@
 # event state or behavior.
 
 from sqlalchemy import JSON, ForeignKey, Index, Integer, String, Text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 from app.models.mixins import IdMixin, TimestampMixin
@@ -24,12 +24,18 @@ class AgentRun(IdMixin, TimestampMixin, Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     adapter_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
     model_config_id: Mapped[str | None] = mapped_column(
-        ForeignKey("model_configs.id"), nullable=True
+        ForeignKey("model_configs.id"), nullable=True, index=True
     )
     model_provider: Mapped[str | None] = mapped_column(String(80), nullable=True)
     model_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     model_base_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     model_api_key_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    run_artifacts = relationship(
+        "RunArtifact",
+        back_populates="run",
+        cascade="all, delete-orphan",
+    )
 
 
 class AgentRunEvent(IdMixin, TimestampMixin, Base):

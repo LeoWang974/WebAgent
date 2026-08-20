@@ -19,11 +19,11 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Query, Response
 from fastapi.responses import FileResponse
-from sqlalchemy import or_, select
+from sqlalchemy import exists, or_, select, true
 
 from app import schemas
 from app.api.dependencies import CurrentUser, DbSession
-from app.models import Artifact, Conversation, ConversationShare
+from app.models import Artifact, Conversation, ConversationShare, RunArtifact
 from app.services.persistence import (
     get_conversation_or_404,
     require_owner,
@@ -58,7 +58,7 @@ async def ensure_artifact_visible(
     artifact: Artifact,
     current_user: CurrentUser,
 ) -> None:
-    if not is_debug_artifact(artifact):
+    if artifact.status == "ready" and not is_debug_artifact(artifact):
         return
     if not await user_developer_mode(db, current_user):
         raise HTTPException(status_code=404, detail="Artifact not found")
@@ -253,29 +253,51 @@ async def list_artifacts(
 ) -> list[schemas.Artifact]:
     resolved_session_id = session_id or session_id_snake
     resolved_run_id = run_id or run_id_snake
-    visibility_filter = or_(
-        Conversation.user_id == current_user.id,
-        Conversation.visibility == "public",
-        (Conversation.visibility == "shared")
-        & (ConversationShare.user_id == current_user.id),
+    developer_mode = await user_developer_mode(db, current_user)
+    visibility_filter = (
+        true()
+        if current_user.role == "admin"
+        else or_(
+            Conversation.user_id == current_user.id,
+            Conversation.visibility == "public",
+            (Conversation.visibility == "shared")
+            & exists(
+                select(1).where(
+                    ConversationShare.conversation_id == Conversation.id,
+                    ConversationShare.user_id == current_user.id,
+                )
+            ),
+        )
     )
     filters = [visibility_filter]
+    if not developer_mode:
+        filters.append(Artifact.status == "ready")
     if resolved_session_id:
         filters.append(Artifact.conversation_id == resolved_session_id)
     if resolved_run_id:
-        filters.append(Artifact.run_id == resolved_run_id)
+        related_artifact_ids = select(RunArtifact.artifact_id).where(
+            RunArtifact.run_id == resolved_run_id
+        )
+        filters.append(
+            or_(
+                Artifact.run_id == resolved_run_id,
+                Artifact.id.in_(related_artifact_ids),
+            )
+        )
 
     result = await db.execute(
         select(Artifact)
         .join(Conversation)
-        .outerjoin(ConversationShare, ConversationShare.conversation_id == Conversation.id)
         .where(*filters)
         .order_by(Artifact.created_at.desc())
     )
-    developer_mode = await user_developer_mode(db, current_user)
     return [
-        to_artifact(item, include_payload=False)
-        for item in result.scalars().unique().all()
+        to_artifact(
+            item,
+            include_payload=False,
+            run_id_override=resolved_run_id,
+        )
+        for item in result.scalars().all()
         if developer_mode or not is_debug_artifact(item)
     ]
 
@@ -336,9 +358,15 @@ async def get_artifact_slides(
                 )
 
     if artifact.run_id:
+        related_artifact_ids = select(RunArtifact.artifact_id).where(
+            RunArtifact.run_id == artifact.run_id
+        )
         html_result = await db.execute(
             select(Artifact).where(
-                Artifact.run_id == artifact.run_id,
+                or_(
+                    Artifact.run_id == artifact.run_id,
+                    Artifact.id.in_(related_artifact_ids),
+                ),
                 Artifact.conversation_id == artifact.conversation_id,
                 Artifact.type == "html_page",
             )

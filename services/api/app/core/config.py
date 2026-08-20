@@ -60,6 +60,10 @@ class Settings(BaseSettings):
     artifact_storage_enabled: bool = True
     artifact_storage_root: str = r"D:\WebAgentArtifacts"
     artifact_preview_cache_root: str = "runtime/artifact-previews"
+    artifact_watcher_poll_interval_seconds: float = 0.5
+    artifact_watcher_stable_seconds: float = 1.5
+    artifact_watcher_stable_samples: int = 3
+    artifact_watcher_settle_timeout_seconds: float = 15.0
     libreoffice_path: str | None = None
     pptx_preview_max_slides: int = 100
     pptx_preview_timeout_seconds: int = 120

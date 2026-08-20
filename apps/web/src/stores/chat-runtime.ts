@@ -11,6 +11,7 @@
 import { selectPreferredArtifact } from "@/lib/artifact-selection";
 import { webAgentApi } from "@/services";
 import type { AgentRunUnsubscribe } from "@/services/adapters/types";
+import type { Artifact } from "@/types";
 import {
   hasPendingAssistantMessage,
   isTerminalRunStatus,
@@ -26,6 +27,52 @@ const requestAbortControllers = new Map<string, AbortController>();
 const agentRunUnsubscribers = new Map<string, AgentRunUnsubscribe>();
 const agentRunPollers = new Map<string, number>();
 const agentRunPollsInFlight = new Set<string>();
+const artifactRefreshTokens = new Map<string, symbol>();
+const artifactRefreshRequests = new Map<string, Promise<Artifact[]>>();
+
+function reportArtifactRefreshError(set: ChatStateSetter, error: unknown) {
+  set({
+    error: error instanceof Error ? error.message : "Failed to refresh run artifacts.",
+  });
+}
+
+export async function refreshRunArtifacts(
+  get: () => ChatState,
+  set: ChatStateSetter,
+  sessionId: string,
+  runId: string,
+) {
+  const refreshKey = `${sessionId}:${runId}`;
+  const token = Symbol(refreshKey);
+  artifactRefreshTokens.set(refreshKey, token);
+  let request = artifactRefreshRequests.get(refreshKey);
+  if (!request) {
+    request = webAgentApi.listArtifacts(sessionId, runId);
+    artifactRefreshRequests.set(refreshKey, request);
+    const clearRequest = () => {
+      if (artifactRefreshRequests.get(refreshKey) === request) {
+        artifactRefreshRequests.delete(refreshKey);
+      }
+    };
+    void request.then(clearRequest, clearRequest);
+  }
+  const artifacts = await request;
+  if (artifactRefreshTokens.get(refreshKey) !== token) {
+    return;
+  }
+  artifactRefreshTokens.delete(refreshKey);
+  set((state) => {
+    const retained = state.artifacts.filter((artifact) => artifact.runId !== runId);
+    const preferred = selectPreferredArtifact(artifacts, sessionId);
+    return {
+      artifacts: [...artifacts, ...retained],
+      selectedArtifactId:
+        state.currentSessionId === sessionId && preferred
+          ? preferred.id
+          : state.selectedArtifactId,
+    };
+  });
+}
 
 export function createRequestAbortController(sessionId: string) {
   requestAbortControllers.get(sessionId)?.abort();
@@ -74,7 +121,12 @@ function startAgentRunPolling(
       return;
     }
     if (isTerminalRunStatus(run.status) && run.sessionId === get().currentSessionId) {
-      const backendMessages = await webAgentApi.listMessages(run.sessionId);
+      const [backendMessages] = await Promise.all([
+        webAgentApi.listMessages(run.sessionId),
+        refreshRunArtifacts(get, set, run.sessionId, run.id).catch((error) =>
+          reportArtifactRefreshError(set, error),
+        ),
+      ]);
       set((state) => {
         const existingById = new Map(state.messages.map((message) => [message.id, message]));
         return {
@@ -136,7 +188,12 @@ export function subscribeAgentRunEvents(
     get().applyAgentRunEvent(event);
     if (isTerminalRunStatus(event.status)) {
       unsubscribeAgentRun(runId);
-      void get().refreshAgentRun(runId);
+      void get()
+        .refreshAgentRun(runId)
+        .then((run) =>
+          run ? refreshRunArtifacts(get, set, run.sessionId, run.id) : undefined,
+        )
+        .catch((error) => reportArtifactRefreshError(set, error));
     }
   });
   agentRunUnsubscribers.set(runId, unsubscribe);
@@ -218,4 +275,6 @@ export function resetChatRuntime() {
   agentRunPollers.forEach((poller) => window.clearInterval(poller));
   agentRunPollers.clear();
   agentRunPollsInFlight.clear();
+  artifactRefreshTokens.clear();
+  artifactRefreshRequests.clear();
 }

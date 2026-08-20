@@ -21,7 +21,8 @@ from sqlalchemy.orm import selectinload
 
 from app import schemas
 from app.core.config import settings
-from app.models import Artifact, Conversation, ConversationShare
+from app.models import Artifact, Conversation, ConversationShare, RunArtifact
+from app.schemas.artifact_manifest import SUPPORTED_ARTIFACT_MANIFEST_SCHEMAS
 from app.services.agent_run_workspace import run_workspace_dir
 from app.services.artifact_storage import (
     artifact_storage_root,
@@ -220,6 +221,12 @@ def organize_artifact_schema(
         conversation_id=conversation.id,
         run_id=run_id,
         is_primary=is_primary,
+        content_hash=(
+            str(metadata["contentHash"])
+            if isinstance(metadata.get("contentHash"), str)
+            and metadata["contentHash"]
+            else None
+        ),
     )
     organized_at = datetime.now().astimezone().isoformat()
 
@@ -265,7 +272,7 @@ def organize_artifact_schema(
 def _artifact_match_keys(metadata: dict) -> set[str]:
     manifest_entry_id = metadata.get("manifestEntryId")
     if (
-        metadata.get("adapterProtocol") == "webagent.artifacts.v2"
+        metadata.get("adapterProtocol") in SUPPORTED_ARTIFACT_MANIFEST_SCHEMAS
         and isinstance(manifest_entry_id, str)
         and manifest_entry_id
     ):
@@ -313,10 +320,17 @@ async def persist_discovered_artifacts(
     stored_artifacts: list[Artifact] = []
     conversation = await refresh_conversation(db, session_id)
     conditions = [Artifact.conversation_id == session_id]
+    existing_query = select(Artifact)
     if run_id:
-        conditions.append(Artifact.run_id == run_id)
-    existing_result = await db.execute(select(Artifact).where(*conditions))
-    existing_index = _index_existing_artifacts(list(existing_result.scalars().all()))
+        existing_query = existing_query.outerjoin(
+            RunArtifact,
+            RunArtifact.artifact_id == Artifact.id,
+        )
+        conditions.append(
+            (RunArtifact.run_id == run_id) | (Artifact.run_id == run_id)
+        )
+    existing_result = await db.execute(existing_query.where(*conditions))
+    existing_index = _index_existing_artifacts(list(existing_result.scalars().unique().all()))
 
     for artifact_schema in discovered_artifacts:
         artifact_schema = organize_artifact_schema(artifact_schema, conversation, run_id)
@@ -352,6 +366,18 @@ async def persist_discovered_artifacts(
             existing_index[key] = artifact
 
     if stored_artifacts:
+        await db.flush()
+        if run_id:
+            linked_result = await db.execute(
+                select(RunArtifact.artifact_id).where(
+                    RunArtifact.run_id == run_id,
+                    RunArtifact.artifact_id.in_([artifact.id for artifact in stored_artifacts]),
+                )
+            )
+            linked_artifact_ids = set(linked_result.scalars().all())
+            for artifact in stored_artifacts:
+                if artifact.id not in linked_artifact_ids:
+                    db.add(RunArtifact(run_id=run_id, artifact_id=artifact.id))
         await db.commit()
         for artifact in stored_artifacts:
             await db.refresh(artifact)

@@ -5,8 +5,7 @@
 # test_fatal_runtime_diagnostics_do_not_match_unrelated_401_text verifies fatal runtime
 # diagnostics do not match unrelated 401 text;
 # test_fatal_runtime_diagnostics_match_explicit_http_401 verifies fatal runtime diagnostics match
-# explicit http 401; test_filter_preexisting_artifacts_excludes_staged_input_by_hash verifies
-# filter preexisting artifacts excludes staged input by hash;
+# explicit http 401;
 # test_organize_artifact_schema_keeps_metadata_path_existing verifies organize artifact schema
 # keeps metadata path existing; test_organize_artifact_schema_separates_intermediate_outputs
 # verifies organize artifact schema separates intermediate outputs;
@@ -23,7 +22,6 @@ from app.core.config import settings
 from app.models import Conversation
 from app.services.agent_run_artifact_service import (
     explicit_requested_artifact_type,
-    filter_preexisting_artifact_schemas,
     raise_for_fatal_runtime_diagnostics,
     validate_explicit_output_artifact,
 )
@@ -106,47 +104,9 @@ def test_explicit_output_validation_rejects_missing_requested_type():
         )
 
 
-def test_filter_preexisting_artifacts_excludes_staged_input_by_hash(tmp_path):
-    source = tmp_path / "source.md"
-    output = tmp_path / "report.html"
-    source.write_text("# Existing report", encoding="utf-8")
-    output.write_text("<html>new</html>", encoding="utf-8")
-    source_artifact = schemas.Artifact(
-        id="source",
-        session_id="conversation1",
-        type="markdown_report",
-        title="source",
-        status="ready",
-        metadata={
-            "path": str(source),
-            "contentHash": "existing-hash",
-        },
-    )
-    output_artifact = schemas.Artifact(
-        id="output",
-        session_id="conversation1",
-        type="html_page",
-        title="report",
-        status="ready",
-        metadata={
-            "path": str(output),
-            "contentHash": "new-hash",
-        },
-    )
-
-    filtered, excluded = filter_preexisting_artifact_schemas(
-        [source_artifact, output_artifact],
-        existing_hashes={"existing-hash"},
-        existing_paths=set(),
-    )
-
-    assert filtered == [output_artifact]
-    assert excluded == [str(source)]
-
-
 def test_manifest_entry_identity_does_not_use_cross_run_content_hash():
     metadata = {
-        "adapterProtocol": "webagent.artifacts.v2",
+        "adapterProtocol": "webagent.artifacts.v3",
         "manifestEntryId": "entry-1",
         "contentHash": "same-content-as-an-older-run",
         "originalPath": "/reports/report.md",

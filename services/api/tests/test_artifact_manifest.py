@@ -1,7 +1,8 @@
-# File purpose: Verifies Artifact Manifest v2 recording, integrity, and run-scoped identity.
-# Main declarations: tests cover atomic finalization, missing-file refresh, and checksum validation.
+# File purpose: Verifies Artifact Manifest v3 states, integrity, and v2 read compatibility.
+# Main declarations: tests cover state finalization, file refresh, and checksum validation.
 
 import hashlib
+import json
 from pathlib import Path
 
 import pytest
@@ -32,7 +33,7 @@ def test_manifest_recorder_finalizes_ready_artifact(tmp_path: Path):
     recorder.finalize()
 
     manifest = load_artifact_manifest(manifest_path)
-    assert manifest.schema_version == "webagent.artifacts.v2"
+    assert manifest.schema_version == "webagent.artifacts.v3"
     assert manifest.status == "finalized"
     assert manifest.finalized_at is not None
     assert manifest.artifacts == [entry]
@@ -74,6 +75,49 @@ def test_manifest_recorder_refreshes_missing_entry_when_file_appears(tmp_path: P
     assert recorder.manifest.artifacts == [ready]
 
 
+def test_manifest_finalization_fails_unsettled_entry(tmp_path: Path):
+    recorder = ArtifactManifestRecorder(
+        tmp_path / "artifact-manifest.json",
+        run_id="run-1",
+        conversation_id="conversation-1",
+    )
+    recorder.record(
+        path=str(tmp_path / "report.md"),
+        artifact_type="markdown_report",
+        title="Report",
+        role="primary",
+        discovered_by="file_watcher",
+        source_dir=str(tmp_path),
+        source_file=None,
+        status="staging",
+    )
+
+    manifest = recorder.finalize()
+
+    assert manifest.artifacts[0].status == "failed"
+    assert "before the file became stable" in str(manifest.artifacts[0].error)
+
+
+def test_load_manifest_keeps_v2_compatibility(tmp_path: Path):
+    path = tmp_path / "artifact-manifest.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema": "webagent.artifacts.v2",
+                "run_id": "legacy-run",
+                "producer": "hermes_cli_adapter",
+                "status": "finalized",
+                "created_at": "2026-08-19T10:00:00Z",
+                "updated_at": "2026-08-19T10:00:01Z",
+                "artifacts": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert load_artifact_manifest(path).schema_version == "webagent.artifacts.v2"
+
+
 def test_manifest_ref_integrity_is_preserved_in_artifact_metadata(tmp_path: Path):
     output = tmp_path / "report.html"
     output.write_text("<html><body>ready</body></html>", encoding="utf-8")
@@ -94,7 +138,7 @@ def test_manifest_ref_integrity_is_preserved_in_artifact_metadata(tmp_path: Path
                 "discovered_by": "adapter_event",
                 "size_bytes": output.stat().st_size,
                 "sha256": checksum,
-                "manifest_schema": "webagent.artifacts.v2",
+                "manifest_schema": "webagent.artifacts.v3",
                 "manifest_path": str(tmp_path / "artifact-manifest.json"),
             }
         ],
@@ -102,7 +146,7 @@ def test_manifest_ref_integrity_is_preserved_in_artifact_metadata(tmp_path: Path
 
     assert len(artifacts) == 1
     metadata = artifacts[0].metadata or {}
-    assert metadata["adapterProtocol"] == "webagent.artifacts.v2"
+    assert metadata["adapterProtocol"] == "webagent.artifacts.v3"
     assert metadata["manifestEntryId"] == "entry-1"
     assert metadata["manifestIntegrityVerified"] is True
     assert metadata["manifestDiscoveredBy"] == "adapter_event"
@@ -122,7 +166,7 @@ def test_manifest_ref_rejects_checksum_mismatch(tmp_path: Path):
                     "status": "ready",
                     "size_bytes": output.stat().st_size,
                     "sha256": "0" * 64,
-                    "manifest_schema": "webagent.artifacts.v2",
+                    "manifest_schema": "webagent.artifacts.v3",
                 }
             ],
         )

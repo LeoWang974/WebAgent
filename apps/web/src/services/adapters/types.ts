@@ -130,7 +130,7 @@ export interface WebAgentApiAdapter {
   getAgentRun(runId: string): Promise<AgentRun>;
   login(input: LoginInput): Promise<AuthResult>;
   logout(): Promise<void>;
-  listArtifacts(sessionId?: string): Promise<Artifact[]>;
+  listArtifacts(sessionId?: string, runId?: string): Promise<Artifact[]>;
   listAgentRuns(sessionId?: string): Promise<AgentRun[]>;
   listFiles(sessionId?: string): Promise<FileAsset[]>;
   listConversationFolders(): Promise<ConversationFolder[]>;

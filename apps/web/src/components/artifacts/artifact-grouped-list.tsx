@@ -9,6 +9,7 @@
 
 import { useMemo, useState } from "react";
 import { FileJson, FileText, Image, Presentation, Table2 } from "lucide-react";
+import { useI18n } from "@/lib/i18n";
 import type { Artifact, ArtifactType } from "@/types";
 import { compareArtifactsForPreview } from "@/lib/artifact-selection";
 
@@ -19,16 +20,6 @@ interface ArtifactGroupedListProps {
 }
 
 type GroupMode = "run" | "type" | "time";
-
-const typeLabel: Record<ArtifactType, string> = {
-  chart: "图表",
-  data_table: "表格",
-  debug_json: "JSON",
-  html_page: "HTML",
-  image_result: "图片",
-  markdown_report: "Markdown",
-  ppt_deck: "PPT",
-};
 
 const typeIcon: Record<ArtifactType, typeof FileText> = {
   chart: Table2,
@@ -48,10 +39,10 @@ function artifactTime(artifact: Artifact) {
   return Number.isNaN(timestamp) ? 0 : timestamp;
 }
 
-function timeGroupLabel(artifact: Artifact) {
+function timeGroupLabel(artifact: Artifact, unknownLabel: string) {
   const timestamp = artifactTime(artifact);
   if (!timestamp) {
-    return "时间未知";
+    return unknownLabel;
   }
   return new Date(timestamp).toLocaleDateString(undefined, {
     day: "numeric",
@@ -59,21 +50,27 @@ function timeGroupLabel(artifact: Artifact) {
   });
 }
 
-function runGroupLabel(artifact: Artifact) {
-  return artifact.runId ? `Run ${artifact.runId.slice(0, 8)}` : "未关联 Run";
+function runGroupLabel(artifact: Artifact, unlinkedLabel: string) {
+  return artifact.runId ? `Run ${artifact.runId.slice(0, 8)}` : unlinkedLabel;
 }
 
-function buildGroups(artifacts: Artifact[], mode: GroupMode) {
+function buildGroups(
+  artifacts: Artifact[],
+  mode: GroupMode,
+  typeLabels: Record<ArtifactType, string>,
+  unknownTimeLabel: string,
+  unlinkedRunLabel: string,
+) {
   const groups = new Map<string, Artifact[]>();
   const sortedArtifacts = [...artifacts].sort(compareArtifactsForPreview);
 
   for (const artifact of sortedArtifacts) {
     const key =
       mode === "run"
-        ? runGroupLabel(artifact)
+        ? runGroupLabel(artifact, unlinkedRunLabel)
         : mode === "type"
-          ? typeLabel[artifact.type]
-          : timeGroupLabel(artifact);
+          ? typeLabels[artifact.type]
+          : timeGroupLabel(artifact, unknownTimeLabel);
     groups.set(key, [...(groups.get(key) ?? []), artifact]);
   }
 
@@ -85,8 +82,31 @@ export function ArtifactGroupedList({
   onSelect,
   selectedArtifactId,
 }: ArtifactGroupedListProps) {
+  const { t } = useI18n();
   const [mode, setMode] = useState<GroupMode>("run");
-  const groups = useMemo(() => buildGroups(artifacts, mode), [artifacts, mode]);
+  const typeLabels = useMemo<Record<ArtifactType, string>>(
+    () => ({
+      chart: t("artifactTypeChart"),
+      data_table: t("artifactTypeTable"),
+      debug_json: "JSON",
+      html_page: "HTML",
+      image_result: t("artifactTypeImage"),
+      markdown_report: "Markdown",
+      ppt_deck: "PPT",
+    }),
+    [t],
+  );
+  const groups = useMemo(
+    () =>
+      buildGroups(
+        artifacts,
+        mode,
+        typeLabels,
+        t("artifactTimeUnknown"),
+        t("artifactUnlinkedRun"),
+      ),
+    [artifacts, mode, t, typeLabels],
+  );
 
   if (!artifacts.length) {
     return null;
@@ -95,12 +115,12 @@ export function ArtifactGroupedList({
   return (
     <div className="mb-3 rounded-lg border bg-white shadow-sm">
       <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
-        <div className="text-xs font-semibold text-muted-foreground">产物列表</div>
+        <div className="text-xs font-semibold text-muted-foreground">{t("artifactList")}</div>
         <div className="flex rounded-md border bg-[#f7f7f5] p-0.5">
           {[
-            ["run", "Run"],
-            ["type", "类型"],
-            ["time", "时间"],
+            ["run", t("artifactGroupRun")],
+            ["type", t("artifactGroupType")],
+            ["time", t("artifactGroupTime")],
           ].map(([value, label]) => (
             <button
               className={`rounded px-2 py-1 text-[11px] ${
@@ -138,7 +158,7 @@ export function ArtifactGroupedList({
                     <Icon className="size-3.5 shrink-0 text-muted-foreground" />
                     <span className="min-w-0 flex-1 truncate text-xs">{artifact.title}</span>
                     <span className="shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                      {typeLabel[artifact.type]}
+                      {typeLabels[artifact.type]}
                     </span>
                   </button>
                 );

@@ -13,7 +13,7 @@ export type ArtifactType =
   | "chart"
   | "debug_json";
 
-export type ArtifactStatus = "pending" | "rendering" | "ready" | "failed";
+export type ArtifactStatus = "pending" | "staging" | "rendering" | "ready" | "failed";
 
 export interface Artifact {
   content?: string;

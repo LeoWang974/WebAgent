@@ -23,6 +23,7 @@ import {
 import {
   createRequestAbortController,
   releaseRequestAbortController,
+  refreshRunArtifacts,
   subscribeAgentRunEvents,
   type ChatStateSetter,
 } from "./chat-runtime";
@@ -199,12 +200,7 @@ export async function sendMessageFlow(
         });
       },
     );
-    if (
-      !currentRunId.startsWith("run_") &&
-      get().agentRuns.some(
-        (runItem) => runItem.id === currentRunId && !isTerminalRunStatus(runItem.status),
-      )
-    ) {
+    if (!currentRunId.startsWith("run_")) {
       const refreshedRun = await webAgentApi.getAgentRun(currentRunId);
       set((state) => ({
         activeAgentRunId: isTerminalRunStatus(refreshedRun.status)
@@ -214,6 +210,16 @@ export async function sendMessageFlow(
           runItem.id === refreshedRun.id ? refreshedRun : runItem,
         ),
       }));
+      if (isTerminalRunStatus(refreshedRun.status)) {
+        try {
+          await refreshRunArtifacts(get, set, sessionId, refreshedRun.id);
+        } catch (error) {
+          set({
+            error:
+              error instanceof Error ? error.message : "Failed to refresh run artifacts.",
+          });
+        }
+      }
     }
   } catch (error) {
     const aborted = error instanceof DOMException && error.name === "AbortError";

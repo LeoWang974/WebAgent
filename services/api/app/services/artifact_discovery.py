@@ -24,7 +24,6 @@
 # discover_artifacts_since discovers artifacts since.
 
 import asyncio
-import base64
 import csv
 import hashlib
 import json
@@ -40,6 +39,7 @@ from typing import Any
 from app import schemas
 from app.core.config import settings
 from app.schemas.artifact import ArtifactType
+from app.schemas.artifact_manifest import SUPPORTED_ARTIFACT_MANIFEST_SCHEMAS
 from app.services.agent_run_workspace import run_artifacts_dir
 from app.services.artifact_dedupe import dedupe_discovered_artifacts
 
@@ -111,13 +111,18 @@ async def discover_artifacts_with_retry(
     explicit_artifact_paths: list[str],
     run_id: str | None,
     explicit_artifacts: list[object] | None = None,
+    *,
+    archive_dir: Path | None = None,
+    authoritative_manifest: bool = False,
 ) -> list[schemas.Artifact]:
-    for attempt in range(5):
+    attempt_count = 3 if authoritative_manifest else 5
+    for attempt in range(attempt_count):
         discovered_artifacts = await asyncio.to_thread(
             create_artifacts_from_refs,
             session_id,
             explicit_artifacts or [],
             run_id,
+            archive_dir=archive_dir,
         )
         if not discovered_artifacts:
             discovered_artifacts = await asyncio.to_thread(
@@ -125,8 +130,9 @@ async def discover_artifacts_with_retry(
                 session_id,
                 explicit_artifact_paths,
                 run_id,
+                archive_dir=archive_dir,
             )
-        if discovered_artifacts:
+        if discovered_artifacts and not authoritative_manifest:
             related_paths = await asyncio.to_thread(
                 discover_related_artifact_paths,
                 explicit_artifact_paths,
@@ -140,10 +146,11 @@ async def discover_artifacts_with_retry(
                         session_id,
                         related_paths,
                         run_id,
+                        archive_dir=archive_dir,
                     )
                 )
                 discovered_artifacts = dedupe_discovered_artifacts(discovered_artifacts)
-        if not discovered_artifacts:
+        if not discovered_artifacts and not authoritative_manifest:
             session_artifact_paths = await asyncio.to_thread(
                 discover_artifact_paths_from_hermes_sessions,
                 since,
@@ -153,6 +160,7 @@ async def discover_artifacts_with_retry(
                 session_id,
                 session_artifact_paths,
                 run_id,
+                archive_dir=archive_dir,
             )
         if not discovered_artifacts and run_id is None:
             discovered_artifacts = await asyncio.to_thread(
@@ -161,9 +169,9 @@ async def discover_artifacts_with_retry(
                 since,
                 run_id,
             )
-        if discovered_artifacts or attempt == 4:
+        if discovered_artifacts or attempt == attempt_count - 1:
             return dedupe_discovered_artifacts(discovered_artifacts)
-        await asyncio.sleep(2)
+        await asyncio.sleep(0.5 if authoritative_manifest else 2)
     return []
 
 
@@ -557,36 +565,34 @@ def _csv_metadata(path: Path) -> dict:
     try:
         with path.open("r", encoding="utf-8-sig", newline="") as file:
             reader = csv.reader(file)
-            rows = list(reader)
+            columns = next(reader, None)
+            if columns is None:
+                return {}
+            preview_rows: list[list[str]] = []
+            row_count = 0
+            for row in reader:
+                row_count += 1
+                if len(preview_rows) < 100:
+                    preview_rows.append(row)
     except OSError:
         return {}
 
-    if not rows:
-        return {}
-
     return {
-        "columns": rows[0],
-        "rows": rows[1:101],
+        "columns": columns,
+        "rows": preview_rows,
         "summary": [
-            {"label": "Rows", "value": str(max(len(rows) - 1, 0))},
-            {"label": "Columns", "value": str(len(rows[0]))},
+            {"label": "Rows", "value": str(row_count)},
+            {"label": "Columns", "value": str(len(columns))},
         ],
     }
 
 
 def _image_metadata(path: Path) -> dict:
-    try:
-        encoded = base64.b64encode(path.read_bytes()).decode("ascii")
-    except OSError:
-        encoded = ""
-
-    mime = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
     return {
         "images": [
             {
                 "id": _artifact_id(path),
                 "prompt": path.stem,
-                "url": f"data:{mime};base64,{encoded}" if encoded else None,
             }
         ]
     }
@@ -596,6 +602,7 @@ def _metadata(
     path: Path,
     artifact_type: ArtifactType,
     *,
+    content_hash: str | None = None,
     original_path: str | None = None,
 ) -> dict:
     role_path = Path(original_path) if original_path else path
@@ -609,7 +616,7 @@ def _metadata(
         artifact_role = "preview_fallback"
     base = {
         "artifactRole": artifact_role,
-        "contentHash": _file_sha256(path),
+        "contentHash": content_hash or _file_sha256(path),
         "developerOnly": artifact_role == "intermediate",
         "filename": path.name,
         "normalizedPath": _normalized_path_key(path),
@@ -640,6 +647,7 @@ def _artifact_from_path(
     path: Path,
     *,
     artifact_type_override: str | None = None,
+    content_hash: str | None = None,
     metadata_extra: dict[str, Any] | None = None,
     original_path: str | None = None,
     title_override: str | None = None,
@@ -653,7 +661,12 @@ def _artifact_from_path(
         return None
 
     artifact_type = _valid_artifact_type(artifact_type_override, _artifact_type(path))
-    metadata = _metadata(path, artifact_type, original_path=original_path)
+    metadata = _metadata(
+        path,
+        artifact_type,
+        content_hash=content_hash,
+        original_path=original_path,
+    )
     if metadata_extra:
         metadata.update({key: value for key, value in metadata_extra.items() if value is not None})
     return schemas.Artifact(
@@ -698,13 +711,24 @@ def _normalize_path(raw_path: str) -> Path:
     return Path(raw_path.strip().strip(".,;:)]}\"'"))
 
 
-def _archive_artifact_path(path: Path, run_id: str | None) -> Path:
+def _archive_artifact_path(
+    path: Path,
+    run_id: str | None,
+    archive_dir: Path | None = None,
+) -> Path:
     if not run_id:
         return path
     if not _is_regular_artifact_candidate(path):
         return path
 
-    artifact_dir = _runtime_artifacts_dir(run_id)
+    artifact_dir = (archive_dir or _runtime_artifacts_dir(run_id)).expanduser().resolve()
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        path.resolve().relative_to(artifact_dir)
+    except ValueError:
+        pass
+    else:
+        return path
     digest = hashlib.sha1(str(path).encode("utf-8", errors="ignore")).hexdigest()[:10]
     destination = artifact_dir / f"{path.stem}-{digest}{path.suffix.lower()}"
     if not destination.exists() or destination.stat().st_mtime < path.stat().st_mtime:
@@ -786,6 +810,8 @@ def create_artifacts_from_paths(
     session_id: str,
     paths: list[str],
     run_id: str | None = None,
+    *,
+    archive_dir: Path | None = None,
 ) -> list[schemas.Artifact]:
     artifacts: list[schemas.Artifact] = []
 
@@ -802,7 +828,7 @@ def create_artifacts_from_paths(
             continue
         readable_path, temp_dir = _materialize_wsl_artifact(path)
         try:
-            archived_path = _archive_artifact_path(readable_path, run_id)
+            archived_path = _archive_artifact_path(readable_path, run_id, archive_dir)
             artifact = _artifact_from_path(
                 session_id,
                 archived_path,
@@ -826,6 +852,8 @@ def create_artifacts_from_refs(
     session_id: str,
     artifact_refs: list[object],
     run_id: str | None = None,
+    *,
+    archive_dir: Path | None = None,
 ) -> list[schemas.Artifact]:
     artifacts: list[schemas.Artifact] = []
 
@@ -880,6 +908,11 @@ def create_artifacts_from_refs(
             if not isinstance(artifact_ref, dict)
             else artifact_ref.get("discovered_by") or artifact_ref.get("discoveredBy")
         )
+        path_scope = (
+            getattr(artifact_ref, "path_scope", None)
+            if not isinstance(artifact_ref, dict)
+            else artifact_ref.get("path_scope") or artifact_ref.get("pathScope")
+        )
         expected_size = (
             getattr(artifact_ref, "size_bytes", None)
             if not isinstance(artifact_ref, dict)
@@ -925,11 +958,12 @@ def create_artifacts_from_refs(
                 and actual_sha256 != expected_sha256
             ):
                 raise RuntimeError(f"Artifact manifest checksum mismatch for {path}.")
-            archived_path = _archive_artifact_path(readable_path, run_id)
+            archived_path = _archive_artifact_path(readable_path, run_id, archive_dir)
             artifact = _artifact_from_path(
                 session_id,
                 archived_path,
                 artifact_type_override=artifact_type,
+                content_hash=actual_sha256,
                 metadata_extra={
                     "adapterProtocol": manifest_schema or "hermes.artifact.v1",
                     "adapterRunId": ref_run_id,
@@ -939,10 +973,11 @@ def create_artifacts_from_refs(
                     "artifactRole": role,
                     "manifestEntryId": entry_id,
                     "manifestDiscoveredBy": discovered_by,
+                    "manifestPathScope": path_scope,
                     "manifestExpectedSize": expected_size,
                     "manifestExpectedSha256": expected_sha256,
                     "manifestIntegrityVerified": bool(
-                        manifest_schema == "webagent.artifacts.v2"
+                        manifest_schema in SUPPORTED_ARTIFACT_MANIFEST_SCHEMAS
                         and actual_sha256
                         and actual_sha256 == expected_sha256
                     ),
@@ -961,7 +996,8 @@ def create_artifacts_from_refs(
     manifest_artifacts = [
         artifact
         for artifact in artifacts
-        if (artifact.metadata or {}).get("adapterProtocol") == "webagent.artifacts.v2"
+        if (artifact.metadata or {}).get("adapterProtocol")
+        in SUPPORTED_ARTIFACT_MANIFEST_SCHEMAS
     ]
     legacy_artifacts = [artifact for artifact in artifacts if artifact not in manifest_artifacts]
     artifacts = manifest_artifacts + dedupe_discovered_artifacts(legacy_artifacts)

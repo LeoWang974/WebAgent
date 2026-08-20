@@ -22,6 +22,7 @@
 import asyncio
 import json
 import os
+import zipfile
 from datetime import datetime
 from pathlib import Path
 
@@ -152,7 +153,8 @@ def test_hermes_resolves_relative_artifacts_from_final_output(tmp_path: Path):
     wrapper = HermesCliWrapper()
     pptx_path = tmp_path / "2026 AI assistant trends.pptx"
     html_path = tmp_path / "deck-preview.html"
-    pptx_path.write_bytes(b"pptx")
+    with zipfile.ZipFile(pptx_path, "w") as archive:
+        archive.writestr("[Content_Types].xml", "<Types />")
     html_path.write_text("<html></html>", encoding="utf-8")
 
     wrapper._remember_final_output_artifact_paths(
@@ -213,7 +215,8 @@ async def test_hermes_emits_artifact_found_after_final_output_discovery(
 ):
     wrapper = HermesCliWrapper()
     pptx_path = tmp_path / "final-deck.pptx"
-    pptx_path.write_bytes(b"pptx")
+    with zipfile.ZipFile(pptx_path, "w") as archive:
+        archive.writestr("[Content_Types].xml", "<Types />")
 
     stdout = asyncio.StreamReader()
     stdout.feed_data(b"PPTX: final-deck.pptx\n")
@@ -262,16 +265,16 @@ async def test_hermes_emits_artifact_found_after_final_output_discovery(
     assert artifact_event.payload["finalDiscovery"] is True
     assert wrapper._env["WEBAGENT_CONVERSATION_ID"] == "conversation-1"
     assert wrapper._env["WEBAGENT_RUN_ID"] == "run-1"
-    assert wrapper._env["WEBAGENT_RUNTIME_POLICY"] == "managed-artifacts-v2"
+    assert wrapper._env["WEBAGENT_RUNTIME_POLICY"] == "managed-artifacts-v3"
     assert wrapper._env["WEBAGENT_OUTPUT_DIR"] == wrapper._env["WEBAGENT_ARTIFACTS_DIR"]
     assert wrapper.last_diagnostics["runtime_instruction_injected"] is False
     manifest_path = tmp_path / "artifacts" / "artifact-manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    assert manifest["schema"] == "webagent.artifacts.v2"
+    assert manifest["schema"] == "webagent.artifacts.v3"
     assert manifest["status"] == "finalized"
     assert manifest["run_id"] == "run-1"
     assert manifest["artifacts"][0]["sha256"]
-    assert artifact_event.payload["artifactManifestSchema"] == "webagent.artifacts.v2"
+    assert artifact_event.payload["artifactManifestSchema"] == "webagent.artifacts.v3"
     assert manifest_event.payload["artifactManifestFinalized"] is True
     assert manifest_event.payload["artifactManifestEntryCount"] == 1
 

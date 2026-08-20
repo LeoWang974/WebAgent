@@ -65,22 +65,36 @@ def _expired_runtime_targets(
     user_root: Path,
     cutoff: datetime,
 ) -> list[Path]:
-    targets: list[Path] = []
-    for directory in (
-        root / "agent-runs",
-        root / "hermes-prompts",
-        root / "hermes-runs",
-    ):
+    targets: set[Path] = set()
+    agent_runs_root = root / "agent-runs"
+    if agent_runs_root.is_dir():
+        run_directories = {
+            marker.parent
+            for marker in agent_runs_root.rglob("package.json")
+            if marker.is_file()
+        }
+        targets.update(path for path in run_directories if _is_expired(path, cutoff))
+        for child in agent_runs_root.iterdir():
+            if child.is_file() and _is_expired(child, cutoff):
+                targets.add(child)
+            elif child.is_dir() and not any(
+                run_dir == child or child in run_dir.parents for run_dir in run_directories
+            ):
+                # Legacy versions stored one Run directly below agent-runs.
+                if _is_expired(child, cutoff):
+                    targets.add(child)
+
+    for directory in (root / "hermes-prompts", root / "hermes-runs"):
         if directory.is_dir():
-            targets.extend(child for child in directory.iterdir() if _is_expired(child, cutoff))
+            targets.update(child for child in directory.iterdir() if _is_expired(child, cutoff))
 
     if user_root.is_dir():
         for runs_dir in user_root.glob("*/conversations/*/runs"):
             if runs_dir.is_dir():
-                targets.extend(
+                targets.update(
                     child for child in runs_dir.iterdir() if _is_expired(child, cutoff)
                 )
-    return targets
+    return sorted(targets, key=str)
 
 
 def _expired_raw_logs(repo_root: Path, cutoff: datetime) -> list[Path]:

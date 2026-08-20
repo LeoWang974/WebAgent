@@ -73,15 +73,16 @@ def store_artifact_file(
     conversation_id: str,
     run_id: str,
     is_primary: bool,
+    content_hash: str | None = None,
 ) -> StoredArtifactFile:
     run_dir = artifact_run_storage_dir(user_id, conversation_id, run_id)
     category = "primary" if is_primary else "intermediate"
     target_dir = run_dir / category
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    content_hash = file_sha256(source)
+    resolved_content_hash = content_hash or file_sha256(source)
     destination = target_dir / (
-        f"{safe_storage_segment(source.stem, 'artifact')}-{content_hash[:12]}"
+        f"{safe_storage_segment(source.stem, 'artifact')}-{resolved_content_hash[:12]}"
         f"{source.suffix.lower()}"
     )
     if not destination.exists():
@@ -96,7 +97,7 @@ def store_artifact_file(
         path=destination,
         run_dir=run_dir,
         category=category,
-        content_hash=content_hash,
+        content_hash=resolved_content_hash,
     )
 
 
@@ -146,7 +147,7 @@ def store_protocol_artifact_manifest(
     conversation_id: str,
     run_id: str,
 ) -> Path:
-    """Persist the adapter-owned v2 manifest beside the archived run outputs."""
+    """Persist the adapter-owned protocol manifest beside the archived run outputs."""
     run_dir = artifact_run_storage_dir(user_id, conversation_id, run_id)
     destination = run_dir / PROTOCOL_MANIFEST_FILENAME
     temporary = destination.with_suffix(".json.tmp")

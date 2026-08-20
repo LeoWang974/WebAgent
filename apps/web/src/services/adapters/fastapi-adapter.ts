@@ -120,10 +120,19 @@ export const fastApiAdapter: WebAgentApiAdapter = {
       }
     }
   },
-  listArtifacts(sessionId?: string) {
-    const path = sessionId
-      ? `/api/sessions/${sessionId}/artifacts`
-      : "/api/artifacts";
+  listArtifacts(sessionId?: string, runId?: string) {
+    const query = new URLSearchParams();
+    if (sessionId) {
+      query.set("sessionId", sessionId);
+    }
+    if (runId) {
+      query.set("runId", runId);
+    }
+    const path = runId
+      ? `/api/artifacts?${query.toString()}`
+      : sessionId
+        ? `/api/sessions/${sessionId}/artifacts`
+        : "/api/artifacts";
     return apiClient<Artifact[]>(path);
   },
   listAgentRuns(sessionId?: string) {
