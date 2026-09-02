@@ -82,6 +82,13 @@ async def test_run_artifact_list_is_authoritative_and_hides_unready_rows(
     assert [item["id"] for item in response.json()] == [ready_artifact_id]
     assert response.json()[0]["runId"] == current_run_id
 
+    session_response = await api_client.get(
+        f"/api/sessions/{conversation_id}/artifacts",
+        headers=auth_headers["owner"],
+    )
+    assert session_response.status_code == 200
+    assert [item["id"] for item in session_response.json()] == [ready_artifact_id]
+
     failed_detail = await api_client.get(
         f"/api/artifacts/{failed_artifact_id}",
         headers=auth_headers["owner"],

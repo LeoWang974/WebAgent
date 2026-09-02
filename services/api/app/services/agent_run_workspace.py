@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.models import Artifact
+from app.models import Artifact, FileAsset
 
 
 def safe_run_path_segment(value: str, fallback: str = "run") -> str:
@@ -118,6 +118,58 @@ async def stage_conversation_artifacts(
                 continue
             if destination.exists():
                 destination = destination_dir / f"{artifact.id[:8]}-{filename}"
+            _stage_artifact_file(source, destination)
+            if destination_dir == context_dir:
+                primary_destination = destination
+        if primary_destination is not None:
+            staged.append(primary_destination)
+
+    return staged
+
+
+async def stage_conversation_files(
+    db: AsyncSession,
+    conversation_id: str,
+    workspace: Path,
+    *,
+    limit: int = 20,
+    mirror_dirs: tuple[Path, ...] = (),
+) -> list[Path]:
+    """Expose uploaded conversation files inside the isolated Hermes workspace."""
+    result = await db.execute(
+        select(FileAsset)
+        .where(FileAsset.conversation_id == conversation_id)
+        .order_by(FileAsset.created_at.desc())
+        .limit(limit)
+    )
+    context_dir = workspace / "context"
+    destination_dirs = tuple(dict.fromkeys((context_dir, workspace, *mirror_dirs)))
+    staged: list[Path] = []
+
+    for file_asset in result.scalars().all():
+        metadata = file_asset.file_metadata or {}
+        source = next(
+            (
+                Path(value)
+                for value in (file_asset.storage_key, metadata.get("path"))
+                if isinstance(value, str) and value and Path(value).is_file()
+            ),
+            None,
+        )
+        if source is None:
+            continue
+
+        filename = safe_run_path_segment(file_asset.filename or source.name, "upload")
+        primary_destination: Path | None = None
+        for destination_dir in destination_dirs:
+            destination_dir.mkdir(parents=True, exist_ok=True)
+            destination = destination_dir / filename
+            if destination.exists() and destination.resolve() == source.resolve():
+                if destination_dir == context_dir:
+                    primary_destination = destination
+                continue
+            if destination.exists():
+                destination = destination_dir / f"{file_asset.id[:8]}-{filename}"
             _stage_artifact_file(source, destination)
             if destination_dir == context_dir:
                 primary_destination = destination

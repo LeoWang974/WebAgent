@@ -20,7 +20,6 @@ import {
   loadSessionWorkspace,
   resetChatRuntime,
   setSwitchingState,
-  subscribeAgentRunEvents,
   unsubscribeAgentRun,
 } from "./chat-runtime";
 import { sendMessageFlow } from "./send-message-flow";
@@ -478,6 +477,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   selectArtifact: (artifactId) => set({ selectedArtifactId: artifactId }),
   selectModel: (modelId) => set({ selectedModelId: modelId }),
   selectSession: (sessionId) => {
+    if (!get().sessions.some((session) => session.id === sessionId)) {
+      return;
+    }
+
     const artifact = selectPreferredArtifact(get().artifacts, sessionId);
     const activeRun = get().agentRuns.find(
       (run) => run.sessionId === sessionId && !isTerminalRunStatus(run.status),
@@ -491,9 +494,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
           : get().messages,
       selectedArtifactId: artifact?.id,
     });
-    if (activeRun) {
-      subscribeAgentRunEvents(get, set, activeRun.id);
-    }
     setSwitchingState(set, get, sessionId);
     void loadSessionWorkspace(get, set, sessionId);
   },

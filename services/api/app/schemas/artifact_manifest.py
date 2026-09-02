@@ -60,6 +60,7 @@ class ArtifactManifest(BaseModel):
     created_at: datetime
     updated_at: datetime
     finalized_at: datetime | None = None
+    required_artifact_types: list[ArtifactType] = Field(default_factory=list)
     artifacts: list[ArtifactManifestEntry] = Field(default_factory=list)
     recovery_used: bool = False
     errors: list[str] = Field(default_factory=list)

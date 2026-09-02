@@ -55,6 +55,7 @@ class AgentRunCreate(ApiModel):
 
 
 class AgentRunEvent(ApiModel):
+    event_id: str
     run_id: str
     event_type: str
     status: AgentRunStatus

@@ -70,6 +70,31 @@ def test_custom_openai_compatible_model_uses_user_snapshot():
     assert config.env_values()["OPENAI_BASE_URL"] == "https://api.deepseek.com/v1"
 
 
+@pytest.mark.parametrize(
+    ("provider", "name", "expected"),
+    [
+        ("sensenova", "SenseNova", "sensenova-6.8-flash-lite"),
+        ("deepseek", "DeepSeek", "deepseek-chat"),
+        ("openai", "GPT-5.5", "gpt-5.5"),
+    ],
+)
+def test_named_models_resolve_to_provider_model_ids(provider, name, expected):
+    config = model_runtime_config_from_model(
+        ModelConfig(
+            id=f"model-{provider}",
+            user_id="user-1",
+            name=name,
+            provider=provider,
+            base_url=None,
+            encrypted_api_key="user-key",
+            is_default=False,
+            is_available=True,
+        )
+    )
+
+    assert config.model_name == expected
+
+
 def test_explicit_custom_model_is_not_treated_as_runtime_selector():
     config = model_runtime_config_from_model(
         ModelConfig(

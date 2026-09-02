@@ -3,6 +3,7 @@
 
 import hashlib
 import json
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -16,6 +17,32 @@ from app.schemas.artifact_manifest import (
 )
 
 ARTIFACT_MANIFEST_FILENAME = "artifact-manifest.json"
+
+_OUTPUT_INTENT_RE = re.compile(
+    r"(?:生成|创建|输出|导出|保存|写入|produce|create|generate|export|save|write)",
+    re.IGNORECASE,
+)
+_REQUESTED_ARTIFACT_PATTERNS = {
+    "markdown_report": re.compile(r"(?:markdown|\.md\b|md 文件|markdown 文件)", re.IGNORECASE),
+    "html_page": re.compile(r"(?:html|\.html?\b|网页|页面)", re.IGNORECASE),
+    "ppt_deck": re.compile(r"(?:pptx?|powerpoint|演示文稿|幻灯片)", re.IGNORECASE),
+}
+
+
+def infer_required_artifact_types(content: str) -> set[str]:
+    """Infer explicit multi-file output requirements from a user request.
+
+    The parser only activates when the request contains an output verb and
+    names a supported artifact format, so ordinary questions about HTML or
+    Markdown do not become false completion contracts.
+    """
+    if not content or not _OUTPUT_INTENT_RE.search(content):
+        return set()
+    return {
+        artifact_type
+        for artifact_type, pattern in _REQUESTED_ARTIFACT_PATTERNS.items()
+        if pattern.search(content)
+    }
 
 
 def _utc_now() -> datetime:
@@ -148,12 +175,36 @@ class ArtifactManifestRecorder:
         self._write()
         return entry
 
-    def finalize(self, *, failed: bool = False, error: str | None = None) -> ArtifactManifest:
+    def set_required_artifact_types(self, artifact_types: set[str]) -> None:
+        """Record the final artifact contract before the manifest is closed."""
+        self.manifest.required_artifact_types = sorted(artifact_types)
+        self.manifest.updated_at = _utc_now()
+        self._write()
+
+    def finalize(
+        self,
+        *,
+        failed: bool = False,
+        error: str | None = None,
+        required_artifact_types: set[str] | None = None,
+    ) -> ArtifactManifest:
         now = _utc_now()
+        if required_artifact_types is not None:
+            self.set_required_artifact_types(required_artifact_types)
         for entry in self.manifest.artifacts:
             if entry.status in {"pending", "staging"}:
                 entry.status = "failed"
                 entry.error = entry.error or "Run ended before the file became stable."
+        ready_types = {
+            entry.artifact_type
+            for entry in self.manifest.artifacts
+            if entry.status == "ready" and entry.role == "primary"
+        }
+        missing_types = set(self.manifest.required_artifact_types) - ready_types
+        if missing_types:
+            failed = True
+            missing = ", ".join(sorted(missing_types))
+            error = error or f"Required primary artifacts are missing: {missing}."
         self.manifest.status = "failed" if failed else "finalized"
         self.manifest.updated_at = now
         self.manifest.finalized_at = now

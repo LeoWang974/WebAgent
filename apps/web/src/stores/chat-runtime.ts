@@ -36,6 +36,29 @@ function reportArtifactRefreshError(set: ChatStateSetter, error: unknown) {
   });
 }
 
+export async function refreshRunMessages(
+  get: () => ChatState,
+  set: ChatStateSetter,
+  sessionId: string,
+) {
+  const backendMessages = await webAgentApi.listMessages(sessionId);
+  if (get().currentSessionId !== sessionId) {
+    return;
+  }
+  set((state) => {
+    const existingById = new Map(state.messages.map((message) => [message.id, message]));
+    return {
+      messages: [
+        ...state.messages.filter((message) => message.sessionId !== sessionId),
+        ...backendMessages.map((message) => ({
+          ...message,
+          waitStartedAt: existingById.get(message.id)?.waitStartedAt,
+        })),
+      ],
+    };
+  });
+}
+
 export async function refreshRunArtifacts(
   get: () => ChatState,
   set: ChatStateSetter,
@@ -121,24 +144,12 @@ function startAgentRunPolling(
       return;
     }
     if (isTerminalRunStatus(run.status) && run.sessionId === get().currentSessionId) {
-      const [backendMessages] = await Promise.all([
-        webAgentApi.listMessages(run.sessionId),
+      await Promise.all([
+        refreshRunMessages(get, set, run.sessionId),
         refreshRunArtifacts(get, set, run.sessionId, run.id).catch((error) =>
           reportArtifactRefreshError(set, error),
         ),
       ]);
-      set((state) => {
-        const existingById = new Map(state.messages.map((message) => [message.id, message]));
-        return {
-          messages: [
-            ...state.messages.filter((message) => message.sessionId !== run.sessionId),
-            ...backendMessages.map((message) => ({
-              ...message,
-              waitStartedAt: existingById.get(message.id)?.waitStartedAt,
-            })),
-          ],
-        };
-      });
     }
     if (isTerminalRunStatus(run.status)) {
       window.setTimeout(() => unsubscribeAgentRun(run.id), 0);
@@ -191,7 +202,12 @@ export function subscribeAgentRunEvents(
       void get()
         .refreshAgentRun(runId)
         .then((run) =>
-          run ? refreshRunArtifacts(get, set, run.sessionId, run.id) : undefined,
+          run
+            ? Promise.all([
+                refreshRunMessages(get, set, run.sessionId),
+                refreshRunArtifacts(get, set, run.sessionId, run.id),
+              ]).then(() => undefined)
+            : undefined,
         )
         .catch((error) => reportArtifactRefreshError(set, error));
     }
@@ -218,6 +234,10 @@ export async function loadSessionWorkspace(
   set: ChatStateSetter,
   sessionId: string,
 ) {
+  if (!get().sessions.some((session) => session.id === sessionId)) {
+    return;
+  }
+
   try {
     const [messages, artifacts, agentRuns] = await Promise.all([
       webAgentApi.listMessages(sessionId),

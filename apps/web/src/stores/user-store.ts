@@ -72,6 +72,8 @@ export const useUserStore = create<UserState>((set, get) => ({
     set({ error: undefined, saving: true });
     try {
       const result = await webAgentApi.login(input);
+      useChatStore.getState().resetWorkspace();
+      useSettingsStore.getState().reset();
       set({ hydrated: true, saving: false, user: result.user });
       return true;
     } catch (error) {
@@ -96,6 +98,8 @@ export const useUserStore = create<UserState>((set, get) => ({
     set({ error: undefined, saving: true });
     try {
       const result = await webAgentApi.register(input);
+      useChatStore.getState().resetWorkspace();
+      useSettingsStore.getState().reset();
       set({ hydrated: true, saving: false, user: result.user });
       return true;
     } catch (error) {

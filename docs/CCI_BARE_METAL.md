@@ -56,6 +56,9 @@ JWT_SECRET_KEY=replace-with-a-long-random-secret
 
 SENSENOVA_API_KEY=sk-...
 SENSENOVA_BASE_URL=https://token.sensenova.cn/v1
+# Optional PEM bundle when the host/proxy uses a private CA.
+SENSENOVA_CA_BUNDLE=
+SENSENOVA_TIMEOUT_SECONDS=30
 SERPER_API_KEY=...
 
 HERMES_CLI_PATH=$WEBAGENT_ROOT/runtime/agent-home/.local/bin/hermes
@@ -75,6 +78,12 @@ BACKEND_CORS_ORIGINS=http://127.0.0.1:3000,http://localhost:3000
 Do not commit real keys. Preserve `secrets/model-config.key`; historical user
 model credentials cannot be decrypted without it.
 
+If the SenseNova connection reports `CERTIFICATE_VERIFY_FAILED`, export the
+complete PEM certificate chain trusted by the host/proxy and set
+`SENSENOVA_CA_BUNDLE` to that file. The same bundle is passed to the Hermes
+runtime as `SSL_CERT_FILE` and `REQUESTS_CA_BUNDLE`; TLS verification remains
+enabled.
+
 `scripts/cci-start.sh` defaults `ARTIFACT_STORAGE_ROOT` to `$WEBAGENT_ROOT/artifacts` and creates
 the directory before migrations and workers start. On the current CCI deployment,
 `WEBAGENT_ROOT=/mnt/afs/tj_share/webagent-cci`, so original artifacts and both manifest files remain
@@ -89,8 +98,9 @@ bash scripts/cci-status.sh
 bash scripts/cci-stop.sh
 ```
 
-The start script launches FastAPI, one short-chat worker, four long-task workers,
-and Next.js. It also runs Alembic migrations before accepting requests.
+The start script launches FastAPI, six content-agnostic Agent Run workers, and
+Next.js. It also runs Alembic migrations before accepting requests. WebAgent
+does not classify user prompts; every message is forwarded unchanged to Hermes.
 
 Useful checks:
 

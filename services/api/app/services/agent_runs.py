@@ -76,6 +76,7 @@ def create_hermes_adapter(
         wsl_distribution=settings.hermes_wsl_distribution,
         serper_configured=bool(settings.serper_api_key),
         resume_session_id=runtime_context.hermes_resume_session_id,
+        model_runtime_config=model_runtime_config,
     )
 
 
@@ -141,6 +142,7 @@ def to_agent_run_schema(
 def to_agent_run_event_schema(event: DBAgentRunEvent, run: DBAgentRun) -> schemas.AgentRunEvent:
     payload = event.payload or {}
     return schemas.AgentRunEvent(
+        event_id=event.id,
         run_id=run.id,
         event_type=event.event_type,
         status=payload.get("status") or run.status,

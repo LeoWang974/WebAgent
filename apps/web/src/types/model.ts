@@ -4,7 +4,12 @@
  * callable declarations.
  */
 
-export type ModelProvider = "sensenova" | "openai_compatible" | "custom";
+export type ModelProvider =
+  | "sensenova"
+  | "deepseek"
+  | "openai"
+  | "openai_compatible"
+  | "custom";
 
 export interface ModelRuntimeStatus {
   adapterKey?: string;

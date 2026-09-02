@@ -41,6 +41,7 @@ export interface AgentRun {
 }
 
 export interface AgentRunEvent {
+  eventId?: string;
   runId: string;
   eventType: string;
   status: AgentRunStatus;

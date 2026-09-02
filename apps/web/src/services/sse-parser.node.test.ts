@@ -6,7 +6,7 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseSseEvents, splitSseBuffer } from "./sse-parser.ts";
+import { createSseEventDeduper, parseSseEvents, splitSseBuffer } from "./sse-parser.ts";
 
 test("parseSseEvents keeps valid events and ignores malformed JSON", () => {
   const originalWarn = console.warn;
@@ -61,4 +61,31 @@ test("splitSseBuffer keeps incomplete trailing events until the next chunk", () 
       type: "assistant_done",
     },
   ]);
+});
+
+test("parseSseEvents accepts CRLF-delimited events", () => {
+  assert.deepEqual(
+    parseSseEvents('event: agent_run_event\r\ndata: {"runId":"run-1"}\r\n\r\n'),
+    [{ data: { runId: "run-1" }, type: "agent_run_event" }],
+  );
+});
+
+test("splitSseBuffer normalizes CRLF without losing the trailing event", () => {
+  const result = splitSseBuffer(
+    'event: assistant_delta\r\ndata: {"content":"中文"}\r\n\r\n',
+  );
+
+  assert.deepEqual(result.events, [
+    { data: { content: "中文" }, type: "assistant_delta" },
+  ]);
+  assert.equal(result.remainingBuffer, "");
+});
+
+test("SSE reconnect deduper ignores replayed persisted events", () => {
+  const shouldDispatch = createSseEventDeduper();
+
+  assert.equal(shouldDispatch({ eventId: "event-1" }), true);
+  assert.equal(shouldDispatch({ eventId: "event-1" }), false);
+  assert.equal(shouldDispatch({ eventId: "event-2" }), true);
+  assert.equal(shouldDispatch({}), true);
 });

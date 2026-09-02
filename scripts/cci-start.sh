@@ -16,13 +16,19 @@ AGENT_BIN_DIR="$ROOT_DIR/runtime/agent-home/.local/bin"
 AGENT_HOME_DIR="$ROOT_DIR/runtime/agent-home"
 HERMES_NODE_DIR="$ROOT_DIR/runtime/agent-home/.hermes/node/bin"
 HERMES_PPT_EXPORT_DIR="$ROOT_DIR/runtime/agent-home/.hermes/skills/sn-ppt-standard/scripts/export_pptx"
+
+if [ -f "$AGENT_ENV" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$AGENT_ENV"
+  set +a
+fi
+
 WEB_PORT="${WEB_PORT:-3000}"
 API_PORT="${API_PORT:-8010}"
 WORKER_POOL="${WORKER_POOL:-solo}"
 WORKER_CONCURRENCY="${WORKER_CONCURRENCY:-1}"
-WORKER_INSTANCES="${WORKER_INSTANCES:-4}"
-SHORT_CHAT_WORKER_INSTANCES="${SHORT_CHAT_WORKER_INSTANCES:-2}"
-SHORT_CHAT_QUEUE_NAME="${SHORT_CHAT_QUEUE_NAME:-short-chat}"
+WORKER_INSTANCES="${WORKER_INSTANCES:-6}"
 AGENT_RUN_QUEUE_NAME="${AGENT_RUN_QUEUE_NAME:-agent-runs}"
 CCI_MANAGE_LOCAL_INFRA="${CCI_MANAGE_LOCAL_INFRA:-true}"
 POSTGRES_DATA_DIR="${POSTGRES_DATA_DIR:-$ROOT_DIR/runtime/postgres/data}"
@@ -103,13 +109,6 @@ start_local_infrastructure() {
 
 start_local_infrastructure
 
-if [ -f "$AGENT_ENV" ]; then
-  set -a
-  # shellcheck disable=SC1090
-  . "$AGENT_ENV"
-  set +a
-fi
-
 if [ -z "${MODEL_CONFIG_ENCRYPTION_KEY:-}" ]; then
   mkdir -p "$(dirname "$MODEL_SECRET_KEY_FILE")"
   if [ ! -f "$MODEL_SECRET_KEY_FILE" ]; then
@@ -131,7 +130,6 @@ export BACKEND_CORS_ORIGINS="${BACKEND_CORS_ORIGINS:-$DEFAULT_CORS_ORIGINS}"
 export ARTIFACT_STORAGE_ENABLED="true"
 export ARTIFACT_STORAGE_ROOT
 export AGENT_RUN_QUEUE_NAME="$AGENT_RUN_QUEUE_NAME"
-export SHORT_CHAT_QUEUE_NAME="$SHORT_CHAT_QUEUE_NAME"
 export SN_API_KEY="${SN_API_KEY:-${SENSENOVA_API_KEY:-${OPENAI_API_KEY:-${LLM_API_KEY:-}}}}"
 export SN_BASE_URL="${SN_BASE_URL:-${SENSENOVA_BASE_URL:-${OPENAI_BASE_URL:-${LLM_BASE_URL:-}}}}"
 export SN_TEXT_API_KEY="${SN_TEXT_API_KEY:-$SN_API_KEY}"
@@ -181,7 +179,7 @@ fi
 for pattern in \
   "uvicorn app.main:app --host 0.0.0.0 --port $API_PORT" \
   "celery -A app.workers.celery_app.celery_app worker" \
-  "next start -H 0.0.0.0 -p $WEB_PORT" \
+  "next start -H 0.0.0.0 -p $WEB_PORT"
 do
   pids="$(pgrep -u "$(id -un)" -f "$pattern" || true)"
   if [ -n "$pids" ]; then
@@ -194,7 +192,7 @@ sleep 2
 for pattern in \
   "uvicorn app.main:app --host 0.0.0.0 --port $API_PORT" \
   "celery -A app.workers.celery_app.celery_app worker" \
-  "next start -H 0.0.0.0 -p $WEB_PORT" \
+  "next start -H 0.0.0.0 -p $WEB_PORT"
 do
   pids="$(pgrep -u "$(id -un)" -f "$pattern" || true)"
   if [ -n "$pids" ]; then
@@ -242,15 +240,6 @@ rm -f "$RUN_DIR"/webagent-worker*.pid
 nohup "$PYTHON_BIN" -m uvicorn app.main:app --host 0.0.0.0 --port "$API_PORT" \
   >> "$LOG_DIR/webagent-api.log" 2>&1 &
 echo "$!" > "$RUN_DIR/webagent-api.pid"
-
-for short_worker_index in $(seq 1 "$SHORT_CHAT_WORKER_INSTANCES"); do
-  nohup "$PYTHON_BIN" -m celery -A app.workers.celery_app.celery_app worker \
-    --hostname="webagent-worker-short-${short_worker_index}@%h" \
-    --loglevel=INFO -Q "$SHORT_CHAT_QUEUE_NAME" \
-    --pool="$WORKER_POOL" --concurrency=1 \
-    >> "$LOG_DIR/webagent-worker.log" 2>&1 &
-  echo "$!" > "$RUN_DIR/webagent-worker-short-${short_worker_index}.pid"
-done
 
 for worker_index in $(seq 1 "$WORKER_INSTANCES"); do
   worker_name="webagent-worker-${worker_index}@%h"

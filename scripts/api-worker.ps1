@@ -31,7 +31,7 @@ $workerQueues = if ($Queues) {
 } elseif ($env:WORKER_QUEUES) {
   $env:WORKER_QUEUES
 } else {
-  "short-chat,agent-runs"
+  "agent-runs"
 }
 $workerPool = if ($Pool) {
   $Pool

@@ -9,6 +9,7 @@ import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import { FileUploadButton } from "./file-upload-button";
 import { ModelSelector } from "./model-selector";
 import { useChatStore, useUiStore } from "@/stores";
+import { webAgentApi } from "@/services";
 import { ArrowUp, Square } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 
@@ -20,6 +21,7 @@ export function ChatComposer() {
   const agentRuns = useChatStore((state) => state.agentRuns);
   const currentSessionId = useChatStore((state) => state.currentSessionId);
   const sendMessage = useChatStore((state) => state.sendMessage);
+  const createSession = useChatStore((state) => state.createSession);
   const stopActiveRun = useChatStore((state) => state.stopActiveRun);
   const sendShortcut = useUiStore((state) => state.sendShortcut);
   const currentActiveRun = agentRuns.find(
@@ -28,6 +30,18 @@ export function ChatComposer() {
       !["completed", "failed", "cancelled", "disconnected"].includes(run.status),
   );
   const running = Boolean(currentActiveRun);
+
+  async function uploadFile(file: File) {
+    let targetSessionId = currentSessionId;
+    if (!targetSessionId) {
+      const session = await createSession();
+      targetSessionId = session?.id ?? "";
+    }
+    if (!targetSessionId) {
+      throw new Error("Create a conversation before uploading a file.");
+    }
+    await webAgentApi.uploadFile({ file, sessionId: targetSessionId });
+  }
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -80,7 +94,7 @@ export function ChatComposer() {
         />
         <div className="flex items-center justify-between gap-2 border-t px-1.5 pt-2">
           <div className="flex min-w-0 items-center gap-1.5">
-            <FileUploadButton />
+            <FileUploadButton disabled={running} onUpload={uploadFile} />
             <ModelSelector />
           </div>
           <div className="flex shrink-0 items-center gap-1.5">

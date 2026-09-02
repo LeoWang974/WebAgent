@@ -12,7 +12,7 @@ import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { useI18n, type TranslationKey } from "@/lib/i18n";
-import { useChatStore, useUiStore } from "@/stores";
+import { useChatStore, useUiStore, useUserStore } from "@/stores";
 import type { Session } from "@/types";
 import { SessionItem } from "./session-item";
 
@@ -114,6 +114,7 @@ export function SessionList() {
   const folders = useChatStore((state) => state.folders);
   const loading = useChatStore((state) => state.loading);
   const currentSessionId = useChatStore((state) => state.currentSessionId);
+  const currentUserId = useUserStore((state) => state.user?.id);
   const deleteSession = useChatStore((state) => state.deleteSession);
   const switchingSessionId = useChatStore((state) => state.switchingSessionId);
   const selectSession = useChatStore((state) => state.selectSession);
@@ -177,6 +178,7 @@ export function SessionList() {
     return (
       <SessionItem
         active={session.id === currentSessionId}
+        canManage={!session.ownerId || session.ownerId === currentUserId}
         folderId={session.folderId}
         folders={folders}
         href={`/app/chat/${session.id}`}
@@ -187,9 +189,6 @@ export function SessionList() {
           selectSession(session.id);
         }}
         onDelete={async () => {
-          const remainingSessions = filteredSessions.filter((item) => item.id !== session.id);
-          const nextSessionId = remainingSessions[0]?.id;
-
           const deleted = await deleteSession(session.id);
           if (!deleted) {
             return;
@@ -198,7 +197,8 @@ export function SessionList() {
           closeSidebarDrawer();
 
           if (session.id === currentSessionId) {
-            router.push(nextSessionId ? `/app/chat/${nextSessionId}` : "/app");
+            const nextSessionId = useChatStore.getState().currentSessionId;
+            router.replace(nextSessionId ? `/app/chat/${nextSessionId}` : "/app");
           }
         }}
         onMoveToFolder={(folderId) => moveSessionToFolder(session.id, folderId)}

@@ -33,11 +33,7 @@ export function isDefaultSessionTitle(title?: string) {
 }
 
 export function generateSessionTitle(content: string) {
-  const cleaned = content
-    .replace(/[`*_>#\[\]{}()（）《》“”‘’]/g, " ")
-    .replace(/\s+/g, " ")
-    .replace(/^(请|请帮我|帮我|麻烦|使用|基于|最后|现在|接下来|生成|分析|写一份|做一份)+/i, "")
-    .trim();
+  const cleaned = content.replace(/\s+/g, " ").trim();
   if (!cleaned) {
     return "新任务";
   }

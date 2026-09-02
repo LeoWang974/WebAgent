@@ -13,6 +13,7 @@
 # records managed runtime output.
 
 import json
+from inspect import signature
 from pathlib import Path
 
 import pytest
@@ -21,9 +22,9 @@ from app import schemas
 from app.core.config import settings
 from app.models import Artifact, Conversation
 from app.services.agent_run_artifact_service import (
-    explicit_requested_artifact_type,
+    discover_and_persist_run_artifacts,
+    final_assistant_message,
     raise_for_fatal_runtime_diagnostics,
-    validate_explicit_output_artifact,
 )
 from app.services.session_artifacts import (
     _artifact_match_keys,
@@ -100,44 +101,60 @@ def test_fatal_runtime_diagnostics_match_stalled_tool_call():
         )
 
 
-def test_explicit_requested_artifact_type_uses_declared_output_path():
-    content = "读取 ./reports/source.html，保存为 ./reports/final.pptx。"
-
-    assert explicit_requested_artifact_type(content) == "ppt_deck"
-
-
-@pytest.mark.parametrize(
-    ("content", "expected_type"),
-    [
-        ("生成 4 页演示文稿，并真正导出为可下载的 .pptx 文件。", "ppt_deck"),
-        ("Create a real downloadable .pptx file.", "ppt_deck"),
-        ("Export a standalone .html file.", "html_page"),
-        ("输出 .md 文件。", "markdown_report"),
-    ],
-)
-def test_explicit_requested_artifact_type_accepts_standalone_extension(
-    content: str,
-    expected_type: str,
+@pytest.mark.asyncio
+async def test_final_assistant_message_does_not_use_stage_message_when_artifacts_exist(
+    monkeypatch,
 ):
-    assert explicit_requested_artifact_type(content) == expected_type
+    stage_message = object()
+    persisted_message = object()
+
+    async def fake_persist_message(*args, **kwargs):
+        return persisted_message
+
+    monkeypatch.setattr(
+        "app.services.agent_run_artifact_service.persist_message",
+        fake_persist_message,
+    )
+
+    result = await final_assistant_message(
+        db=object(),
+        conversation_id="conversation-1",
+        assistant_messages=[stage_message],
+        response_artifacts=[type("Artifact", (), {"id": "artifact-1"})()],
+        completion_messages=[],
+    )
+
+    assert result is persisted_message
 
 
-def test_explicit_json_is_not_treated_as_a_primary_output_contract():
-    assert explicit_requested_artifact_type("Export ./reports/debug.json") is None
+@pytest.mark.asyncio
+async def test_final_assistant_message_prefers_explicit_completion_message(
+    monkeypatch,
+):
+    stage_message = object()
+    completion_message = type("Message", (), {"artifact_ids": []})()
+
+    class FakeDb:
+        async def flush(self):
+            return None
+
+        async def refresh(self, message):
+            return None
+
+    result = await final_assistant_message(
+        db=FakeDb(),
+        conversation_id="conversation-1",
+        assistant_messages=[stage_message],
+        response_artifacts=[type("Artifact", (), {"id": "artifact-1"})()],
+        completion_messages=[completion_message],
+    )
+
+    assert result is completion_message
+    assert completion_message.artifact_ids == ["artifact-1"]
 
 
-def test_explicit_output_validation_rejects_missing_requested_type():
-    html_artifact = type(
-        "Artifact",
-        (),
-        {"type": "html_page", "is_primary": True},
-    )()
-
-    with pytest.raises(RuntimeError, match="explicitly requested ppt_deck"):
-        validate_explicit_output_artifact(
-            "保存为 ./reports/final.pptx",
-            [html_artifact],
-        )
+def test_artifact_discovery_does_not_accept_user_prompt_content():
+    assert "content" not in signature(discover_and_persist_run_artifacts).parameters
 
 
 def test_manifest_entry_identity_does_not_use_cross_run_content_hash():

@@ -2,9 +2,17 @@
 # Main declarations: now_iso handles now iso; HermesAdapter defines hermes adapter state or
 # behavior.
 
-import re
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
+from os import environ
+
+import httpx
+
+from app.core.config import settings
+from app.services.model_runtime_config import (
+    OPENAI_COMPATIBLE_PROVIDERS,
+    ModelRuntimeConfig,
+)
 
 from .cli import HermesCliWrapper
 from .schemas import AgentArtifactRef, AgentRunCreate, AgentRunEvent, AgentRunStep
@@ -13,12 +21,6 @@ RECOVERABLE_TOOL_STALL_MARKERS = (
     "stream stalled mid tool-call",
     "the action was not executed",
 )
-EXPLICIT_ARTIFACT_SUFFIX_RE = re.compile(
-    r"\.(?:md|html?|pptx|png|jpe?g|csv|xlsx)\b",
-    re.IGNORECASE,
-)
-
-
 def now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -31,14 +33,95 @@ class HermesAdapter:
         wsl_distribution: str = "Ubuntu",
         serper_configured: bool = False,
         resume_session_id: str | None = None,
+        model_runtime_config: ModelRuntimeConfig | None = None,
     ):
         self.resume_session_id = resume_session_id
+        self.model_runtime_config = model_runtime_config
         self.cli = HermesCliWrapper(
             hermes_path,
             hermes_home,
             wsl_distribution,
             serper_configured=serper_configured,
         )
+
+    async def health_check(self) -> dict[str, object]:
+        """Probe the configured OpenAI-compatible endpoint used by Hermes.
+
+        Hermes itself does not expose a health endpoint, so a minimal chat
+        completion request is the most reliable way to verify credentials,
+        endpoint and model configuration together.
+        """
+        runtime_config = self.model_runtime_config
+        if runtime_config is None:
+            return {
+                "ok": False,
+                "status": "unconfigured",
+                "message": "Model runtime configuration is missing.",
+            }
+        provider = runtime_config.provider.strip().lower()
+        base_url = (runtime_config.base_url or "").strip()
+        api_key = (runtime_config.api_key or "").strip()
+        if provider not in OPENAI_COMPATIBLE_PROVIDERS:
+            return {
+                "ok": False,
+                "status": "unsupported",
+                "message": f"Provider '{runtime_config.provider}' is not supported by Hermes.",
+            }
+        if not base_url:
+            return {
+                "ok": False,
+                "status": "unconfigured",
+                "message": "Model base URL is not configured.",
+            }
+        if not api_key:
+            return {
+                "ok": False,
+                "status": "unconfigured",
+                "message": "Model API key is not configured.",
+            }
+
+        endpoint = f"{base_url.rstrip('/')}/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": runtime_config.model_name,
+            "messages": [{"role": "user", "content": "ping"}],
+            "max_tokens": 1,
+            "temperature": 0,
+        }
+        verify: bool | str = (
+            settings.sensenova_ca_bundle
+            or environ.get("SSL_CERT_FILE")
+            or environ.get("REQUESTS_CA_BUNDLE")
+            or True
+        )
+        try:
+            async with httpx.AsyncClient(
+                timeout=settings.sensenova_timeout_seconds,
+                verify=verify,
+            ) as client:
+                response = await client.post(endpoint, headers=headers, json=payload)
+        except httpx.HTTPError as error:
+            return {
+                "ok": False,
+                "status": "unavailable",
+                "message": f"Model API request failed: {error.__class__.__name__}.",
+            }
+        if response.is_success:
+            return {
+                "ok": True,
+                "status": "connected",
+                "message": "Model API connection succeeded.",
+                "status_code": response.status_code,
+            }
+        return {
+            "ok": False,
+            "status": "unavailable",
+            "message": f"Model API returned HTTP {response.status_code}.",
+            "status_code": response.status_code,
+        }
 
     async def cancel_run(self, run_id: str) -> bool:
         return await self.cli.cancel_run(run_id)
@@ -49,7 +132,6 @@ class HermesAdapter:
     ) -> AsyncGenerator[AgentRunEvent, None]:
         event_index = 0
         run_id = input_data.run_id or input_data.session_id
-        requested_suffix = self._explicit_artifact_suffix(input_data.content)
 
         for attempt in range(2):
             recoverable_stall = False
@@ -92,19 +174,10 @@ class HermesAdapter:
                     ),
                 )
 
-            diagnostics = self.cli.last_diagnostics or {}
-            diagnostic_text = "\n".join(
-                str(diagnostics.get(key) or "")
-                for key in ("last_stage", "stdout_tail", "stderr_tail")
-            )
-            incomplete_handoff = self._is_incomplete_artifact_handoff(
-                diagnostic_text,
-                requested_suffix,
-            )
             should_retry = (
                 attempt == 0
                 and not self.cli.last_artifact_paths
-                and (recoverable_stall or incomplete_handoff)
+                and recoverable_stall
             )
             if should_retry:
                 event_index += 1
@@ -116,11 +189,7 @@ class HermesAdapter:
                     payload={
                         "protocol": "hermes.stream.v1",
                         "recoveryAttempt": 1,
-                        "recoveryReason": (
-                            "stalled_tool_call"
-                            if recoverable_stall
-                            else "incomplete_artifact_handoff"
-                        ),
+                        "recoveryReason": "stalled_tool_call",
                     },
                     step=AgentRunStep(
                         id=f"{run_id}_stage_{event_index}",
@@ -136,24 +205,6 @@ class HermesAdapter:
     def _is_recoverable_tool_stall(content: str) -> bool:
         normalized = " ".join(content.lower().split())
         return all(marker in normalized for marker in RECOVERABLE_TOOL_STALL_MARKERS)
-
-    @staticmethod
-    def _explicit_artifact_suffix(content: str) -> str | None:
-        matches = list(EXPLICIT_ARTIFACT_SUFFIX_RE.finditer(content))
-        return matches[-1].group(0).lower() if matches else None
-
-    @staticmethod
-    def _is_incomplete_artifact_handoff(
-        content: str,
-        requested_suffix: str | None,
-    ) -> bool:
-        if not requested_suffix or requested_suffix not in content.lower():
-            return False
-        normalized = " ".join(content.lower().split())
-        return (
-            ("执行" in normalized and "即可生成" in normalized)
-            or ("run " in normalized and "to generate" in normalized)
-        )
 
     def get_last_artifact_paths(self) -> list[str]:
         return list(self.cli.last_artifact_paths)

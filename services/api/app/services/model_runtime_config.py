@@ -135,20 +135,20 @@ def _normalize_provider(provider: str | None) -> str:
 def _default_base_url(provider: str) -> str | None:
     if provider == "sensenova":
         return settings.sensenova_base_url or environ.get("SENSENOVA_BASE_URL")
-    if provider == "openai":
-        return "https://api.openai.com/v1"
     if provider == "deepseek":
-        return "https://api.deepseek.com/v1"
+        return settings.deepseek_base_url or environ.get("DEEPSEEK_BASE_URL") or "https://api.deepseek.com/v1"
+    if provider == "openai":
+        return settings.openai_base_url or environ.get("OPENAI_BASE_URL") or "https://api.openai.com/v1"
     return None
 
 
 def _default_api_key(provider: str) -> str | None:
     if provider == "sensenova":
         return settings.sensenova_api_key or environ.get("SENSENOVA_API_KEY")
-    if provider == "openai":
-        return environ.get("OPENAI_API_KEY")
     if provider == "deepseek":
-        return environ.get("DEEPSEEK_API_KEY")
+        return settings.deepseek_api_key or environ.get("DEEPSEEK_API_KEY")
+    if provider == "openai":
+        return settings.openai_api_key or environ.get("OPENAI_API_KEY")
     if provider == "gemini":
         return environ.get("GEMINI_API_KEY") or environ.get("GOOGLE_API_KEY")
     return None
@@ -165,6 +165,24 @@ def default_model_runtime_config(model_config_id: str | None = None) -> ModelRun
     )
 
 
+def _resolve_model_name(provider: str, name: str) -> str:
+    normalized_name = name.strip().lower()
+    aliases = {
+        "sensenova": settings.sensenova_default_model,
+        "sensenova default model": settings.sensenova_default_model,
+        "deepseek": settings.deepseek_default_model,
+        "deepseek chat": settings.deepseek_default_model,
+        "gpt5.5": settings.openai_default_model,
+        "gpt-5.5": settings.openai_default_model,
+        "openai": settings.openai_default_model,
+    }
+    return aliases.get(normalized_name, name.strip()) or {
+        "sensenova": settings.sensenova_default_model,
+        "deepseek": settings.deepseek_default_model,
+        "openai": settings.openai_default_model,
+    }.get(provider, settings.sensenova_default_model)
+
+
 def model_runtime_config_from_model(model: ModelConfig) -> ModelRuntimeConfig:
     provider = _normalize_provider(model.provider)
     name = (model.name or "").strip()
@@ -175,11 +193,7 @@ def model_runtime_config_from_model(model: ModelConfig) -> ModelRuntimeConfig:
     )
     if is_runtime_selector:
         return default_model_runtime_config(model.id)
-    model_name = (
-        settings.sensenova_default_model
-        if provider == "sensenova" and name.lower() in {"sensenova", "sensenova default model"}
-        else name or settings.sensenova_default_model
-    )
+    model_name = _resolve_model_name(provider, name)
     return ModelRuntimeConfig(
         model_config_id=model.id,
         provider=provider,

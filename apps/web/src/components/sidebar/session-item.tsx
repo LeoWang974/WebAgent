@@ -16,6 +16,7 @@ import type { ConversationFolder } from "@/types/session";
 
 interface SessionItemProps {
   active?: boolean;
+  canManage?: boolean;
   folderId?: string;
   folders?: ConversationFolder[];
   href?: string;
@@ -33,6 +34,7 @@ interface SessionItemProps {
 
 export function SessionItem({
   active = false,
+  canManage = true,
   folderId,
   folders = [],
   href,
@@ -135,7 +137,7 @@ export function SessionItem({
           {content}
         </button>
       )}
-      {!confirmingDelete ? (
+      {canManage && !confirmingDelete ? (
         <div className="mr-1 mt-1 flex shrink-0 items-center gap-1">
           <button
             aria-label="重命名会话"
@@ -210,7 +212,7 @@ export function SessionItem({
             <Trash2 className="size-3.5" />
           </button>
         </div>
-      ) : (
+      ) : canManage ? (
         <div className="mr-1 mt-1 flex shrink-0 items-center gap-1">
           <button
             aria-label={t("confirmDelete")}
@@ -239,7 +241,7 @@ export function SessionItem({
             <X className="size-3.5" />
           </button>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

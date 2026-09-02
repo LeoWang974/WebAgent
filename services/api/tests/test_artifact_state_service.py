@@ -106,3 +106,47 @@ async def test_sync_run_artifact_state_ignores_older_status_regression(
     assert regressed is not None
     assert regressed.status == "ready"
     assert regressed.artifact_metadata["mtimeNs"] == 20
+
+
+@pytest.mark.asyncio
+async def test_sync_run_artifact_state_preserves_intermediate_role(
+    db_sessionmaker,
+    seeded_users,
+):
+    conversation_id = "conversation-watcher-role"
+    run_id = "run-watcher-role"
+    async with db_sessionmaker() as db:
+        db.add(
+            Conversation(
+                id=conversation_id,
+                user_id=seeded_users["owner"].id,
+                title="Watcher role",
+            )
+        )
+        run = AgentRun(
+            id=run_id,
+            conversation_id=conversation_id,
+            status="running",
+            title="Watcher role",
+        )
+        db.add(run)
+        await db.commit()
+
+        payload = {
+            "artifactPath": "/runtime/plan.json",
+            "artifactType": "debug_json",
+            "artifactTitle": "plan",
+            "manifestEntryId": "entry-plan",
+            "manifestSchema": "webagent.artifacts.v3",
+            "artifactRole": "intermediate",
+        }
+        artifact = await sync_run_artifact_state(
+            db,
+            run,
+            {**payload, "artifactState": "pending"},
+        )
+        await db.commit()
+
+        assert artifact is not None
+        assert artifact.is_primary is False
+        assert artifact.artifact_metadata["artifactRole"] == "intermediate"

@@ -18,3 +18,15 @@ test("polling and SSE terminal paths refresh run artifacts", () => {
   assert.ok(calls.length >= 2);
   assert.match(source, /if \(isTerminalRunStatus\(event\.status\)\)/);
 });
+
+test("terminal recovery refreshes persisted conversation messages", () => {
+  assert.match(source, /export async function refreshRunMessages/);
+  assert.match(source, /refreshRunMessages\(get, set, run\.sessionId\)/);
+});
+
+test("workspace loading ignores stale session ids", () => {
+  assert.match(
+    source,
+    /if \(!get\(\)\.sessions\.some\(\(session\) => session\.id === sessionId\)\) \{\s*return;/,
+  );
+});

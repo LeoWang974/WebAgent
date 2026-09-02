@@ -12,6 +12,7 @@
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
+from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 
@@ -19,6 +20,7 @@ from app import schemas
 from app.api.dependencies import CurrentUser, DbSession
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models import AgentRun, ModelConfig, SkillVersion, User
+from app.schemas.model import ModelProvider
 from app.services.model_secret_encryption import encrypt_model_secret
 from app.services.persistence import (
     get_user_by_username,
@@ -40,6 +42,7 @@ from app.services.settings_service import (
 )
 
 router = APIRouter()
+MODEL_PROVIDER_ADAPTER = TypeAdapter(ModelProvider)
 
 def get_input_value(input_data: dict[str, Any], camel_key: str, snake_key: str, default=None):
     if camel_key in input_data:
@@ -57,6 +60,23 @@ def get_model_name_input(input_data: dict[str, Any], default: str) -> str:
         or default
     )
     return str(value).strip() or default
+
+
+def get_model_provider_input(input_data: dict[str, Any], default: str) -> str:
+    raw_value = input_data.get("provider", default)
+    normalized = str(raw_value or default).strip().lower()
+    if normalized in {"openai-compatible", "openai compatible"}:
+        normalized = "openai_compatible"
+    try:
+        return MODEL_PROVIDER_ADAPTER.validate_python(normalized)
+    except ValidationError as error:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Invalid model provider. Supported providers: sensenova, deepseek, "
+                "openai, openai_compatible, custom."
+            ),
+        ) from error
 
 
 def to_user_schema(user: User) -> schemas.User:
@@ -178,7 +198,7 @@ async def add_model(
         encrypted_api_key=encrypt_model_secret(api_key),
         is_available=True,
         name=get_model_name_input(input_data, "Custom model"),
-        provider=input_data.get("provider", "custom"),
+        provider=get_model_provider_input(input_data, "custom"),
         is_default=False,
     )
     db.add(model)
@@ -196,7 +216,7 @@ async def update_model(
 ) -> schemas.ModelConfig:
     model = await get_user_model(db, current_user, model_id)
     model.name = get_model_name_input(input_data, model.name)
-    model.provider = input_data.get("provider", model.provider)
+    model.provider = get_model_provider_input(input_data, model.provider)
     model.base_url = get_input_value(input_data, "baseUrl", "base_url", model.base_url)
     api_key = get_input_value(input_data, "apiKey", "api_key")
     if api_key:

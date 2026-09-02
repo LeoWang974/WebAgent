@@ -2,8 +2,8 @@
 # Main declarations: test_hermes_recovers_latest_assistant_message_from_session verifies hermes
 # recovers latest assistant message from session;
 # test_hermes_session_recovery_ignores_sessions_from_before_run verifies hermes session recovery
-# ignores sessions from before run; test_hermes_completion_signal_accepts_chinese_and_mojibake
-# verifies hermes completion signal accepts chinese and mojibake;
+# ignores sessions from before run; test_hermes_completion_signal_requires_explicit_terminal_wording
+# verifies intermediate report wording does not stop a Hermes run prematurely;
 # test_hermes_box_parser_accepts_mojibake_box_prefixes verifies hermes box parser accepts mojibake
 # box prefixes; test_hermes_summarizes_long_box_to_visible_stage verifies hermes summarizes long
 # box to visible stage; test_hermes_stream_event_payload_contains_protocol_fields verifies hermes
@@ -194,15 +194,36 @@ def test_hermes_terminal_output_does_not_attach_stale_or_missing_artifacts(
     assert wrapper._remember_artifact_path(str(fresh_report)) is True
 
 
-def test_hermes_completion_signal_accepts_chinese_and_mojibake():
-    report_generated = "\u62a5\u544a\u5df2\u751f\u6210\u3002\u9a8c\u8bc1\u6587\u4ef6\uff1a"
+def test_hermes_completion_signal_requires_explicit_terminal_wording():
+    final_report_generated = (
+        "\u6700\u7ec8\u62a5\u544a\u5df2\u751f\u6210\u3002\u9a8c\u8bc1\u6587\u4ef6\uff1a"
+    )
     ppt_completed = "\u73b0\u5728\u6267\u884cPPTX\u8f6c\u6362\u5b8c\u6210"
-    report_completed = "\u62a5\u544a\u5b8c\u6210\u3002\u4ea7\u51fa\u6587\u4ef6\u7ed3\u6784\uff1a"
+    intermediate_reports_completed = (
+        "\u6240\u6709\u5b50\u62a5\u544a\u5b8c\u6210\uff0c\u5f00\u59cb\u7efc\u5408\u9636\u6bb5\u3002"
+    )
+    generic_report_generated = "\u62a5\u544a\u5df2\u751f\u6210\u3002\u9a8c\u8bc1\u6587\u4ef6\uff1a"
+    generic_task_completed = (
+        "\u5b50\u4efb\u52a1\u5df2\u5b8c\u6210\uff0c\u7ee7\u7eed\u5904\u7406\u3002"
+    )
 
-    assert HermesCliWrapper._is_completion_signal(report_generated)
+    assert HermesCliWrapper._is_completion_signal(final_report_generated)
     assert HermesCliWrapper._is_completion_signal(ppt_completed)
-    assert HermesCliWrapper._is_completion_signal(report_completed)
-    assert HermesCliWrapper._is_completion_signal("Duration:       18m 1s")
+    assert not HermesCliWrapper._is_completion_signal(intermediate_reports_completed)
+    assert not HermesCliWrapper._is_completion_signal(generic_report_generated)
+    assert not HermesCliWrapper._is_completion_signal(generic_task_completed)
+    assert not HermesCliWrapper._is_completion_signal("Duration:       18m 1s")
+
+
+def test_hermes_terminal_provider_failure_is_detected_even_when_artifacts_exist():
+    wrapper = HermesCliWrapper()
+
+    failure = wrapper._terminal_provider_failure(
+        "API call failed after 3 attempts: HTTP 401 invalid token"
+    )
+
+    assert failure is not None
+    assert "invalid token" in failure.lower()
 
 
 @pytest.mark.parametrize(
@@ -472,8 +493,12 @@ async def test_hermes_session_recovery_does_not_duplicate_visible_completion(
 
     completed = [event for event in events if event.event_type == "completed"]
     assert len(completed) == 1
-    assert completed[0].content == "Report completed."
-    assert completed[0].payload.get("sessionRecovery") is None
+    assert completed[0].content == "Report completed with details."
+    assert completed[0].payload.get("sessionRecovery") is True
+    stage_events = [event for event in events if event.content == "Report completed."]
+    assert len(stage_events) == 1
+    assert stage_events[0].event_type == "stage_started"
+    assert stage_events[0].payload.get("sessionRecovery") is None
 
 
 def test_hermes_stream_event_classification():
@@ -524,4 +549,73 @@ def test_hermes_summarizes_raw_tool_lines_to_user_visible_status():
     assert (
         HermesCliWrapper._summarize_raw_runtime_line("write /tmp/deck/pages/page_003.html")
         == "正在生成第 3 页幻灯片..."
+    )
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "API call failed after 3 retries: Connection error.",
+        "API failed after 3 retries - Rate limited.",
+        "Non-retryable error (HTTP 401): Unauthorized",
+        "Invalid token for configured provider",
+    ],
+)
+def test_hermes_detects_terminal_provider_failures(message: str):
+    assert HermesCliWrapper._terminal_provider_failure(message) == message
+
+
+def test_hermes_does_not_stop_on_transient_provider_retry():
+    assert (
+        HermesCliWrapper._terminal_provider_failure(
+            "API call failed (attempt 1/3): APIConnectionError"
+        )
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_hermes_stream_fails_fast_after_terminal_provider_error(
+    monkeypatch, tmp_path: Path
+):
+    wrapper = HermesCliWrapper()
+    stdout = asyncio.StreamReader()
+    stdout.feed_data(b"API call failed after 3 retries: Connection error.\n")
+    stdout.feed_eof()
+    stderr = asyncio.StreamReader()
+    stderr.feed_eof()
+
+    class FakeProcess:
+        pid = 12347
+        returncode = 1
+
+        def __init__(self):
+            self.stdout = stdout
+            self.stderr = stderr
+
+        async def wait(self):
+            return self.returncode
+
+    async def fake_create_subprocess_exec(*args, **kwargs):
+        return FakeProcess()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+    monkeypatch.setattr(wrapper, "_build_chat_exec_args", lambda *args, **kwargs: ["hermes"])
+    monkeypatch.setattr(
+        wrapper,
+        "_raw_log_path",
+        lambda run_id=None: tmp_path / "hermes-raw.log",
+    )
+
+    with pytest.raises(RuntimeError, match="API call failed after 3 retries"):
+        [
+            event
+            async for event in wrapper.ask_stream_events(
+                "hello",
+                working_dir=str(tmp_path),
+            )
+        ]
+
+    assert wrapper.last_diagnostics["provider_failure"] == (
+        "API call failed after 3 retries: Connection error."
     )

@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 from app.schemas.base import ApiModel
 
-ModelProvider = Literal["sensenova", "openai_compatible", "custom"]
+ModelProvider = Literal["sensenova", "deepseek", "openai", "openai_compatible", "custom"]
 
 
 class ModelConfig(ApiModel):

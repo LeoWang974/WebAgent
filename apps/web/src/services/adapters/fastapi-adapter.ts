@@ -4,7 +4,7 @@
  */
 
 import { API_BASE_URL, apiClient, getAccessToken } from "../api-client";
-import { parseSseEvents, splitSseBuffer } from "../sse-parser";
+import { createSseEventDeduper, parseSseEvents, splitSseBuffer } from "../sse-parser";
 import type {
   AgentRun,
   AgentRunEvent,
@@ -232,6 +232,7 @@ export const fastApiAdapter: WebAgentApiAdapter = {
       }
     }
 
+    buffer += decoder.decode();
     if (buffer.trim()) {
       for (const event of parseSseEvents(buffer)) {
         onEvent({
@@ -245,6 +246,7 @@ export const fastApiAdapter: WebAgentApiAdapter = {
     let reconnectTimer: number | undefined;
     let controller: AbortController | undefined;
     let stopped = false;
+    const shouldDispatchEvent = createSseEventDeduper();
 
     const scheduleReconnect = () => {
       if (!stopped && reconnectTimer === undefined) {
@@ -267,6 +269,9 @@ export const fastApiAdapter: WebAgentApiAdapter = {
           }
           const agentRunEvent = event.data as unknown as AgentRunEvent;
           if (agentRunEvent.runId !== runId || typeof agentRunEvent.status !== "string") {
+            continue;
+          }
+          if (!shouldDispatchEvent(agentRunEvent)) {
             continue;
           }
           onEvent(agentRunEvent);
@@ -300,6 +305,7 @@ export const fastApiAdapter: WebAgentApiAdapter = {
           buffer = remainingBuffer;
           dispatchEvents(events);
         }
+        buffer += decoder.decode();
         if (buffer.trim()) {
           dispatchEvents(parseSseEvents(buffer));
         }

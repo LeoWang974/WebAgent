@@ -33,6 +33,7 @@ from app.services.agent_run_workspace import (
     run_artifacts_dir,
     run_workspace_dir,
     stage_conversation_artifacts,
+    stage_conversation_files,
 )
 from app.services.agent_runs import (
     create_hermes_adapter,
@@ -101,6 +102,23 @@ async def _message_snapshot(db: AsyncSession, message: Message) -> tuple[str, di
     return content, to_message(message).model_dump(by_alias=True)
 
 
+async def _queued_user_content(
+    db: AsyncSession,
+    conversation_id: str,
+    queued_payload: dict,
+) -> str:
+    """Load the unchanged persisted user message; support pre-migration queued events."""
+    message_id = queued_payload.get("userMessageId")
+    if isinstance(message_id, str) and message_id:
+        message = await db.get(Message, message_id)
+        if message is None:
+            raise RuntimeError(f"Queued user message not found: {message_id}")
+        if message.conversation_id != conversation_id or message.role != "user":
+            raise RuntimeError("Queued user message does not belong to the Agent Run conversation.")
+        return message.content
+    return str(queued_payload.get("content") or "")
+
+
 async def execute_queued_agent_run(run_id: str) -> None:
     async with AsyncSessionLocal() as db:
         await _execute_queued_agent_run(db, run_id)
@@ -126,10 +144,11 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
             run.status,
         )
         return
-    content = str(queued_payload.get("content") or "")
+    content = await _queued_user_content(db, conversation_id, queued_payload)
     model_id = queued_payload.get("modelId")
     run_started_at = run.created_at or datetime.now()
     assistant_messages: list[Message] = []
+    assistant_completion_messages: list[Message] = []
     assistant_output_parts: list[str] = []
     assistant_event_count = 0
     stage_bubble_counts: dict[str, int] = {}
@@ -190,6 +209,12 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
             run_workspace,
             mirror_dirs=(user_runtime_context.hermes_home / "context",),
         )
+        staged_context_files = await stage_conversation_files(
+            db,
+            conversation_id,
+            run_workspace,
+            mirror_dirs=(user_runtime_context.hermes_home / "context",),
+        )
         logger.info(
             "Staged conversation artifacts: run_id=%s count=%s workspace=%s",
             run_id_value,
@@ -225,13 +250,13 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
             progress=5,
             step_status="running",
             payload={
-                "content": content,
                 "modelId": model_id,
                 "adapterKey": current_adapter_key,
                 "adapterLockScope": user_runtime_context.adapter_lock_scope(),
                 "userRuntimeRoot": str(user_runtime_context.root_dir),
                 "workspaceDir": str(run_workspace),
                 "contextArtifacts": [str(path) for path in staged_context_artifacts],
+                "contextFiles": [str(path) for path in staged_context_files],
             },
         )
         if adapter is None:
@@ -382,6 +407,8 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
             )
             assistant_output_parts.append(message_content)
             assistant_messages.append(assistant_message)
+            if event_type == "completed" or event_payload.get("completionDetected") is True:
+                assistant_completion_messages.append(assistant_message)
             assistant_event_count += 1
             await record_db_agent_run_event(
                 db,
@@ -422,14 +449,14 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
             adapter,
             artifact_discovery_summary,
             user_id,
-            content,
-            "\n\n".join(assistant_output_parts),
+            assistant_output="\n\n".join(assistant_output_parts),
         )
         assistant_message = await final_assistant_message(
             db,
             conversation_id,
             assistant_messages,
             response_artifacts,
+            completion_messages=assistant_completion_messages,
         )
         assistant_message_content, assistant_message_payload = await _message_snapshot(
             db,
@@ -515,7 +542,10 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
     except Exception as error:
         logger.exception("Queued agent run failed")
         if adapter is not None and hasattr(adapter, "cancel_run"):
-            await adapter.cancel_run(run_id_value)
+            try:
+                await adapter.cancel_run(run_id_value)
+            except Exception:
+                logger.exception("Failed to cancel Hermes after run error: run_id=%s", run_id_value)
         await db.rollback()
         run = await db.get(AgentRun, run_id_value)
         if run is None:

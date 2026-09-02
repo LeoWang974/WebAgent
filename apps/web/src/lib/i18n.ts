@@ -51,7 +51,6 @@ export const translations = {
     autoSummarizeContext: "\u81ea\u52a8\u538b\u7f29\u4e0a\u4e0b\u6587",
     autoSummarizeContextDescription:
       "\u5f53\u4f1a\u8bdd\u8f83\u957f\u65f6\uff0c\u81ea\u52a8\u751f\u6210\u6458\u8981\u4ee5\u4fdd\u7559\u5173\u952e\u80cc\u666f\u3002",
-    autoRoute: "\u81ea\u52a8\u8def\u7531",
     autoSkill: "\u81ea\u52a8\u9009\u62e9",
     avgGrowth: "\u5e73\u5747\u589e\u957f",
     backToSettings: "\u8fd4\u56de\u8bbe\u7f6e",
@@ -124,10 +123,10 @@ export const translations = {
     messages: "\u6761\u6d88\u606f",
     modelConfiguration: "\u6a21\u578b\u914d\u7f6e",
     modelDescription:
-      "\u5e73\u53f0\u9ed8\u8ba4\u4f7f\u7528 sensenova\u3002\u7528\u6237\u81ea\u6709\u7684\u5916\u90e8\u6a21\u578b\u914d\u7f6e\u7a0d\u540e\u4f1a\u5728\u8fd9\u91cc\u63a5\u5165\u3002",
+      "\u7edf\u4e00\u4f7f\u7528 Hermes \u8fd0\u884c\u65f6\uff0c\u9ed8\u8ba4\u4f7f\u7528 SenseNova\uff1bDeepSeek \u548c GPT-5.5 \u53ef\u7531\u7528\u6237\u81ea\u884c\u914d\u7f6e\u3002",
     modelName: "\u6a21\u578b\u540d\u79f0",
     modelSettingsDescription:
-      "\u9009\u62e9\u9ed8\u8ba4\u6a21\u578b\uff0c\u7ba1\u7406\u5916\u90e8\u6a21\u578b\u914d\u7f6e\uff0c\u5e76\u9884\u7559\u8fde\u63a5\u6d4b\u8bd5\u6d41\u7a0b\u3002",
+      "\u9009\u62e9 Hermes \u5b9e\u9645\u4f7f\u7528\u7684\u6a21\u578b\uff0c\u7ba1\u7406 API \u914d\u7f6e\u5e76\u6d4b\u8bd5\u8fde\u63a5\u3002",
     models: "\u6a21\u578b",
     newChat: "\u65b0\u5bf9\u8bdd",
     newVersion: "\u65b0\u7248\u672c",
@@ -285,7 +284,6 @@ export const translations = {
     autoSummarizeContext: "Auto summarize context",
     autoSummarizeContextDescription:
       "When conversations get long, create summaries to keep the most important background available.",
-    autoRoute: "Auto route",
     autoSkill: "Auto skill",
     avgGrowth: "Avg growth",
     backToSettings: "Back to settings",
@@ -355,10 +353,10 @@ export const translations = {
     messages: "messages",
     modelConfiguration: "Model configuration",
     modelDescription:
-      "Platform defaults use sensenova. User-owned external model settings will be added here later.",
+      "Hermes uses SenseNova by default. Configure DeepSeek or GPT-5.5 yourself when needed.",
     modelName: "Model name",
     modelSettingsDescription:
-      "Choose the default model, manage external model configs, and reserve the connection test workflow.",
+      "Choose the model Hermes uses, manage API settings, and test the connection.",
     models: "Models",
     newChat: "New chat",
     newVersion: "New version",

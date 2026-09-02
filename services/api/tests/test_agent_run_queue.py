@@ -1,6 +1,6 @@
-# File purpose: Verifies agent-run queue classification and cancellation polling behavior.
-# Main declarations: queue classification tests cover short, artifact, validation-token, and
-# long requests; cancellation polling test verifies database-read throttling.
+# File purpose: Verifies content-independent Agent Run queueing and cancellation polling.
+# Main declarations: queue routing and persisted-message tests protect prompt transparency;
+# cancellation polling test verifies database-read throttling.
 
 from types import SimpleNamespace
 
@@ -8,43 +8,48 @@ import pytest
 
 from app.services import agent_run_control
 from app.services.agent_run_control import AgentRunCancellationPoller
-from app.services.agent_run_queue import is_short_chat_request, queue_for_message
+from app.services.agent_run_executor import _queued_user_content
+from app.services.agent_run_queue import queue_for_message
 
 
-def test_short_chat_request_uses_priority_queue():
-    assert is_short_chat_request("你好") is True
-    queue_name, queue_reason = queue_for_message("你好")
-
-    assert queue_name == "short-chat"
-    assert queue_reason == "短对话优先队列"
+def test_all_prompts_use_the_same_hermes_queue():
+    assert queue_for_message() == ("agent-runs", "Hermes 任务队列")
 
 
-def test_artifact_requests_stay_on_long_task_queue():
-    for prompt in (
-        "请输出中文 Markdown 报告",
-        "基于上述报告生成 HTML 文件",
-        "生成一份 12 页 PPT",
-    ):
-        assert is_short_chat_request(prompt) is False
-        assert queue_for_message(prompt)[0] == "agent-runs"
+@pytest.mark.asyncio
+async def test_worker_loads_the_exact_persisted_user_message():
+    original = "  第一行\n\n第二行，保留空白。  "
+    message = SimpleNamespace(
+        content=original,
+        conversation_id="conversation-1",
+        role="user",
+    )
+
+    class FakeDb:
+        async def get(self, model, message_id):
+            del model
+            assert message_id == "message-1"
+            return message
+
+    content = await _queued_user_content(
+        FakeDb(),
+        "conversation-1",
+        {"userMessageId": "message-1"},
+    )
+
+    assert content == original
 
 
-def test_short_question_about_previous_artifact_uses_priority_queue():
-    assert is_short_chat_request("请只回答：我上一轮要求生成几页 PPT？") is True
-    assert is_short_chat_request("How many slides did I ask for last turn?") is True
+@pytest.mark.asyncio
+async def test_worker_supports_legacy_queued_prompt_payloads():
+    original = " legacy prompt "
+    content = await _queued_user_content(
+        SimpleNamespace(),
+        "conversation-1",
+        {"content": original},
+    )
 
-
-def test_artifact_word_inside_validation_token_stays_on_short_queue():
-    prompt = "Reply with QA-B-AFTER-PPT-OK only."
-
-    assert is_short_chat_request(prompt) is True
-    assert queue_for_message(prompt)[0] == "short-chat"
-
-
-def test_long_plain_request_stays_on_long_task_queue():
-    prompt = "请详细分析这个主题，并给出完整论证、风险、案例和实施建议。" * 3
-    assert is_short_chat_request(prompt) is False
-    assert queue_for_message(prompt)[0] == "agent-runs"
+    assert content == original
 
 
 @pytest.mark.asyncio

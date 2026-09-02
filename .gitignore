@@ -65,4 +65,5 @@ work-*.log
 
 # Local handoff / launch helpers
 docs/TRAE.md
+docs/PROJECT_HANDOVER_PRIVATE.md
 start.ps1

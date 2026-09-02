@@ -342,6 +342,26 @@ async def test_model_config_accepts_separate_runtime_model_name(
 
 
 @pytest.mark.asyncio
+async def test_model_config_rejects_unknown_provider(
+    api_client: AsyncClient,
+    auth_headers: dict[str, dict[str, str]],
+):
+    response = await api_client.post(
+        "/api/settings/models",
+        json={
+            "apiKey": "user-key",
+            "baseUrl": "https://example.invalid/v1",
+            "modelName": "custom-model",
+            "provider": "openclaw",
+        },
+        headers=auth_headers["owner"],
+    )
+
+    assert response.status_code == 422
+    assert "Invalid model provider" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_non_stream_message_enqueues_agent_run(
     api_client: AsyncClient,
     auth_headers: dict[str, dict[str, str]],

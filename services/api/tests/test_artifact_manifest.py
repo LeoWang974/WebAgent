@@ -8,7 +8,18 @@ from pathlib import Path
 import pytest
 
 from app.services.artifact_discovery import create_artifacts_from_refs
-from app.services.artifact_manifest import ArtifactManifestRecorder, load_artifact_manifest
+from app.services.artifact_manifest import (
+    ArtifactManifestRecorder,
+    infer_required_artifact_types,
+    load_artifact_manifest,
+)
+
+
+def test_infer_required_artifact_types_only_for_explicit_output_requests():
+    assert infer_required_artifact_types("What is an HTML page?") == set()
+    assert infer_required_artifact_types(
+        "保存为 Markdown 文件，并额外生成独立 HTML 页面和 PPTX。"
+    ) == {"markdown_report", "html_page", "ppt_deck"}
 
 
 def test_manifest_recorder_finalizes_ready_artifact(tmp_path: Path):
@@ -96,6 +107,50 @@ def test_manifest_finalization_fails_unsettled_entry(tmp_path: Path):
 
     assert manifest.artifacts[0].status == "failed"
     assert "before the file became stable" in str(manifest.artifacts[0].error)
+
+
+def test_manifest_finalization_fails_incomplete_required_bundle(tmp_path: Path):
+    output = tmp_path / "report.md"
+    output.write_text("# Report\n", encoding="utf-8")
+    recorder = ArtifactManifestRecorder(
+        tmp_path / "artifact-manifest.json",
+        run_id="run-required-bundle",
+        conversation_id="conversation-1",
+    )
+    recorder.record(
+        path=str(output),
+        artifact_type="markdown_report",
+        title="Report",
+        role="primary",
+        discovered_by="adapter_event",
+        source_dir=str(tmp_path),
+        source_file=output,
+    )
+
+    manifest = recorder.finalize(
+        required_artifact_types={"markdown_report", "html_page", "ppt_deck"}
+    )
+
+    assert manifest.status == "failed"
+    assert manifest.required_artifact_types == [
+        "html_page",
+        "markdown_report",
+        "ppt_deck",
+    ]
+    assert "html_page" in manifest.errors[0]
+
+
+def test_manifest_finalization_allows_short_run_without_artifact_contract(tmp_path: Path):
+    recorder = ArtifactManifestRecorder(
+        tmp_path / "artifact-manifest.json",
+        run_id="run-short-chat",
+        conversation_id="conversation-1",
+    )
+
+    manifest = recorder.finalize()
+
+    assert manifest.status == "finalized"
+    assert manifest.required_artifact_types == []
 
 
 def test_load_manifest_keeps_v2_compatibility(tmp_path: Path):

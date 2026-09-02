@@ -35,19 +35,29 @@ class Settings(BaseSettings):
     model_config_encryption_previous_keys: str = ""
     sensenova_api_key: str | None = None
     sensenova_base_url: str | None = None
-    sensenova_default_model: str = "sensenova-6.7-flash-lite"
+    sensenova_default_model: str = "sensenova-6.8-flash-lite"
+    # Optional PEM bundle for environments whose local CA store does not trust
+    # the SenseNova certificate chain. TLS verification remains enabled.
+    sensenova_ca_bundle: str | None = None
+    sensenova_timeout_seconds: float = 30.0
+    deepseek_api_key: str | None = None
+    deepseek_base_url: str | None = None
+    deepseek_default_model: str = "deepseek-chat"
+    openai_api_key: str | None = None
+    openai_base_url: str | None = None
+    openai_default_model: str = "gpt-5.5"
     serper_api_key: str | None = None
     hermes_cli_path: str = "hermes"
     hermes_home: str = "~/.hermes"
     hermes_skills_dir: str | None = None
     hermes_wsl_distribution: str = "Ubuntu"
+    playwright_browsers_path: str | None = None
     agent_run_idle_timeout_seconds: int = 30 * 60
-    agent_run_overall_timeout_seconds: int = 2 * 60 * 60
+    agent_run_overall_timeout_seconds: int = 4 * 60 * 60
     agent_run_event_poll_interval_seconds: float = 1.0
     upload_max_size_bytes: int = 25 * 1024 * 1024
     agent_run_queue_enabled: bool = True
     agent_run_queue_name: str = "agent-runs"
-    short_chat_queue_name: str = "short-chat"
     agent_run_workspace_root: str = "runtime/agent-runs"
     agent_runtime_user_root: str = "runtime/users"
     agent_adapter_limit_scope: str = "per_user"

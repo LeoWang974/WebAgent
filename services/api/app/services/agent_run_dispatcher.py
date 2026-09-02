@@ -41,7 +41,7 @@ async def enqueue_agent_run_message(
         model_runtime_config=model_runtime_config,
         commit=False,
     )
-    queue_name, queue_reason = queue_for_message(input_data.content)
+    queue_name, queue_reason = queue_for_message()
     queue_position = await estimated_queue_position(queue_name)
     conversation = await db.get(Conversation, session_id)
     if conversation is not None:
@@ -55,7 +55,6 @@ async def enqueue_agent_run_message(
         progress=0,
         step_status="pending",
         payload={
-            "content": input_data.content,
             "modelId": input_data.model_id,
             "adapterKey": "hermes",
             "modelConfigId": run.model_config_id,

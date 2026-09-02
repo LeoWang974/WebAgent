@@ -18,6 +18,7 @@ VALID_ARTIFACT_TYPES = {
     "chart",
     "debug_json",
 }
+VALID_ARTIFACT_ROLES = {"primary", "intermediate", "preview_fallback"}
 
 
 async def sync_run_artifact_state(
@@ -53,6 +54,11 @@ async def sync_run_artifact_state(
     )
     artifact = result.scalars().unique().one_or_none()
     metadata = dict(artifact.artifact_metadata or {}) if artifact else {}
+    artifact_role = str(
+        payload.get("artifactRole") or metadata.get("artifactRole") or "primary"
+    ).strip()
+    if artifact_role not in VALID_ARTIFACT_ROLES:
+        artifact_role = "primary"
     incoming_mtime = payload.get("mtimeNs")
     previous_mtime = metadata.get("mtimeNs")
     if (
@@ -66,7 +72,7 @@ async def sync_run_artifact_state(
     metadata.update(
         {
             "adapterProtocol": payload.get("manifestSchema"),
-            "artifactRole": "primary",
+            "artifactRole": artifact_role,
             "manifestEntryId": entry_id or metadata.get("manifestEntryId"),
             "watcherPath": path,
             "path": path,
@@ -87,9 +93,7 @@ async def sync_run_artifact_state(
             title=str(payload.get("artifactTitle") or Path(path).stem),
             status=state,
             artifact_metadata=metadata,
-            is_primary=(
-                artifact_type != "debug_json" and payload.get("artifactRole") != "intermediate"
-            ),
+            is_primary=artifact_type != "debug_json" and artifact_role == "primary",
         )
         db.add(artifact)
         await db.flush()
@@ -99,6 +103,7 @@ async def sync_run_artifact_state(
         artifact.title = str(payload.get("artifactTitle") or artifact.title)
         artifact.status = state
         artifact.artifact_metadata = metadata
+        artifact.is_primary = artifact_type != "debug_json" and artifact_role == "primary"
     return artifact
 
 

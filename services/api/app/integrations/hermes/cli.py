@@ -20,6 +20,7 @@ from app.schemas.artifact_manifest import ARTIFACT_MANIFEST_SCHEMA
 from app.services.artifact_manifest import (
     ARTIFACT_MANIFEST_FILENAME,
     ArtifactManifestRecorder,
+    infer_required_artifact_types,
 )
 from app.services.run_artifact_watcher import (
     ArtifactFileTransition,
@@ -74,6 +75,13 @@ IGNORED_ARTIFACT_FILENAMES = {
     "soul.md",
     "testing.md",
 }
+TERMINAL_PROVIDER_FAILURE_MARKERS = (
+    "api call failed after",
+    "api failed after",
+    "non-retryable error",
+    "invalid token",
+    "missing authentication header",
+)
 BOX_CODEPOINTS = {
     0x2500,
     0x2502,
@@ -942,35 +950,41 @@ class HermesCliWrapper:
     @staticmethod
     def _is_completion_signal(text: str) -> bool:
         # Hermes commonly wraps file extensions in Markdown backticks. Match
-        # completion semantics independently of whitespace and punctuation so
-        # a verified final artifact can close the run promptly.
+        # explicit terminal semantics independently of whitespace and
+        # punctuation. Research skills use generic report/task completion
+        # wording for intermediate sub-reports before synthesis.
         normalized = "".join(char for char in text.lower() if char.isalnum())
         completion_markers = [
-            "duration",
-            "\u62a5\u544a\u5df2\u5b8c\u6210",
-            "\u62a5\u544a\u5df2\u751f\u6210",
-            "\u62a5\u544a\u5b8c\u6210",
-            "\u4efb\u52a1\u5df2\u5b8c\u6210",
-            "\u4efb\u52a1\u5b8c\u6210",
             "\u6700\u7ec8\u62a5\u544a\u5df2\u5b8c\u6210",
             "\u6700\u7ec8\u62a5\u544a\u5df2\u751f\u6210",
             "\u5df2\u751f\u6210\u6700\u7ec8\u62a5\u544a",
             "pptx\u8f6c\u6362\u5b8c\u6210",
             "pptx\u5df2\u4fdd\u5b58",
             "pptx\u5df2\u751f\u6210",
+            "ppt\u5df2\u751f\u6210",
             "pptxissaved",
             "pptxhasbeensaved",
             "pptxfilehasbeengeneratedandverified",
             "pptxhasbeengeneratedandverified",
             "htmlfilehasbeengeneratedandverified",
             "markdownreporthasbeengeneratedandverified",
-            "ppt\u5df2\u751f\u6210",
-            "\u8f6c\u6362\u5b8c\u6210",
             "finalreportcompleted",
-            "reportcompleted",
+            "finalreportgenerated",
+            "finalreporthasbeengeneratedandverified",
             "resumethissessionwith:",
         ]
         return any(marker in normalized for marker in completion_markers)
+
+    @staticmethod
+    def _terminal_provider_failure(text: str) -> str | None:
+        """Return a terminal Hermes provider error without matching transient retries."""
+        normalized = re.sub(r"\s+", " ", ANSI_RE.sub("", text)).strip()
+        if not normalized:
+            return None
+        lower = normalized.lower()
+        if not any(marker in lower for marker in TERMINAL_PROVIDER_FAILURE_MARKERS):
+            return None
+        return normalized[-1000:]
 
     @staticmethod
     def _has_user_visible_signal(text: str) -> bool:
@@ -1143,6 +1157,11 @@ class HermesCliWrapper:
                 workspace_dir=working_dir,
                 artifacts_dir=artifacts_dir,
             )
+            required_artifact_types = infer_required_artifact_types(question)
+            if required_artifact_types:
+                self.artifact_manifest_recorder.set_required_artifact_types(
+                    required_artifact_types
+                )
             artifact_watcher = RunArtifactWatcher(
                 Path(working_dir or artifacts_dir).expanduser(),
                 poll_interval_seconds=settings.artifact_watcher_poll_interval_seconds,
@@ -1232,6 +1251,7 @@ class HermesCliWrapper:
         last_session_activity_monotonic = asyncio.get_running_loop().time()
         session_artifact_candidates: set[str] = set()
         session_artifact_observations: dict[str, tuple[int, int, float, int]] = {}
+        provider_failure_message: str | None = None
 
         async def stop_after_completion() -> None:
             if process.returncode is not None:
@@ -1417,7 +1437,8 @@ class HermesCliWrapper:
             return False, False, cleaned
 
         async def read_stream(stream: asyncio.StreamReader | None, is_stderr: bool) -> None:
-            nonlocal completion_detected, final_output_tail, stderr_tail, stdout_tail
+            nonlocal completion_detected, final_output_tail, provider_failure_message
+            nonlocal stderr_tail, stdout_tail
 
             if stream is None:
                 await line_queue.put(None)
@@ -1427,7 +1448,7 @@ class HermesCliWrapper:
             decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
 
             async def consume_decoded(decoded: str) -> None:
-                nonlocal completion_detected, final_output_tail
+                nonlocal completion_detected, final_output_tail, provider_failure_message
                 nonlocal stderr_tail, stdout_tail, stream_pending
                 if not decoded:
                     return
@@ -1437,6 +1458,10 @@ class HermesCliWrapper:
                 final_output_tail = (final_output_tail + decoded)[-131072:]
                 if self._is_completion_signal(decoded):
                     completion_detected = True
+                terminal_failure = self._terminal_provider_failure(decoded)
+                if terminal_failure:
+                    provider_failure_message = terminal_failure
+                    self.last_diagnostics["provider_failure"] = terminal_failure
                 if is_stderr:
                     stderr_tail = (stderr_tail + decoded)[-4000:]
                     stderr_chunks.append(decoded)
@@ -1496,6 +1521,9 @@ class HermesCliWrapper:
                             poll_artifact_watcher()
                         ):
                             yield artifact_event
+                    if provider_failure_message:
+                        await stop_after_completion()
+                        break
                     session_updates, stable_session_paths = poll_session_recovery()
                     for session_update in session_updates:
                         if not self._should_emit_box(session_update):
@@ -1560,6 +1588,10 @@ class HermesCliWrapper:
                         poll_artifact_watcher()
                     ):
                         yield artifact_event
+
+                if provider_failure_message:
+                    await stop_after_completion()
+                    break
 
                 if in_hermes_box and not raw_line.strip():
                     if box_lines and box_lines[-1] != "":
@@ -1737,16 +1769,35 @@ class HermesCliWrapper:
             manifest_snapshot: dict[str, object] | None = None
             if self.artifact_manifest_recorder is not None:
                 manifest_failed = bool(
-                    process.returncode != 0
-                    and not completion_detected
-                    and not self.last_artifact_paths
+                    provider_failure_message
+                    or (
+                        process.returncode != 0
+                        and not completion_detected
+                        and not self.last_artifact_paths
+                    )
                 )
                 manifest_error = (
-                    f"Hermes exited with code {process.returncode}." if manifest_failed else None
+                    (
+                        f"Hermes provider failure: {provider_failure_message}"
+                        if provider_failure_message
+                        else f"Hermes exited with code {process.returncode}."
+                    )
+                    if manifest_failed
+                    else None
+                )
+                requires_final_bundle = bool(
+                    not provider_failure_message
+                    and self.artifact_manifest_recorder.manifest.required_artifact_types
+                    and (completion_detected or process.returncode == 0)
                 )
                 self.artifact_manifest_recorder.finalize(
                     failed=manifest_failed,
                     error=manifest_error,
+                    required_artifact_types=(
+                        set(self.artifact_manifest_recorder.manifest.required_artifact_types)
+                        if requires_final_bundle
+                        else set()
+                    ),
                 )
                 manifest_snapshot = self.artifact_manifest_recorder.snapshot()
             self.last_diagnostics.update(
@@ -1759,6 +1810,7 @@ class HermesCliWrapper:
                     "last_stage": self.last_diagnostics.get("last_stage"),
                     "stderr_tail": stderr_tail[-2000:],
                     "stdout_tail": stdout_tail[-2000:],
+                    "provider_failure": provider_failure_message,
                     "artifact_manifest": manifest_snapshot,
                 }
             )
@@ -1835,6 +1887,9 @@ class HermesCliWrapper:
         if run_id and run_id in self.cancelled_run_ids:
             self.cancelled_run_ids.discard(run_id)
             return
+
+        if provider_failure_message:
+            raise RuntimeError(f"Hermes provider error: {provider_failure_message}")
 
         if process.returncode != 0:
             stderr_str = "".join(stderr_chunks).strip()

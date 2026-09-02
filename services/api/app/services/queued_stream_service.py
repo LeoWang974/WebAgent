@@ -27,74 +27,94 @@ async def stream_queued_agent_run(
     run: AgentRun,
 ):
     from app.services.agent_runs import TERMINAL_RUN_STATUSES
-
-    yield f": {' ' * 2048}\n\n"
-    yield sse("user_message", to_message(user_message).model_dump(by_alias=True))
-    queued_payload = await _queued_event_payload(db, run.id)
-    yield sse(
-        "run_started",
-        {
-            "runId": run.id,
+    try:
+        # Snapshot ORM-backed values before the first yield. StreamingResponse may
+        # roll back the request transaction between iterator advances, which can
+        # expire these objects and trigger implicit async ORM IO on resume.
+        run_id = run.id
+        user_message_payload = to_message(user_message).model_dump(by_alias=True)
+        queued_payload = await _queued_event_payload(db, run_id)
+        run_started_payload = {
+            "runId": run_id,
             "sessionId": session_id,
             "status": run.status,
             "progress": run.progress,
             "queueName": queued_payload.get("queueName"),
             "queuePosition": queued_payload.get("queuePosition"),
             "queueReason": queued_payload.get("queueReason"),
-        },
-    )
+        }
+        yield f": {' ' * 2048}\n\n"
+        user_message_event = sse("user_message", user_message_payload)
+        run_started_event = sse("run_started", run_started_payload)
+        await db.rollback()
+        yield user_message_event
+        yield run_started_event
 
-    event_cursor = AgentRunEventCursor()
-    assistant_done_sent = False
-    run_id = run.id
-    while True:
-        run_result = await db.execute(
-            select(AgentRun)
-            .where(AgentRun.id == run_id)
-            .execution_options(populate_existing=True)
-        )
-        run = run_result.scalar_one_or_none()
-        if run is None:
-            raise RuntimeError("Queued agent run disappeared before completion.")
-        events = await list_new_run_events(db, run.id, event_cursor)
-        for event in events:
-            payload = event.payload or {}
-            if (
-                event.event_type != "queued"
-                and payload.get("content")
-                and payload.get("messageId")
-            ):
-                yield sse(
-                    "assistant_delta",
-                    {
-                        "content": payload["content"],
-                        "messageId": payload["messageId"],
-                        "sessionId": session_id,
-                        "runId": run.id,
-                    },
-                )
-            if event.event_type == "artifact_created" and isinstance(payload.get("artifact"), dict):
-                yield sse(
-                    "artifact_created",
-                    {
-                        "artifact": payload["artifact"],
-                        "messageId": payload.get("messageId"),
-                        "sessionId": session_id,
-                        "runId": run.id,
-                    },
-                )
-            if event.event_type == "assistant_done":
-                done_payload = await build_assistant_done_payload(
-                    db,
-                    session_id,
-                    run,
-                    payload,
-                )
-                yield sse("assistant_done", done_payload)
-                assistant_done_sent = True
+        event_cursor = AgentRunEventCursor()
+        assistant_done_sent = False
+        while True:
+            run_result = await db.execute(
+                select(AgentRun)
+                .where(AgentRun.id == run_id)
+                .execution_options(populate_existing=True)
+            )
+            run = run_result.scalar_one_or_none()
+            if run is None:
+                await db.rollback()
+                raise RuntimeError("Queued agent run disappeared before completion.")
+            events = await list_new_run_events(db, run.id, event_cursor)
+            encoded_events: list[str] = []
+            for event in events:
+                payload = event.payload or {}
+                event_content = payload.get("content")
+                if (
+                    event.event_type != "queued"
+                    and isinstance(event_content, str)
+                    and event_content
+                ):
+                    encoded_events.append(
+                        sse(
+                            "assistant_delta",
+                            {
+                                "content": event_content,
+                                "messageId": str(
+                                    payload.get("messageId") or f"run_event_{run.id}_{event.id}"
+                                ),
+                                "sessionId": session_id,
+                                "runId": run.id,
+                            },
+                        )
+                    )
+                if event.event_type == "artifact_created" and isinstance(
+                    payload.get("artifact"), dict
+                ):
+                    encoded_events.append(
+                        sse(
+                            "artifact_created",
+                            {
+                                "artifact": payload["artifact"],
+                                "messageId": payload.get("messageId"),
+                                "sessionId": session_id,
+                                "runId": run.id,
+                            },
+                        )
+                    )
+                if event.event_type == "assistant_done":
+                    encoded_events.append(
+                        sse(
+                            "assistant_done",
+                            await build_assistant_done_payload(
+                                db,
+                                session_id,
+                                run,
+                                payload,
+                            ),
+                        )
+                    )
+                    assistant_done_sent = True
 
-        if run.status in TERMINAL_RUN_STATUSES:
-            if not assistant_done_sent:
+            is_terminal = run.status in TERMINAL_RUN_STATUSES
+            if is_terminal and not assistant_done_sent:
                 message_result = await db.execute(
                     select(Message)
                     .where(
@@ -108,18 +128,29 @@ async def stream_queued_agent_run(
                 message = message_result.scalar_one_or_none()
                 if message is not None:
                     conversation = await refresh_conversation(db, session_id)
-                    yield sse(
-                        "assistant_done",
-                        {
-                            "message": to_message(message).model_dump(by_alias=True),
-                            "session": to_session(conversation).model_dump(by_alias=True),
-                            "runId": run.id,
-                            "status": run.status,
-                        },
+                    encoded_events.append(
+                        sse(
+                            "assistant_done",
+                            {
+                                "message": to_message(message).model_dump(by_alias=True),
+                                "session": to_session(conversation).model_dump(by_alias=True),
+                                "runId": run.id,
+                                "status": run.status,
+                            },
+                        )
                     )
-            break
-        yield ": heartbeat\n\n"
-        await asyncio.sleep(settings.agent_run_event_poll_interval_seconds)
+
+            # The request stream must never keep a read transaction open while
+            # the client is consuming events or waiting for the next poll.
+            await db.rollback()
+            for encoded_event in encoded_events:
+                yield encoded_event
+            if is_terminal:
+                break
+            yield ": heartbeat\n\n"
+            await asyncio.sleep(settings.agent_run_event_poll_interval_seconds)
+    finally:
+        await db.rollback()
 
 
 async def stream_session_message_response(

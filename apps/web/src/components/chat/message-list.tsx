@@ -26,8 +26,12 @@ export function MessageList() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const [nearBottom, setNearBottom] = useState(true);
-  const messages = allMessages.filter(
-    (message) => message.sessionId === currentSessionId,
+  const messages = Array.from(
+    new Map(
+      allMessages
+        .filter((message) => message.sessionId === currentSessionId)
+        .map((message) => [message.id, message]),
+    ).values(),
   );
   const currentRun = agentRuns.find((run) => run.sessionId === currentSessionId);
   const lastMessageId = messages.at(-1)?.id;

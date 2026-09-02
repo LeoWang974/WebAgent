@@ -204,12 +204,30 @@ def _sync_runtime_env(
         "XDG_CACHE_HOME": shared_dir / "xdg-cache",
         "PIP_CACHE_DIR": shared_dir / "pip-cache",
         "npm_config_cache": shared_dir / "npm-cache",
-        "PLAYWRIGHT_BROWSERS_PATH": shared_dir / "playwright-browsers",
         "PYTHONUSERBASE": shared_dir / "python-user-base",
     }
     for directory in cache_dirs.values():
         directory.mkdir(parents=True, exist_ok=True)
     values.update({key: shell_path(path) for key, path in cache_dirs.items()})
+    configured_browser_path = (
+        settings.playwright_browsers_path
+        or environ.get("PLAYWRIGHT_BROWSERS_PATH")
+    )
+    if configured_browser_path:
+        # Browser binaries are immutable and can be shared across isolated runs;
+        # keep the path explicit so each run does not trigger a fresh install.
+        values["PLAYWRIGHT_BROWSERS_PATH"] = configured_browser_path
+    else:
+        browser_cache_dir = shared_dir / "playwright-browsers"
+        browser_cache_dir.mkdir(parents=True, exist_ok=True)
+        values["PLAYWRIGHT_BROWSERS_PATH"] = shell_path(browser_cache_dir)
+    if (
+        settings.sensenova_ca_bundle
+        and (model_runtime_config is None or model_runtime_config.provider.lower() == "sensenova")
+    ):
+        ca_bundle = path_from_runtime_setting(settings.sensenova_ca_bundle)
+        values["SSL_CERT_FILE"] = shell_path(ca_bundle)
+        values["REQUESTS_CA_BUNDLE"] = shell_path(ca_bundle)
     _write_runtime_env_values(hermes_env_path, values)
 
 

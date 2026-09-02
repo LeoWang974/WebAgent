@@ -12,6 +12,7 @@ import pytest
 
 from app.integrations.hermes import AgentRunCreate, HermesAdapter
 from app.integrations.hermes.cli import HermesCliWrapper, HermesStreamEvent
+from app.services.model_runtime_config import ModelRuntimeConfig
 
 
 def test_hermes_adapter_has_no_skill_mapping_helpers():
@@ -20,6 +21,75 @@ def test_hermes_adapter_has_no_skill_mapping_helpers():
     assert not hasattr(adapter, "_get_skills_for_skill")
     assert not hasattr(adapter, "_get_toolsets_for_skill")
     assert not hasattr(adapter, "_build_runtime_prompt")
+
+
+@pytest.mark.asyncio
+async def test_hermes_health_check_probes_configured_model(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        status_code = 200
+        is_success = True
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, **kwargs):
+            captured["url"] = url
+            captured.update(kwargs)
+            return FakeResponse()
+
+    monkeypatch.setattr(
+        "app.integrations.hermes.adapter.httpx.AsyncClient",
+        lambda **kwargs: (captured.update(client_kwargs=kwargs) or FakeClient()),
+    )
+    monkeypatch.setattr(
+        "app.integrations.hermes.adapter.settings.sensenova_ca_bundle",
+        "C:/certs/sensenova-ca.pem",
+    )
+    adapter = HermesAdapter(
+        model_runtime_config=ModelRuntimeConfig(
+            model_config_id="model-1",
+            provider="sensenova",
+            model_name="sensenova-6.8-flash-lite",
+            base_url="https://token.sensenova.cn/v1",
+            api_key="secret",
+        )
+    )
+
+    result = await adapter.health_check()
+
+    assert result["ok"] is True
+    assert result["status"] == "connected"
+    assert captured["url"] == "https://token.sensenova.cn/v1/chat/completions"
+    assert captured["json"]["model"] == "sensenova-6.8-flash-lite"
+    assert captured["headers"]["Authorization"] == "Bearer secret"
+    assert captured["client_kwargs"]["verify"] == "C:/certs/sensenova-ca.pem"
+
+
+@pytest.mark.asyncio
+async def test_hermes_health_check_reports_missing_credentials():
+    adapter = HermesAdapter(
+        model_runtime_config=ModelRuntimeConfig(
+            model_config_id="model-1",
+            provider="sensenova",
+            model_name="sensenova-6.8-flash-lite",
+            base_url="https://token.sensenova.cn/v1",
+            api_key=None,
+        )
+    )
+
+    result = await adapter.health_check()
+
+    assert result == {
+        "ok": False,
+        "status": "unconfigured",
+        "message": "Model API key is not configured.",
+    }
 
 
 def test_hermes_chat_command_starts_in_run_workspace(tmp_path):
@@ -46,7 +116,7 @@ async def test_hermes_stream_forwards_prompt_verbatim():
 
     adapter = HermesAdapter()
     adapter.cli = FakeCli()
-    content = "请使用 sn-deep-research 调研《主题乐园》并输出 Markdown 报告。"
+    content = "  请使用 sn-deep-research 调研《主题乐园》。\n\n保留这些空行。  "
 
     events = [
         event
@@ -136,48 +206,6 @@ async def test_hermes_does_not_retry_stall_after_artifact_exists():
 
     assert attempts == 1
     assert len(events) == 1
-
-
-@pytest.mark.asyncio
-async def test_hermes_retries_incomplete_artifact_handoff_without_rewriting_prompt():
-    attempts: list[dict[str, object]] = []
-
-    class FakeCli:
-        last_artifact_paths: list[str] = []
-        last_artifacts: list[dict] = []
-        last_diagnostics: dict[str, object] = {}
-
-        async def ask_stream_events(self, **kwargs):
-            attempts.append(kwargs)
-            if len(attempts) == 1:
-                self.last_diagnostics = {
-                    "last_stage": "gen_pptx.js 已写入，执行脚本即可生成 .pptx。"
-                }
-                yield HermesStreamEvent(
-                    event_type="completed",
-                    content="gen_pptx.js 已写入，执行脚本即可生成 .pptx。",
-                )
-                return
-            self.last_diagnostics = {"last_stage": "PPTX 已生成"}
-            yield HermesStreamEvent(event_type="completed", content="PPTX 已生成")
-
-    adapter = HermesAdapter(resume_session_id="incomplete-session")
-    adapter.cli = FakeCli()
-    prompt = "生成并导出 .pptx 文件"
-
-    events = [
-        event
-        async for event in adapter.stream_response_events(
-            AgentRunCreate(content=prompt, session_id="session_1", run_id="run_1")
-        )
-    ]
-
-    assert [attempt["question"] for attempt in attempts] == [prompt, prompt]
-    assert [attempt["session_id"] for attempt in attempts] == ["incomplete-session", None]
-    assert any(
-        event.payload.get("recoveryReason") == "incomplete_artifact_handoff"
-        for event in events
-    )
 
 
 def test_final_discovery_scans_the_run_runtime_root(tmp_path):

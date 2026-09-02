@@ -24,6 +24,7 @@ import {
   createRequestAbortController,
   releaseRequestAbortController,
   refreshRunArtifacts,
+  refreshRunMessages,
   subscribeAgentRunEvents,
   type ChatStateSetter,
 } from "./chat-runtime";
@@ -56,8 +57,8 @@ export async function sendMessageFlow(
   set: ChatStateSetter,
   content: string,
 ) {
-  const trimmed = content.trim();
-  if (!trimmed) {
+  const userContent = content;
+  if (!userContent.trim()) {
     return;
   }
 
@@ -76,7 +77,7 @@ export async function sendMessageFlow(
   const shouldAutoRename = Boolean(
     currentSession && isDefaultSessionTitle(currentSession.title),
   );
-  const autoTitle = generateSessionTitle(trimmed);
+  const autoTitle = generateSessionTitle(userContent);
   const now = new Date().toISOString();
   const localRunId = createId("run");
   let currentRunId = localRunId;
@@ -84,7 +85,7 @@ export async function sendMessageFlow(
     id: createId("message_user"),
     sessionId,
     role: "user",
-    content: trimmed,
+    content: userContent,
     createdAt: now,
   };
   const pendingAssistantMessage = createPendingAssistantMessage(
@@ -173,7 +174,7 @@ export async function sendMessageFlow(
   try {
     await webAgentApi.sendMessageStream(
       {
-        content: trimmed,
+        content: userContent,
         modelId,
         signal: requestAbortController.signal,
         sessionId,
@@ -184,9 +185,6 @@ export async function sendMessageFlow(
           currentRunId,
           "runId" in event ? event.runId : undefined,
         );
-        if (event.type === "run_started") {
-          stopDiscovery();
-        }
         set((state) => {
           const boundState: SendMessageStreamEventState = {
             ...state,
@@ -198,6 +196,10 @@ export async function sendMessageFlow(
             sessionId,
           });
         });
+        if (event.type === "run_started") {
+          stopDiscovery();
+          subscribeAgentRunEvents(get, set, event.runId);
+        }
       },
     );
     if (!currentRunId.startsWith("run_")) {
@@ -205,14 +207,17 @@ export async function sendMessageFlow(
       set((state) => ({
         activeAgentRunId: isTerminalRunStatus(refreshedRun.status)
           ? undefined
-          : state.activeAgentRunId,
+            : state.activeAgentRunId,
         agentRuns: state.agentRuns.map((runItem) =>
           runItem.id === refreshedRun.id ? refreshedRun : runItem,
         ),
       }));
       if (isTerminalRunStatus(refreshedRun.status)) {
         try {
-          await refreshRunArtifacts(get, set, sessionId, refreshedRun.id);
+          await Promise.all([
+            refreshRunMessages(get, set, sessionId),
+            refreshRunArtifacts(get, set, sessionId, refreshedRun.id),
+          ]);
         } catch (error) {
           set({
             error:
@@ -231,6 +236,27 @@ export async function sendMessageFlow(
           subscribeAgentRunEvents(get, set, backendRun.id);
           return;
         }
+        set((state) => ({
+          activeAgentRunId:
+            state.activeAgentRunId === currentRunId ? undefined : state.activeAgentRunId,
+          agentRuns: state.agentRuns.map((runItem) =>
+            runItem.id === backendRun.id ? { ...runItem, ...backendRun } : runItem,
+          ),
+        }));
+        try {
+          await Promise.all([
+            refreshRunMessages(get, set, backendRun.sessionId),
+            refreshRunArtifacts(get, set, backendRun.sessionId, backendRun.id),
+          ]);
+        } catch (recoveryError) {
+          set({
+            error:
+              recoveryError instanceof Error
+                ? recoveryError.message
+                : "Failed to recover the completed run.",
+          });
+        }
+        return;
       } catch {
         // Fall through to the visible request failure state.
       }

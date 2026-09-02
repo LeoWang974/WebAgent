@@ -143,7 +143,7 @@ export function AgentStatus() {
                 </div>
               ) : null}
               <div className="space-y-3">
-                {run.steps.map((step, index) => (
+                {Array.from(new Map(run.steps.map((step) => [step.id, step])).values()).map((step, index) => (
                   <div className="rounded-lg border bg-[#fbfbfa] p-3" key={step.id}>
                     <div className="flex items-center justify-between gap-3">
                       <div className="text-xs font-medium text-muted-foreground">

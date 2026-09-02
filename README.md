@@ -29,7 +29,6 @@ Browser :3000
           +-- PostgreSQL: users, sessions, messages, runs, artifacts
           +-- Redis: Celery queues and adapter capacity locks
           +-- Celery workers
-                +-- short-chat queue
                 +-- agent-runs queue
                       +-- Hermes CLI
 ```
@@ -62,9 +61,14 @@ docs                     Operations, deployment, and testing notes
   and encrypted API key.
 - Every Agent Run stores a model configuration snapshot.
 - Every run has a user/conversation/run-scoped workspace.
-- Short chats use the `short-chat` Celery queue; long jobs use `agent-runs`.
-- Queue classification changes scheduling priority only. It never changes the
-  prompt sent to Hermes.
+- Every message uses the same `agent-runs` queue. WebAgent does not inspect or
+  classify prompt intent before invoking Hermes.
+- User input is forwarded unchanged; runtime events and Artifact Manifest data
+  drive stage bubbles and artifact persistence.
+- WebAgent does not infer skills, output formats, or artifact requirements from
+  prompt text. Hermes remains responsible for task planning and tool choice.
+- WebAgent may normalize Hermes output only for bubble deduplication and stage
+  presentation; the original Hermes message content remains persisted.
 - Adapter capacity is scoped per conversation so different users and different
   conversations can run concurrently.
 
@@ -90,11 +94,11 @@ The scripts start:
 
 - Next.js on `0.0.0.0:3000`.
 - FastAPI on `127.0.0.1:8010`.
-- Two `short-chat` Celery workers and two independent `agent-runs` workers.
+- Four independent `agent-runs` workers.
 
-The CCI launcher defaults to two short-chat workers and four long-task workers.
-Override `SHORT_CHAT_WORKER_INSTANCES`, `WORKER_INSTANCES`, or
-`WORKER_CONCURRENCY` in the CCI environment when capacity requirements change.
+The CCI launcher defaults to six `agent-runs` workers. Override
+`WORKER_INSTANCES` or `WORKER_CONCURRENCY` in the CCI environment when capacity
+requirements change.
 
 Use the following command to stop all three processes:
 

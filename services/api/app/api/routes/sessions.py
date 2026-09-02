@@ -291,7 +291,7 @@ async def list_session_artifacts(
     return [
         to_artifact(item, include_payload=False)
         for item in result.scalars().all()
-        if developer_mode or not is_debug_artifact(item)
+        if developer_mode or (item.status == "ready" and not is_debug_artifact(item))
     ]
 
 

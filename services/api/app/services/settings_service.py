@@ -10,11 +10,12 @@
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import schemas
-from app.models import ModelConfig, SkillConfig, User, UserSettings
+from app.core.config import settings
+from app.models import AgentRun, ModelConfig, SkillConfig, User, UserSettings
 from app.services.model_runtime_config import model_runtime_config_builder
 from app.services.model_secret_encryption import mask_model_secret
 
@@ -30,7 +31,7 @@ DEFAULT_INTERFACE = {"developer_mode": False}
 
 DEFAULT_MODELS = [
     {
-        "name": "SenseNova default model",
+        "name": "SenseNova",
         "provider": "sensenova",
         "base_url": None,
         "encrypted_api_key": None,
@@ -38,6 +39,27 @@ DEFAULT_MODELS = [
         "is_available": True,
     },
 ]
+
+UNCONFIGURED_BUILTIN_MODEL_NAMES = {"deepseek", "gpt-5.5", "gpt5.5"}
+
+LEGACY_RUNTIME_MODEL_NAMES = {
+    "hermes",
+    "hermes agent",
+    "hermes local runtime",
+    "openclaw",
+    "openclaw agent",
+}
+
+
+def is_legacy_runtime_model(model: ModelConfig) -> bool:
+    name = (model.name or "").strip().lower()
+    base_url = (model.base_url or "").strip().lower()
+    return (
+        name in LEGACY_RUNTIME_MODEL_NAMES
+        or "openclaw" in name
+        or "localhost:8642" in base_url
+        or "127.0.0.1:18789" in base_url
+    )
 
 DEFAULT_SKILLS = [
     {
@@ -79,11 +101,19 @@ def to_model_schema(
     model: ModelConfig,
     runtime_status: dict[str, Any] | None = None,
 ) -> schemas.ModelConfig:
+    provider = (model.provider or "").strip().lower()
+    effective_base_url = model.base_url
+    if not effective_base_url and provider == "sensenova":
+        effective_base_url = settings.sensenova_base_url or "https://token.sensenova.cn/v1"
+    elif not effective_base_url and provider == "deepseek":
+        effective_base_url = settings.deepseek_base_url or "https://api.deepseek.com/v1"
+    elif not effective_base_url and provider == "openai":
+        effective_base_url = settings.openai_base_url or "https://api.openai.com/v1"
     return schemas.ModelConfig(
         id=model.id,
         name=model.name,
         provider=model.provider,
-        base_url=model.base_url,
+        base_url=effective_base_url,
         is_default=model.is_default,
         is_available=model.is_available,
         masked_api_key=mask_model_secret(model.encrypted_api_key),
@@ -118,9 +148,9 @@ async def check_runtime_model(
     if not hasattr(adapter, "health_check"):
         return {
             "adapterKey": "hermes",
-            "ok": True,
-            "status": "available",
-            "message": "Runtime adapter is available; no active health check is implemented.",
+            "ok": False,
+            "status": "unavailable",
+            "message": "Runtime adapter does not support health checks.",
         }
 
     try:
@@ -134,11 +164,17 @@ async def check_runtime_model(
         }
 
     ok = bool(health.get("ok")) if isinstance(health, dict) else False
+    health_message = (
+        health.get("message")
+        if isinstance(health, dict) and isinstance(health.get("message"), str)
+        else None
+    )
     return {
         "adapterKey": "hermes",
         "ok": ok,
         "status": "connected" if ok else "unavailable",
-        "message": "Runtime health check passed." if ok else "Runtime health check failed.",
+        "message": health_message
+        or ("Runtime health check passed." if ok else "Runtime health check failed."),
         "health": health,
     }
 
@@ -172,8 +208,60 @@ async def ensure_default_models(db: AsyncSession, user: User) -> None:
         .order_by(ModelConfig.created_at.asc())
     )
     existing_models = list(result.scalars().all())
-    existing_by_name = {model.name: model for model in existing_models}
     changed = False
+
+    # Hermes is the only runtime adapter. Older deployments stored the adapter
+    # itself (and OpenClaw) as selectable models; remove those stale entries so
+    # the settings page contains LLM choices only. Runs keep their history, but
+    # no longer point at a deleted model configuration.
+    legacy_models = [model for model in existing_models if is_legacy_runtime_model(model)]
+    if legacy_models:
+        for model in legacy_models:
+            await db.execute(
+                update(AgentRun)
+                .where(AgentRun.model_config_id == model.id)
+                .values(model_config_id=None)
+            )
+            await db.delete(model)
+        existing_models = [model for model in existing_models if model not in legacy_models]
+        changed = True
+
+    # DeepSeek and GPT are opt-in models. Remove rows that were created by the
+    # old built-in catalog, but keep any user-configured row with credentials or
+    # an explicit endpoint.
+    unconfigured_builtins = [
+        model
+        for model in existing_models
+        if (model.name or "").strip().lower() in UNCONFIGURED_BUILTIN_MODEL_NAMES
+        and not model.encrypted_api_key
+        and not model.base_url
+    ]
+    if unconfigured_builtins:
+        for model in unconfigured_builtins:
+            await db.execute(
+                update(AgentRun)
+                .where(AgentRun.model_config_id == model.id)
+                .values(model_config_id=None)
+            )
+            await db.delete(model)
+        existing_models = [model for model in existing_models if model not in unconfigured_builtins]
+        changed = True
+
+    # Normalize the old default label before comparing against the new catalog.
+    legacy_sensenova = next(
+        (
+            model
+            for model in existing_models
+            if (model.name or "").strip().lower() == "sensenova default model"
+        ),
+        None,
+    )
+    if legacy_sensenova is not None:
+        legacy_sensenova.name = "SenseNova"
+        legacy_sensenova.provider = "sensenova"
+        changed = True
+
+    existing_by_name = {model.name: model for model in existing_models}
 
     for item in DEFAULT_MODELS:
         if item["name"] not in existing_by_name:

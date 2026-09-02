@@ -134,7 +134,6 @@ async def stream_agent_run_events(
     current_user: CurrentUser,
 ) -> StreamingResponse:
     await get_db_agent_run(db, run_id, current_user)
-    await db.close()
 
     async def event_stream():
         event_cursor = AgentRunEventCursor()
@@ -149,8 +148,9 @@ async def stream_agent_run_events(
                         sse("agent_run_event", api_event.model_dump(by_alias=True))
                     )
                 is_terminal = run.status in TERMINAL_RUN_STATUSES
-                # Do not retain a database connection while waiting on the client or poll timer.
-                await db.close()
+                # End the read transaction before yielding or waiting so the long-lived stream
+                # does not hold a database connection between polls.
+                await db.rollback()
                 for encoded_event in encoded_events:
                     yield encoded_event
                 if is_terminal:

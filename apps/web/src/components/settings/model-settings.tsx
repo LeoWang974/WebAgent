@@ -24,6 +24,8 @@ import type { ModelProvider } from "@/types";
 
 const providerOptions: Array<{ label: string; value: ModelProvider }> = [
   { label: "sensenova", value: "sensenova" },
+    { label: "DeepSeek", value: "deepseek" },
+    { label: "OpenAI / GPT", value: "openai" },
   { label: "OpenAI compatible", value: "openai_compatible" },
   { label: "Custom", value: "custom" },
 ];

@@ -1,7 +1,7 @@
 /**
  * File purpose: Implements browser-side API access for sse parser.
  * Main declarations: parseSseJson handles parse sse json; parseSseEvents handles parse sse events;
- * splitSseBuffer handles split sse buffer.
+ * splitSseBuffer handles split sse buffer; createSseEventDeduper filters replayed events.
  */
 
 export interface ParsedSseEvent {
@@ -23,8 +23,9 @@ export function parseSseJson<T>(data: string, eventType: string): T | undefined 
 }
 
 export function parseSseEvents(rawEvents: string): ParsedSseEvent[] {
-  return rawEvents
-    .split("\n\n")
+  const normalized = normalizeSseLineEndings(rawEvents);
+  return normalized
+    .split(/\n{2,}/)
     .map((rawEvent) => {
       const lines = rawEvent.split("\n");
       const type = lines
@@ -47,10 +48,30 @@ export function parseSseEvents(rawEvents: string): ParsedSseEvent[] {
 }
 
 export function splitSseBuffer(buffer: string) {
-  const rawEvents = buffer.split("\n\n");
+  const normalized = normalizeSseLineEndings(buffer);
+  const rawEvents = normalized.split("\n\n");
   const remainingBuffer = rawEvents.pop() ?? "";
   return {
     events: parseSseEvents(rawEvents.join("\n\n")),
     remainingBuffer,
   };
+}
+
+export function createSseEventDeduper() {
+  const seenEventIds = new Set<string>();
+
+  return (event: { eventId?: string }) => {
+    if (!event.eventId) {
+      return true;
+    }
+    if (seenEventIds.has(event.eventId)) {
+      return false;
+    }
+    seenEventIds.add(event.eventId);
+    return true;
+  };
+}
+
+function normalizeSseLineEndings(value: string) {
+  return value.replace(/\r\n?/g, "\n");
 }

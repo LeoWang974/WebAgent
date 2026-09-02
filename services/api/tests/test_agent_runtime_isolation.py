@@ -14,8 +14,13 @@ import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
 from app.core.config import settings
+from app.models import FileAsset
 from app.services.adapter_limiter import adapter_lock_scope
+from app.services.agent_run_workspace import stage_conversation_files
 from app.services.model_runtime_config import ModelRuntimeConfig
 from app.services.runtime_environment import (
     build_user_runtime_context,
@@ -71,12 +76,34 @@ def test_build_user_runtime_context_creates_per_conversation_dirs(monkeypatch, t
     assert context.adapter_lock_scope() == "conversation:user-one:conversation-one"
 
 
+def test_build_user_runtime_context_exports_sensenova_ca_bundle(
+    monkeypatch, tmp_path: Path
+):
+    runtime_root = tmp_path / "runtime-users"
+    hermes_home = _base_hermes_home(tmp_path)
+    ca_bundle = tmp_path / "corp-ca.pem"
+    ca_bundle.write_text("-----BEGIN CERTIFICATE-----\n", encoding="utf-8")
+    monkeypatch.setattr(settings, "agent_runtime_user_root", str(runtime_root))
+    monkeypatch.setattr(settings, "hermes_home", str(hermes_home))
+    monkeypatch.setattr(settings, "hermes_skills_dir", "")
+    monkeypatch.setattr(settings, "sensenova_ca_bundle", str(ca_bundle))
+
+    user = SimpleNamespace(id="user-one", username="Test User")
+    context = build_user_runtime_context(user, "conversation-one")
+
+    hermes_env = (context.hermes_home / ".env").read_text(encoding="utf-8")
+    expected = shell_path(ca_bundle)
+    assert f"SSL_CERT_FILE={expected}" in hermes_env
+    assert f"REQUESTS_CA_BUNDLE={expected}" in hermes_env
+
+
 def test_build_user_runtime_context_uses_run_model_snapshot(monkeypatch, tmp_path: Path):
     runtime_root = tmp_path / "runtime-users"
     hermes_home = _base_hermes_home(tmp_path)
     monkeypatch.setattr(settings, "agent_runtime_user_root", str(runtime_root))
     monkeypatch.setattr(settings, "hermes_home", str(hermes_home))
     monkeypatch.setattr(settings, "hermes_skills_dir", "")
+    monkeypatch.setattr(settings, "playwright_browsers_path", None)
 
     config = ModelRuntimeConfig(
         model_config_id="model-1",
@@ -109,6 +136,27 @@ def test_build_user_runtime_context_uses_run_model_snapshot(monkeypatch, tmp_pat
     scrub_runtime_credentials(context)
     assert not (context.hermes_home / ".env").exists()
     assert not (context.hermes_home / "config.yaml").exists()
+
+
+def test_build_user_runtime_context_preserves_configured_browser_cache(
+    monkeypatch, tmp_path: Path
+):
+    runtime_root = tmp_path / "runtime-users"
+    hermes_home = _base_hermes_home(tmp_path)
+    monkeypatch.setattr(settings, "agent_runtime_user_root", str(runtime_root))
+    monkeypatch.setattr(settings, "hermes_home", str(hermes_home))
+    monkeypatch.setattr(settings, "hermes_skills_dir", "")
+    monkeypatch.setattr(
+        settings,
+        "playwright_browsers_path",
+        "/home/tester/.cache/ms-playwright",
+    )
+
+    user = SimpleNamespace(id="user-one", username="Test User")
+    context = build_user_runtime_context(user, "conversation-one", run_id="run-one")
+
+    hermes_env = (context.hermes_home / ".env").read_text(encoding="utf-8")
+    assert "PLAYWRIGHT_BROWSERS_PATH=/home/tester/.cache/ms-playwright" in hermes_env
 
 
 def test_build_user_runtime_context_resumes_latest_conversation_session(
@@ -152,3 +200,33 @@ def test_adapter_lock_scope_respects_configured_scope(monkeypatch):
     assert adapter_lock_scope("conversation:user:abc") == "conversation:user:abc"
     monkeypatch.setattr(settings, "agent_adapter_limit_scope", "global")
     assert adapter_lock_scope("conversation:user:abc") == "global"
+
+
+@pytest.mark.asyncio
+async def test_stage_conversation_files_copies_uploads_into_run_workspace(
+    db_sessionmaker: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+):
+    source = tmp_path / "source data.csv"
+    source.write_text("name,value\nAda,1\n", encoding="utf-8")
+    workspace = tmp_path / "run-workspace"
+
+    async with db_sessionmaker() as db:
+        db.add(
+            FileAsset(
+                id="upload-one",
+                user_id="user-one",
+                conversation_id="conversation-one",
+                filename="source data.csv",
+                content_type="text/csv",
+                size=source.stat().st_size,
+                storage_key=str(source),
+                file_metadata={"path": str(source)},
+            )
+        )
+        await db.commit()
+
+        staged = await stage_conversation_files(db, "conversation-one", workspace)
+
+    assert staged == [workspace / "context" / "source data.csv"]
+    assert staged[0].read_text(encoding="utf-8") == "name,value\nAda,1\n"

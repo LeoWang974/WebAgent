@@ -173,11 +173,11 @@ function DiagnosticsPanel({ events, run }: { events: AgentRunEvent[]; run: Agent
         </div>
       ) : null}
       <div className="space-y-3">
-        {diagnostics.map((event) => {
+        {diagnostics.map((event, index) => {
           const diagnostic = buildRunDiagnosticViewModel(event, run, events);
 
           return (
-            <div className="rounded-lg border bg-[#fbfbfa] p-3" key={event.step.id}>
+            <div className="rounded-lg border bg-[#fbfbfa] p-3" key={`${event.eventId ?? event.step.id}-${index}`}>
               <div className="text-xs font-medium text-muted-foreground">
                 {new Date(event.step.timestamp).toLocaleString()} / {event.step.label}
               </div>
@@ -276,9 +276,17 @@ export function AgentRunDetailView({ runId }: AgentRunDetailViewProps) {
               : currentRun,
           );
           setEvents((currentEvents) =>
-            currentEvents.some((item) => item.step.id === event.step.id)
+            currentEvents.some((item) =>
+              event.eventId
+                ? item.eventId === event.eventId
+                : item.step.id === event.step.id,
+            )
               ? currentEvents.map((item) =>
-                  item.step.id === event.step.id ? event : item,
+                  (event.eventId
+                    ? item.eventId === event.eventId
+                    : item.step.id === event.step.id)
+                    ? event
+                    : item,
                 )
               : [...currentEvents, event],
           );
@@ -433,7 +441,7 @@ export function AgentRunDetailView({ runId }: AgentRunDetailViewProps) {
           <div className="mb-3 text-sm font-semibold">运行时间线</div>
           <div className="space-y-3">
             {timelineEvents.map((event, index) => (
-              <div className="rounded-lg border bg-[#fbfbfa] p-3" key={event.step.id}>
+              <div className="rounded-lg border bg-[#fbfbfa] p-3" key={`${event.eventId ?? event.step.id}-${index}`}>
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="text-xs font-medium text-muted-foreground">
                     #{index + 1} / {new Date(event.step.timestamp).toLocaleString()}

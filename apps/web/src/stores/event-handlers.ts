@@ -44,6 +44,8 @@ export function applyAgentRunEventState(
   event: AgentRunEvent,
 ): Partial<AgentRunEventState> {
   const terminal = isTerminalRunStatus(event.status);
+  const eventRun = state.agentRuns.find((run) => run.id === event.runId);
+  const recoveredRun = eventRun ?? recoverRunFromPendingMessage(state, event);
   const nextAgentRuns = state.agentRuns.map((run) => {
     if (run.id !== event.runId) {
       return run;
@@ -64,14 +66,24 @@ export function applyAgentRunEventState(
       completedAt: event.completedAt,
       error: event.error,
       progress: event.progress,
-      status: event.status,
+      status: mergeRunStatus(run.status, event.status),
       steps: hasExistingStep ? previousSteps : [...previousSteps, event.step],
     };
-    if (event.payload?.messageId && event.payload?.content) {
+    if (event.payload?.content) {
       nextRun.hasAssistantResponse = true;
     }
     return nextRun;
   });
+
+  if (!eventRun && recoveredRun) {
+    nextAgentRuns.push(recoveredRun);
+  }
+
+  const nextState = {
+    ...state,
+    agentRuns: nextAgentRuns,
+  };
+  const eventMessages = applyRunningAgentRunEventMessages(nextState, event);
 
   return {
     activeAgentRunId:
@@ -80,15 +92,49 @@ export function applyAgentRunEventState(
         : state.activeAgentRunId,
     agentRuns: nextAgentRuns,
     messages: terminal
-      ? removePendingMessagesForRun(state, event.runId)
-      : applyRunningAgentRunEventMessages(
-          {
-            ...state,
-            agentRuns: nextAgentRuns,
-          },
-          event,
-        ),
+      ? removePendingMessagesForRun({ ...nextState, messages: eventMessages }, event.runId)
+      : eventMessages,
   };
+}
+
+function recoverRunFromPendingMessage(
+  state: AgentRunEventState,
+  event: AgentRunEvent,
+): AgentRun | undefined {
+  if (state.activeAgentRunId !== event.runId) {
+    return undefined;
+  }
+  const pendingMessage = state.messages.find(
+    (message) => message.role === "assistant" && message.isPending,
+  );
+  if (!pendingMessage) {
+    return undefined;
+  }
+  return {
+    id: event.runId,
+    sessionId: pendingMessage.sessionId,
+    status: event.status,
+    title: "Hermes request",
+    progress: event.progress,
+    steps: [],
+    startedAt: event.step.timestamp,
+    completedAt: event.completedAt,
+    error: event.error,
+    hasAssistantResponse: false,
+  };
+}
+
+function mergeRunStatus(
+  currentStatus: AgentRun["status"],
+  incomingStatus: AgentRun["status"],
+): AgentRun["status"] {
+  if (currentStatus === "completed" && incomingStatus !== "completed") {
+    return currentStatus;
+  }
+  if (isTerminalRunStatus(currentStatus) && !isTerminalRunStatus(incomingStatus)) {
+    return currentStatus;
+  }
+  return incomingStatus;
 }
 
 function removePendingMessagesForRun(state: AgentRunEventState, runId: string) {
@@ -108,7 +154,12 @@ function applyRunningAgentRunEventMessages(
 ) {
   const run = state.agentRuns.find((item) => item.id === event.runId);
   const content = typeof event.payload?.content === "string" ? event.payload.content.trim() : "";
-  const messageId = typeof event.payload?.messageId === "string" ? event.payload.messageId : "";
+  const messageId =
+    typeof event.payload?.messageId === "string" && event.payload.messageId
+      ? event.payload.messageId
+      : content && event.step?.id
+        ? `run_event_${event.runId}_${event.step.id}`
+        : "";
   if (run && content && messageId) {
     if (state.messages.some((message) => message.id === messageId)) {
       return state.messages;
