@@ -16,7 +16,8 @@ export interface ModelRuntimeStatus {
   health?: Record<string, unknown>;
   message?: string;
   ok?: boolean;
-  status?: "available" | "connected" | "unavailable" | string;
+  transient?: boolean;
+  status?: "available" | "connected" | "degraded" | "unavailable" | string;
 }
 
 export interface ModelConfig {

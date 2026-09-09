@@ -16,6 +16,10 @@ export class ApiError extends Error {
   }
 }
 
+export interface ApiClientInit extends RequestInit {
+  timeoutMs?: number;
+}
+
 export function getAccessToken() {
   if (typeof window === "undefined") {
     return undefined;
@@ -26,23 +30,39 @@ export function getAccessToken() {
 
 export async function apiClient<T>(
   path: string,
-  init?: RequestInit,
+  init?: ApiClientInit,
 ): Promise<T> {
-  const headers = new Headers(init?.headers);
+  const { timeoutMs = 60_000, ...requestInit } = init ?? {};
+  const headers = new Headers(requestInit.headers);
   const token = getAccessToken();
 
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
   }
 
-  if (!(init?.body instanceof FormData) && !headers.has("Content-Type")) {
+  if (!(requestInit.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    headers,
-  });
+  const controller = new AbortController();
+  const timeoutId = globalThis.setTimeout(() => controller.abort(), timeoutMs);
+  const forwardAbort = () => controller.abort();
+  if (requestInit.signal?.aborted) {
+    controller.abort();
+  }
+  requestInit.signal?.addEventListener("abort", forwardAbort, { once: true });
+
+  let response!: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      ...requestInit,
+      headers,
+      signal: controller.signal,
+    });
+  } finally {
+    globalThis.clearTimeout(timeoutId);
+    requestInit.signal?.removeEventListener("abort", forwardAbort);
+  }
 
   if (!response.ok) {
     let detail = `API request failed: ${response.status}`;

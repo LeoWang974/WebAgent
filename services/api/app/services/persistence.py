@@ -22,13 +22,26 @@ from app import schemas
 from app.core.config import settings
 from app.core.security import decode_access_token, hash_password
 from app.db.session import get_db
-from app.models import Artifact, Conversation, ConversationShare, FileAsset, Message, User
+from app.models import Artifact, Conversation, FileAsset, Message, User
+from app.services.artifact_path_utils import artifact_path_for_host
+from app.services.artifact_storage import artifact_storage_root
 
 DEFAULT_DEV_EMAIL = "demo@webagent.local"
 
 
 def now_iso() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _trusted_artifact_file_path(value: object) -> Path | None:
+    if not isinstance(value, str) or not value:
+        return None
+    path = artifact_path_for_host(value, wsl_distribution=settings.hermes_wsl_distribution)
+    try:
+        path.resolve().relative_to(artifact_storage_root().resolve())
+    except (OSError, ValueError):
+        return None
+    return path if path.is_file() else None
 
 
 def normalize_email(email: str) -> str:
@@ -234,14 +247,17 @@ def to_artifact(
         if not has_preview_url:
             image_path = next(
                 (
-                    Path(value)
+                    path
                     for value in (metadata.get("path"), metadata.get("originalPath"))
-                    if isinstance(value, str) and value and Path(value).is_file()
+                    for path in [_trusted_artifact_file_path(value)]
+                    if path is not None
                 ),
                 None,
             )
             if image_path is not None:
                 try:
+                    if image_path.stat().st_size > settings.artifact_preview_max_bytes:
+                        raise OSError("artifact preview exceeds configured size limit")
                     encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
                 except OSError:
                     pass
@@ -287,7 +303,10 @@ async def get_conversation_or_404(
     result = await db.execute(
         select(Conversation)
         .where(Conversation.id == session_id)
-        .options(selectinload(Conversation.shares).selectinload(ConversationShare.user))
+        # Permission checks only need share ids and roles.  Loading each shared
+        # user's full row here made every message/run/artifact request fan out
+        # into an unnecessary second query and object graph.
+        .options(selectinload(Conversation.shares))
         .execution_options(populate_existing=True)
     )
     conversation = result.scalar_one_or_none()

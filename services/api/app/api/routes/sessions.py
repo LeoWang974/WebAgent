@@ -10,7 +10,7 @@
 import asyncio
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import selectinload
@@ -96,6 +96,7 @@ async def delete_conversation_folder(
 async def list_sessions(
     db: DbSession,
     current_user: CurrentUser,
+    limit: int = Query(default=100, ge=1, le=500),
 ) -> list[schemas.Session]:
     result = await db.execute(
         select(Conversation)
@@ -111,6 +112,7 @@ async def list_sessions(
         )
         .options(selectinload(Conversation.shares).selectinload(ConversationShare.user))
         .order_by(Conversation.updated_at.desc())
+        .limit(limit)
     )
     conversations = result.scalars().unique().all()
     return [to_session(item) for item in conversations]
@@ -238,14 +240,16 @@ async def list_session_messages(
     session_id: str,
     db: DbSession,
     current_user: CurrentUser,
+    limit: int = Query(default=500, ge=1, le=2000),
 ) -> list[schemas.Message]:
     await get_conversation_or_404(db, session_id, current_user)
     result = await db.execute(
         select(Message)
         .where(Message.conversation_id == session_id)
-        .order_by(Message.created_at.asc())
+        .order_by(Message.created_at.desc(), Message.id.desc())
+        .limit(limit)
     )
-    return [to_message(item) for item in result.scalars().all()]
+    return [to_message(item) for item in reversed(result.scalars().all())]
 
 
 @router.post("/{session_id}/messages", response_model=schemas.SendMessageResult)
@@ -280,12 +284,14 @@ async def list_session_artifacts(
     session_id: str,
     db: DbSession,
     current_user: CurrentUser,
+    limit: int = Query(default=500, ge=1, le=2000),
 ) -> list[schemas.Artifact]:
     await get_conversation_or_404(db, session_id, current_user)
     result = await db.execute(
         select(Artifact)
         .where(Artifact.conversation_id == session_id)
         .order_by(Artifact.created_at.desc())
+        .limit(limit)
     )
     developer_mode = await user_developer_mode(db, current_user)
     return [
@@ -300,11 +306,13 @@ async def list_session_files(
     session_id: str,
     db: DbSession,
     current_user: CurrentUser,
+    limit: int = Query(default=200, ge=1, le=1000),
 ) -> list[schemas.FileAsset]:
     await get_conversation_or_404(db, session_id, current_user)
     result = await db.execute(
         select(FileAsset)
         .where(FileAsset.conversation_id == session_id)
         .order_by(FileAsset.created_at.desc())
+        .limit(limit)
     )
     return [to_file_asset(item) for item in result.scalars().all()]

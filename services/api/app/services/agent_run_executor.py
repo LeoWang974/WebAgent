@@ -7,6 +7,7 @@
 import asyncio
 import logging
 from datetime import datetime
+from pathlib import Path
 
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import select
@@ -54,6 +55,22 @@ from app.services.stage_bubble_filter import normalize_runtime_update, should_su
 from app.services.stream_protocol import runtime_diagnostics
 
 logger = logging.getLogger(__name__)
+
+
+def _append_uploaded_file_context(content: str, staged_files: list[Path]) -> str:
+    """Tell Hermes which staged attachments are available without exposing host paths."""
+    if not staged_files:
+        return content
+    attachment_lines = "\n".join(
+        f"- context/{path.name}" for path in staged_files
+    )
+    return (
+        f"{content.rstrip()}\n\n"
+        "[WebAgent attachments]\n"
+        "The following user-uploaded files are available in the current workspace. "
+        "Read them when they are relevant to the request:\n"
+        f"{attachment_lines}"
+    )
 
 
 async def _load_run_context(
@@ -215,6 +232,7 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
             run_workspace,
             mirror_dirs=(user_runtime_context.hermes_home / "context",),
         )
+        agent_content = _append_uploaded_file_context(content, staged_context_files)
         logger.info(
             "Staged conversation artifacts: run_id=%s count=%s workspace=%s",
             run_id_value,
@@ -280,7 +298,7 @@ async def _execute_queued_agent_run(db: AsyncSession, run_id: str) -> None:
         from app.integrations.hermes import AgentRunCreate as AdapterAgentRunCreate
 
         adapter_input = AdapterAgentRunCreate(
-            content=content,
+            content=agent_content,
             session_id=conversation_id,
             model_id=model_id,
             run_id=run_id_value,

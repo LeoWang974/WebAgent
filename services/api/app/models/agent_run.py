@@ -40,6 +40,9 @@ class AgentRun(IdMixin, TimestampMixin, Base):
 
 class AgentRunEvent(IdMixin, TimestampMixin, Base):
     __tablename__ = "agent_run_events"
+    __table_args__ = (
+        Index("ix_agent_run_events_run_created_id", "run_id", "created_at", "id"),
+    )
 
     run_id: Mapped[str] = mapped_column(ForeignKey("agent_runs.id"), index=True)
     event_type: Mapped[str] = mapped_column(String(80))

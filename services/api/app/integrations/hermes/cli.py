@@ -1796,7 +1796,7 @@ class HermesCliWrapper:
                     required_artifact_types=(
                         set(self.artifact_manifest_recorder.manifest.required_artifact_types)
                         if requires_final_bundle
-                        else set()
+                        else None
                     ),
                 )
                 manifest_snapshot = self.artifact_manifest_recorder.snapshot()

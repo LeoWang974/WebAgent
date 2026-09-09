@@ -129,3 +129,30 @@ async def upload_file(
         raise
     await db.refresh(file_asset)
     return to_file_asset(file_asset)
+
+
+@router.delete("/{file_id}", status_code=204)
+async def delete_file(
+    file_id: str,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> None:
+    result = await db.execute(
+        select(FileAsset).where(
+            FileAsset.id == file_id,
+            FileAsset.user_id == current_user.id,
+        )
+    )
+    file_asset = result.scalar_one_or_none()
+    if file_asset is None:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    storage_path = Path(file_asset.storage_key)
+    try:
+        if storage_path.is_file():
+            await asyncio.to_thread(storage_path.unlink)
+        await db.delete(file_asset)
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise

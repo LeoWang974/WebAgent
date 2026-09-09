@@ -30,11 +30,36 @@ const providerOptions: Array<{ label: string; value: ModelProvider }> = [
   { label: "Custom", value: "custom" },
 ];
 
-function runtimeStatusText(model: { isAvailable?: boolean; runtimeStatus?: { message?: string } }) {
+function runtimeStatusText(model: {
+  isAvailable?: boolean;
+  runtimeStatus?: { message?: string; status?: string };
+}) {
   if (model.runtimeStatus?.message) {
     return model.runtimeStatus.message;
   }
+  if (model.runtimeStatus?.status === "degraded") {
+    return "连接待确认";
+  }
+  if (model.runtimeStatus?.status === "unavailable") {
+    return "连接不可用";
+  }
   return model.isAvailable === false ? "连接不可用" : "连接可用";
+}
+
+function modelAvailabilityState(model: {
+  isAvailable?: boolean;
+  runtimeStatus?: { ok?: boolean; status?: string };
+}) {
+  if (model.runtimeStatus?.status === "degraded") {
+    return "degraded";
+  }
+  if (model.runtimeStatus?.status === "unavailable") {
+    return "unavailable";
+  }
+  if (model.runtimeStatus?.ok === true || model.isAvailable === true) {
+    return "connected";
+  }
+  return "unavailable";
 }
 
 function runtimeHealthSummary(value: unknown) {
@@ -82,6 +107,7 @@ export function ModelSettings() {
   const [apiKey, setApiKey] = useState("");
   const [editingModelId, setEditingModelId] = useState<string>();
   const [editBaseUrl, setEditBaseUrl] = useState("");
+  const [editApiKey, setEditApiKey] = useState("");
   const [editName, setEditName] = useState("");
   const [editProvider, setEditProvider] = useState<ModelProvider>("openai_compatible");
   const [name, setName] = useState("");
@@ -141,33 +167,42 @@ export function ModelSettings() {
             </div>
           </div>
           <div className="mt-3 grid gap-2 md:grid-cols-2">
-            {runtimeModels.map((model) => (
-              <div className="rounded-md border bg-[#fbfbfa] p-3" key={model.id}>
-                <div className="flex items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-medium">{model.name}</div>
-                    <div className="mt-1 truncate text-xs text-muted-foreground">
-                      {model.runtimeStatus?.adapterKey ?? "runtime"} /{" "}
-                      {model.baseUrl ?? "未配置地址"}
+            {runtimeModels.map((model) => {
+              const availability = modelAvailabilityState(model);
+              return (
+                <div className="rounded-md border bg-[#fbfbfa] p-3" key={model.id}>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium">{model.name}</div>
+                      <div className="mt-1 truncate text-xs text-muted-foreground">
+                        {model.runtimeStatus?.adapterKey ?? "runtime"} /{" "}
+                        {model.baseUrl ?? "未配置地址"}
+                      </div>
                     </div>
+                    <span
+                      className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] ${
+                        availability === "unavailable"
+                          ? "border-amber-200 bg-amber-50 text-amber-700"
+                          : availability === "degraded"
+                            ? "border-yellow-200 bg-yellow-50 text-yellow-700"
+                            : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                      }`}
+                    >
+                      {availability === "unavailable"
+                        ? "未连接"
+                        : availability === "degraded"
+                          ? "待确认"
+                          : "已连接"}
+                    </span>
                   </div>
-                  <span
-                    className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] ${
-                      model.isAvailable === false
-                        ? "border-amber-200 bg-amber-50 text-amber-700"
-                        : "border-emerald-200 bg-emerald-50 text-emerald-700"
-                    }`}
-                  >
-                    {model.isAvailable === false ? "未连接" : "已连接"}
-                  </span>
+                  {model.runtimeStatus?.message ? (
+                    <div className="mt-2 line-clamp-2 text-xs text-muted-foreground">
+                      {model.runtimeStatus.message}
+                    </div>
+                  ) : null}
                 </div>
-                {model.runtimeStatus?.message ? (
-                  <div className="mt-2 line-clamp-2 text-xs text-muted-foreground">
-                    {model.runtimeStatus.message}
-                  </div>
-                ) : null}
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       ) : null}
@@ -183,7 +218,7 @@ export function ModelSettings() {
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
                 {editingModelId === model.id ? (
-                  <div className="grid gap-2 md:grid-cols-3">
+                  <div className="grid gap-2 md:grid-cols-4">
                     <input
                       className="rounded-md border px-2 py-1.5 text-sm"
                       onChange={(event) => setEditName(event.target.value)}
@@ -208,6 +243,14 @@ export function ModelSettings() {
                       placeholder="https://api.example.com/v1"
                       value={editBaseUrl}
                     />
+                    <input
+                      className="rounded-md border px-2 py-1.5 text-sm"
+                      autoComplete="new-password"
+                      onChange={(event) => setEditApiKey(event.target.value)}
+                      placeholder="留空保持当前 API Key"
+                      type="password"
+                      value={editApiKey}
+                    />
                   </div>
                 ) : (
                   <button
@@ -224,7 +267,7 @@ export function ModelSettings() {
                           {t("defaultModel")}
                         </span>
                       ) : null}
-                      {model.isAvailable ? (
+                      {modelAvailabilityState(model) === "connected" ? (
                         <CheckCircle2 className="size-3.5 text-emerald-600" />
                       ) : null}
                     </div>
@@ -239,9 +282,11 @@ export function ModelSettings() {
                     ) : null}
                     <div
                       className={`mt-2 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] ${
-                        model.isAvailable === false
+                        modelAvailabilityState(model) === "unavailable"
                           ? "border-amber-200 bg-amber-50 text-amber-700"
-                          : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                          : modelAvailabilityState(model) === "degraded"
+                            ? "border-yellow-200 bg-yellow-50 text-yellow-700"
+                            : "border-emerald-200 bg-emerald-50 text-emerald-700"
                       }`}
                       title={runtimeHealthSummary(model.runtimeStatus?.health)}
                     >
@@ -262,6 +307,7 @@ export function ModelSettings() {
                       className="flex size-7 items-center justify-center rounded-md border bg-white hover:bg-muted"
                       onClick={() => {
                         void updateModel(model.id, {
+                          ...(editApiKey.trim() ? { apiKey: editApiKey.trim() } : {}),
                           baseUrl: editBaseUrl.trim() || undefined,
                           name: editName.trim() || model.name,
                           provider: editProvider,
@@ -288,6 +334,7 @@ export function ModelSettings() {
                     onClick={() => {
                       setEditingModelId(model.id);
                       setEditBaseUrl(model.baseUrl ?? "");
+                      setEditApiKey("");
                       setEditName(model.name);
                       setEditProvider(model.provider);
                     }}

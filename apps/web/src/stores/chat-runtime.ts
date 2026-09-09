@@ -239,10 +239,11 @@ export async function loadSessionWorkspace(
   }
 
   try {
-    const [messages, artifacts, agentRuns] = await Promise.all([
+    const [messages, artifacts, agentRuns, files] = await Promise.all([
       webAgentApi.listMessages(sessionId),
       webAgentApi.listArtifacts(sessionId),
       webAgentApi.listAgentRuns(sessionId),
+      webAgentApi.listFiles(sessionId),
     ]);
     const activeRun = agentRuns.find((run) => !isTerminalRunStatus(run.status));
     const hydratedMessages =
@@ -258,6 +259,7 @@ export async function loadSessionWorkspace(
         ...state.artifacts.filter((artifact) => artifact.sessionId !== sessionId),
         ...artifacts,
       ],
+      files: state.currentSessionId === sessionId ? files : state.files,
       error: undefined,
       messages: [
         ...state.messages.filter((message) => message.sessionId !== sessionId),

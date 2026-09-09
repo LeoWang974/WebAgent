@@ -12,6 +12,9 @@ from app.models.mixins import IdMixin, TimestampMixin
 
 class Conversation(IdMixin, TimestampMixin, Base):
     __tablename__ = "conversations"
+    __table_args__ = (
+        Index("ix_conversations_user_updated", "user_id", "updated_at"),
+    )
 
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     folder_id: Mapped[str | None] = mapped_column(

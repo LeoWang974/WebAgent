@@ -153,6 +153,21 @@ def test_manifest_finalization_allows_short_run_without_artifact_contract(tmp_pa
     assert manifest.required_artifact_types == []
 
 
+def test_manifest_finalization_preserves_existing_artifact_contract(tmp_path: Path):
+    recorder = ArtifactManifestRecorder(
+        tmp_path / "artifact-manifest.json",
+        run_id="run-required-preserved",
+        conversation_id="conversation-1",
+    )
+    recorder.set_required_artifact_types({"markdown_report", "html_page"})
+
+    manifest = recorder.finalize(failed=True, error="provider unavailable")
+
+    assert manifest.status == "failed"
+    assert manifest.required_artifact_types == ["html_page", "markdown_report"]
+    assert any("provider unavailable" in item for item in manifest.errors)
+
+
 def test_load_manifest_keeps_v2_compatibility(tmp_path: Path):
     path = tmp_path / "artifact-manifest.json"
     path.write_text(

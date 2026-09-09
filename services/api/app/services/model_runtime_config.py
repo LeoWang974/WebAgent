@@ -254,8 +254,14 @@ class ModelRuntimeConfigBuilder:
 
         result = await db.execute(
             select(ModelConfig)
-            .where(ModelConfig.user_id == user.id, ModelConfig.is_default.is_(True))
-            .order_by(ModelConfig.updated_at.desc())
+            .where(ModelConfig.user_id == user.id)
+            # A stale/unavailable default must not block a known-good model
+            # when callers omit model_id (for example, older clients).
+            .order_by(
+                ModelConfig.is_available.desc(),
+                ModelConfig.is_default.desc(),
+                ModelConfig.updated_at.desc(),
+            )
             .limit(1)
         )
         return result.scalar_one_or_none()

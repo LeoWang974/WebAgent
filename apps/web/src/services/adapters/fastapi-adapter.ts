@@ -45,6 +45,11 @@ export const fastApiAdapter: WebAgentApiAdapter = {
       method: "POST",
     });
   },
+  deleteFile(fileId: string) {
+    return apiClient<void>(`/api/files/${fileId}`, {
+      method: "DELETE",
+    });
+  },
   createSession(input: CreateSessionInput) {
     return apiClient<Session>("/api/sessions", {
       body: JSON.stringify({
@@ -87,7 +92,7 @@ export const fastApiAdapter: WebAgentApiAdapter = {
     });
   },
   downloadArtifact(artifactId: string) {
-    return apiClient<Blob>(`/api/artifacts/${artifactId}/download`);
+    return apiClient<Blob>(`/api/artifacts/${artifactId}/download`, { timeoutMs: 300_000 });
   },
   getCurrentUser() {
     return apiClient<User>("/api/auth/me");
@@ -246,14 +251,19 @@ export const fastApiAdapter: WebAgentApiAdapter = {
     let reconnectTimer: number | undefined;
     let controller: AbortController | undefined;
     let stopped = false;
+    let reconnectAttempt = 0;
     const shouldDispatchEvent = createSseEventDeduper();
 
     const scheduleReconnect = () => {
-      if (!stopped && reconnectTimer === undefined) {
+      if (!stopped && reconnectTimer === undefined && reconnectAttempt < 8) {
+        const delay = Math.min(30_000, 1_500 * 2 ** reconnectAttempt);
+        reconnectAttempt += 1;
         reconnectTimer = window.setTimeout(() => {
           reconnectTimer = undefined;
           void connect();
-        }, 1500);
+        }, delay);
+      } else if (reconnectAttempt >= 8) {
+        stopped = true;
       }
     };
 
@@ -289,8 +299,13 @@ export const fastApiAdapter: WebAgentApiAdapter = {
           signal: controller.signal,
         });
         if (!response.ok || !response.body) {
+          if ([401, 403, 404].includes(response.status)) {
+            stopped = true;
+            return;
+          }
           throw new Error(`Agent run event stream failed: ${response.status}`);
         }
+        reconnectAttempt = 0;
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -356,6 +371,7 @@ export const fastApiAdapter: WebAgentApiAdapter = {
     return apiClient<FileAsset>("/api/files", {
       body: formData,
       method: "POST",
+      timeoutMs: 120_000,
     });
   },
 };

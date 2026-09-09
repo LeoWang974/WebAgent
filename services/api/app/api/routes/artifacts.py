@@ -26,6 +26,7 @@ from app.api.dependencies import CurrentUser, DbSession
 from app.core.config import settings
 from app.models import Artifact, Conversation, ConversationShare, RunArtifact
 from app.services.artifact_path_utils import artifact_path_for_host
+from app.services.artifact_storage import artifact_storage_root
 from app.services.persistence import (
     get_conversation_or_404,
     require_owner,
@@ -85,11 +86,16 @@ def artifact_download_name(artifact: Artifact) -> str:
 
 def artifact_file_path(artifact: Artifact) -> Path | None:
     metadata = artifact.artifact_metadata or {}
+    storage_root = artifact_storage_root().resolve()
     for key in ("path", "originalPath"):
         raw_path = metadata.get(key)
         if not isinstance(raw_path, str) or not raw_path:
             continue
         path = normalize_artifact_path(raw_path)
+        try:
+            path.resolve().relative_to(storage_root)
+        except (OSError, ValueError):
+            continue
         if path.exists() and path.is_file():
             return path
     return None
@@ -180,6 +186,11 @@ def discover_deck_slide_paths(artifact: Artifact) -> list[Path]:
 
 def slide_content_from_path(path: Path) -> tuple[str, str] | None:
     suffix = path.suffix.lower()
+    try:
+        if path.stat().st_size > settings.artifact_preview_max_bytes:
+            return None
+    except OSError:
+        return None
     if suffix in HTML_SLIDE_SUFFIXES:
         try:
             return path.read_text(encoding="utf-8", errors="replace"), "text/html"
@@ -243,6 +254,7 @@ def dedupe_slide_artifacts(artifacts: list[Artifact]) -> list[Artifact]:
 async def list_artifacts(
     db: DbSession,
     current_user: CurrentUser,
+    limit: int = Query(default=500, ge=1, le=2000),
     session_id: str | None = Query(default=None, alias="sessionId"),
     session_id_snake: str | None = Query(default=None, alias="session_id"),
     run_id: str | None = Query(default=None, alias="runId"),
@@ -287,6 +299,7 @@ async def list_artifacts(
         .join(Conversation)
         .where(*filters)
         .order_by(Artifact.created_at.desc())
+        .limit(limit)
     )
     return [
         to_artifact(

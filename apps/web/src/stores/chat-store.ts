@@ -27,6 +27,7 @@ import type {
   AgentRun,
   AgentRunEvent,
   Artifact,
+  FileAsset,
   Message,
   ModelConfig,
   ConversationFolder,
@@ -35,10 +36,60 @@ import type {
   SkillKey,
 } from "@/types";
 
+function preferredModelId(models: ModelConfig[]) {
+  return (
+    models.find((model) => model.isDefault && model.isAvailable === true)?.id ??
+    models.find((model) => model.isAvailable === true)?.id ??
+    models.find((model) => model.isDefault)?.id ??
+    models[0]?.id
+  );
+}
+
+function isDefinitivelyUnavailable(model: ModelConfig | undefined) {
+  return (
+    model?.isAvailable === false &&
+    model.runtimeStatus?.status !== "degraded" &&
+    model.runtimeStatus?.transient !== true
+  );
+}
+
+function mergeModelStatus(
+  currentModels: ModelConfig[],
+  modelId: string,
+  updatedModel: ModelConfig,
+) {
+  const previousDefaultId = currentModels.find((model) => model.isDefault)?.id;
+  let models = currentModels.map((model) =>
+    model.id === modelId ? { ...model, ...updatedModel } : model,
+  );
+
+  // Keep the local default flags consistent when the backend automatically
+  // fails over from an unavailable default to a known-good model.
+  if (updatedModel.isDefault) {
+    models = models.map((model) => ({
+      ...model,
+      isDefault: model.id === updatedModel.id,
+    }));
+  } else if (
+    previousDefaultId === modelId &&
+    isDefinitivelyUnavailable(updatedModel) &&
+    models.some((model) => model.isAvailable === true)
+  ) {
+    const replacementId = preferredModelId(models);
+    models = models.map((model) => ({
+      ...model,
+      isDefault: model.id === replacementId,
+    }));
+  }
+
+  return models;
+}
+
 export interface ChatState {
   activeAgentRunId?: string;
   agentRuns: AgentRun[];
   artifacts: Artifact[];
+  files: FileAsset[];
   currentSessionId: string;
   error?: string;
   folders: ConversationFolder[];
@@ -60,6 +111,8 @@ export interface ChatState {
   applyAgentRunEvent: (event: AgentRunEvent) => void;
   createConversationFolder: (name: string) => Promise<void>;
   createSession: () => Promise<Session | undefined>;
+  uploadFile: (file: File) => Promise<FileAsset>;
+  deleteFile: (fileId: string) => Promise<void>;
   deleteArtifact: (artifactId: string) => Promise<void>;
   deleteConversationFolder: (folderId: string) => Promise<void>;
   deleteModel: (modelId: string) => Promise<void>;
@@ -94,6 +147,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   activeAgentRunId: undefined,
   agentRuns: [],
   artifacts: [],
+  files: [],
   currentSessionId: "",
   error: undefined,
   folders: [],
@@ -132,6 +186,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const session = await webAgentApi.createSession({});
       set((state) => ({
         currentSessionId: session.id,
+        files: [],
         selectedArtifactId: undefined,
         sessions: [session, ...state.sessions],
       }));
@@ -140,6 +195,40 @@ export const useChatStore = create<ChatState>((set, get) => ({
     } catch (error) {
       set({ error: error instanceof Error ? error.message : "Failed to create session." });
       return undefined;
+    }
+  },
+  uploadFile: async (file) => {
+    let sessionId = get().currentSessionId;
+    if (!sessionId) {
+      const session = await get().createSession();
+      sessionId = session?.id ?? "";
+    }
+    if (!sessionId) {
+      throw new Error("Create a conversation before uploading a file.");
+    }
+
+    try {
+      const uploaded = await webAgentApi.uploadFile({ file, sessionId });
+      set((state) => ({
+        error: undefined,
+        files:
+          state.currentSessionId === sessionId
+            ? [uploaded, ...state.files.filter((item) => item.id !== uploaded.id)]
+            : state.files,
+      }));
+      return uploaded;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to upload file.";
+      set({ error: message });
+      throw error instanceof Error ? error : new Error(message);
+    }
+  },
+  deleteFile: async (fileId) => {
+    try {
+      await webAgentApi.deleteFile(fileId);
+      set((state) => ({ files: state.files.filter((item) => item.id !== fileId) }));
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : "Failed to delete file." });
     }
   },
   createConversationFolder: async (name) => {
@@ -221,12 +310,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
         agentRuns: state.agentRuns.filter((run) => run.sessionId !== sessionId),
         artifacts: state.artifacts.filter((artifact) => artifact.sessionId !== sessionId),
         currentSessionId,
+        files: state.files.filter((file) => file.sessionId !== sessionId),
         messages: state.messages.filter((message) => message.sessionId !== sessionId),
         selectedArtifactId,
         sessions,
         switchingSessionId: state.switchingSessionId === sessionId ? undefined : state.switchingSessionId,
       };
     });
+    const nextSessionId = get().currentSessionId;
+    if (nextSessionId && nextSessionId !== sessionId) {
+      void loadSessionWorkspace(get, set, nextSessionId);
+    }
     return true;
   },
   deleteConversationFolder: async (folderId) => {
@@ -260,16 +354,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
         ? preferredSessionId
         : sessions[0]?.id ?? "";
       const modelConfigs = models;
-      const selectedModelId =
-        modelConfigs.find((model) => model.isDefault)?.id ??
-        modelConfigs[0]?.id ??
-        models.find((model) => model.isDefault)?.id ??
-        models[0]?.id;
+      const selectedModelId = preferredModelId(modelConfigs);
       set({
         artifacts: [],
         activeAgentRunId: undefined,
         agentRuns: [],
         currentSessionId,
+        files: [],
         folders,
         hydrated: true,
         loading: false,
@@ -324,6 +415,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       activeAgentRunId: undefined,
       agentRuns: [],
       artifacts: [],
+      files: [],
       currentSessionId: "",
       error: undefined,
       folders: [],
@@ -488,6 +580,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({
       activeAgentRunId: activeRun?.id,
       currentSessionId: sessionId,
+      files: [],
       messages:
         activeRun && !hasPendingAssistantMessage(get().messages, sessionId)
           ? [...get().messages, pendingMessageForRun(activeRun)]
@@ -606,37 +699,49 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ runtimeStatusRefreshing: true });
     const runtimeModels = get().models;
 
-    await Promise.all(
-      runtimeModels.map(async (model) => {
-        try {
-          const updatedModel = await settingsApi.testModelConnection(model.id);
-          set((state) => ({
-            models: state.models.map((item) =>
-              item.id === model.id ? { ...item, ...updatedModel } : item,
-            ),
-          }));
-        } catch (error) {
-          const message =
-            error instanceof Error ? error.message : "Runtime health check failed.";
-          set((state) => ({
-            models: state.models.map((item) =>
-              item.id === model.id
-                ? {
-                    ...item,
-                    isAvailable: false,
-                    runtimeStatus: {
-                      adapterKey: "hermes",
-                      message,
-                      ok: false,
-                      status: "unavailable",
-                    },
-                  }
-                : item,
-            ),
-          }));
-        }
-      }),
-    );
+    for (let index = 0; index < runtimeModels.length; index += 3) {
+      await Promise.all(
+        runtimeModels.slice(index, index + 3).map(async (model) => {
+          try {
+            const updatedModel = await settingsApi.testModelConnection(model.id);
+            set((state) => {
+              const models = mergeModelStatus(state.models, model.id, updatedModel);
+              const selectedModel = models.find((item) => item.id === state.selectedModelId);
+              return {
+                models,
+                selectedModelId:
+                  isDefinitivelyUnavailable(selectedModel)
+                    ? preferredModelId(models)
+                    : state.selectedModelId ?? preferredModelId(models),
+              };
+            });
+          } catch (error) {
+            const message =
+              error instanceof Error ? error.message : "Runtime health check failed.";
+            set((state) => {
+              const models = mergeModelStatus(state.models, model.id, {
+                ...model,
+                isAvailable: false,
+                runtimeStatus: {
+                  adapterKey: "hermes",
+                  message,
+                  ok: false,
+                  status: "unavailable",
+                },
+              });
+              const selectedModel = models.find((item) => item.id === state.selectedModelId);
+              return {
+                models,
+                selectedModelId:
+                  isDefinitivelyUnavailable(selectedModel)
+                    ? preferredModelId(models)
+                    : state.selectedModelId ?? preferredModelId(models),
+              };
+            });
+          }
+        }),
+      );
+    }
     set({
       runtimeStatusCheckedAt: new Date().toISOString(),
       runtimeStatusRefreshing: false,
@@ -646,11 +751,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ testingModelId: modelId });
     try {
       const updatedModel = await settingsApi.testModelConnection(modelId);
-      set((state) => ({
-        models: state.models.map((model) => (model.id === modelId ? updatedModel : model)),
-        runtimeStatusCheckedAt: new Date().toISOString(),
-        testingModelId: undefined,
-      }));
+      set((state) => {
+        const models = mergeModelStatus(state.models, modelId, updatedModel);
+        const selectedModel = models.find((model) => model.id === state.selectedModelId);
+        return {
+          models,
+          runtimeStatusCheckedAt: new Date().toISOString(),
+          selectedModelId:
+            isDefinitivelyUnavailable(selectedModel)
+              ? preferredModelId(models)
+              : state.selectedModelId ?? preferredModelId(models),
+          testingModelId: undefined,
+        };
+      });
     } catch (error) {
       set({
         error: error instanceof Error ? error.message : "Failed to test model.",

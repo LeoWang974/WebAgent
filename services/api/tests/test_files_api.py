@@ -130,3 +130,54 @@ async def test_file_upload_rejects_oversized_content(
         headers=auth_headers["owner"],
     )
     assert upload_response.status_code == 413
+
+
+@pytest.mark.asyncio
+async def test_file_delete_removes_owned_file(
+    api_client: AsyncClient,
+    auth_headers: dict[str, dict[str, str]],
+    db_sessionmaker: async_sessionmaker[AsyncSession],
+):
+    upload_response = await api_client.post(
+        "/api/files",
+        files={"file": ("remove-me.txt", b"temporary", "text/plain")},
+        headers=auth_headers["owner"],
+    )
+    assert upload_response.status_code == 200
+    file_id = upload_response.json()["id"]
+
+    async with db_sessionmaker() as db:
+        file_asset = await db.get(FileAsset, file_id)
+        assert file_asset is not None
+        storage_path = Path(file_asset.storage_key)
+        assert storage_path.exists()
+
+    delete_response = await api_client.delete(
+        f"/api/files/{file_id}",
+        headers=auth_headers["owner"],
+    )
+    assert delete_response.status_code == 204
+    assert not storage_path.exists()
+
+    async with db_sessionmaker() as db:
+        assert await db.get(FileAsset, file_id) is None
+
+
+@pytest.mark.asyncio
+async def test_file_delete_rejects_other_users_file(
+    api_client: AsyncClient,
+    auth_headers: dict[str, dict[str, str]],
+):
+    upload_response = await api_client.post(
+        "/api/files",
+        files={"file": ("private.txt", b"private", "text/plain")},
+        headers=auth_headers["owner"],
+    )
+    file_id = upload_response.json()["id"]
+
+    delete_response = await api_client.delete(
+        f"/api/files/{file_id}",
+        headers=auth_headers["stranger"],
+    )
+
+    assert delete_response.status_code == 404

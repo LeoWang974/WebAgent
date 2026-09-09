@@ -70,6 +70,9 @@ class RunArtifact(IdMixin, TimestampMixin, Base):
 
 class FileAsset(IdMixin, TimestampMixin, Base):
     __tablename__ = "files"
+    __table_args__ = (
+        Index("ix_files_conversation_created", "conversation_id", "created_at"),
+    )
 
     user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     conversation_id: Mapped[str | None] = mapped_column(

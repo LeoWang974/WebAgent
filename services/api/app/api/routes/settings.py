@@ -13,7 +13,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import TypeAdapter, ValidationError
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 
 from app import schemas
@@ -196,7 +196,10 @@ async def add_model(
         user_id=current_user.id,
         base_url=get_input_value(input_data, "baseUrl", "base_url"),
         encrypted_api_key=encrypt_model_secret(api_key),
-        is_available=True,
+        # A newly saved model has not been probed yet.  Do not advertise it as
+        # usable until the user (or the runtime refresh) receives a successful
+        # health-check response.
+        is_available=False,
         name=get_model_name_input(input_data, "Custom model"),
         provider=get_model_provider_input(input_data, "custom"),
         is_default=False,
@@ -221,6 +224,9 @@ async def update_model(
     api_key = get_input_value(input_data, "apiKey", "api_key")
     if api_key:
         model.encrypted_api_key = encrypt_model_secret(api_key)
+    # Changing any runtime setting invalidates the previous probe result.  It
+    # must be tested again before the model is shown as available.
+    model.is_available = False
     await db.commit()
     await db.refresh(model)
     return to_model_schema(model)
@@ -245,7 +251,11 @@ async def delete_model(
     if was_default:
         models = await list_user_models(db, current_user)
         if models:
-            models[0].is_default = True
+            # Prefer a model with a successful persisted probe when replacing
+            # a deleted default; otherwise keep the deterministic first row.
+            replacement = next((item for item in models if item.is_available), models[0])
+            for item in models:
+                item.is_default = item.id == replacement.id
             await db.commit()
     return None
 
@@ -277,7 +287,37 @@ async def test_model_connection(
 ) -> schemas.ModelConfig:
     model = await get_user_model(db, current_user, model_id)
     runtime_status = await check_runtime_model(db, current_user, model)
-    model.is_available = bool(runtime_status.get("ok"))
+    if runtime_status.get("ok"):
+        model.is_available = True
+    elif not runtime_status.get("transient"):
+        # Network timeouts and connection resets are inconclusive.  Preserve
+        # the last known availability instead of turning a usable model into a
+        # permanently unavailable one because a single probe was slow.
+        model.is_available = False
+
+    # Never leave an unavailable model as the default when another model has a
+    # known-good probe result.  Otherwise the composer keeps selecting the
+    # broken default even though a working model is visible in Settings.
+    if (
+        not model.is_available
+        and not runtime_status.get("transient")
+        and model.is_default
+    ):
+        replacement_result = await db.execute(
+            select(ModelConfig)
+            .where(
+                ModelConfig.user_id == current_user.id,
+                ModelConfig.id != model.id,
+                ModelConfig.is_available.is_(True),
+            )
+            .order_by(ModelConfig.created_at.asc())
+            .limit(1)
+        )
+        replacement = replacement_result.scalar_one_or_none()
+        if replacement is not None:
+            model.is_default = False
+            replacement.is_default = True
+
     await db.commit()
     await db.refresh(model)
     return to_model_schema(model, runtime_status=runtime_status)

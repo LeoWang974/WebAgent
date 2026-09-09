@@ -8,6 +8,7 @@
 
 from datetime import datetime, timedelta
 
+import httpx
 import pytest
 
 from app.integrations.hermes import AgentRunCreate, HermesAdapter
@@ -72,6 +73,48 @@ async def test_hermes_health_check_probes_configured_model(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_hermes_health_check_does_not_apply_sensenova_ca_to_other_providers(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        status_code = 200
+        is_success = True
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, _url, **_kwargs):
+            return FakeResponse()
+
+    monkeypatch.setattr(
+        "app.integrations.hermes.adapter.httpx.AsyncClient",
+        lambda **kwargs: (captured.update(client_kwargs=kwargs) or FakeClient()),
+    )
+    monkeypatch.setattr(
+        "app.integrations.hermes.adapter.settings.sensenova_ca_bundle",
+        "C:/certs/sensenova-ca.pem",
+    )
+    adapter = HermesAdapter(
+        model_runtime_config=ModelRuntimeConfig(
+            model_config_id="model-2",
+            provider="deepseek",
+            model_name="deepseek-chat",
+            base_url="https://api.deepseek.com/v1",
+            api_key="secret",
+        )
+    )
+
+    result = await adapter.health_check()
+
+    assert result["ok"] is True
+    assert captured["client_kwargs"]["verify"] is True
+
+
+@pytest.mark.asyncio
 async def test_hermes_health_check_reports_missing_credentials():
     adapter = HermesAdapter(
         model_runtime_config=ModelRuntimeConfig(
@@ -90,6 +133,39 @@ async def test_hermes_health_check_reports_missing_credentials():
         "status": "unconfigured",
         "message": "Model API key is not configured.",
     }
+
+
+@pytest.mark.asyncio
+async def test_hermes_health_check_marks_network_timeout_as_transient(monkeypatch):
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, _url, **_kwargs):
+            raise httpx.ReadTimeout("upstream is slow")
+
+    monkeypatch.setattr(
+        "app.integrations.hermes.adapter.httpx.AsyncClient",
+        lambda **_kwargs: FakeClient(),
+    )
+    adapter = HermesAdapter(
+        model_runtime_config=ModelRuntimeConfig(
+            model_config_id="model-3",
+            provider="sensenova",
+            model_name="sensenova-6.8-flash-lite",
+            base_url="https://token.sensenova.cn/v1",
+            api_key="secret",
+        )
+    )
+
+    result = await adapter.health_check()
+
+    assert result["ok"] is False
+    assert result["status"] == "degraded"
+    assert result["transient"] is True
 
 
 def test_hermes_chat_command_starts_in_run_workspace(tmp_path):

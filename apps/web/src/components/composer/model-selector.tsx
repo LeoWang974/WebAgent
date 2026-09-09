@@ -14,7 +14,9 @@ function optionLabel(model: ModelConfig, defaultLabel: string) {
   if (model.isDefault) {
     parts.push(`(${defaultLabel})`);
   }
-  if (model.isAvailable === false) {
+  if (model.runtimeStatus?.status === "degraded") {
+    parts.push("待确认");
+  } else if (model.runtimeStatus?.status === "unavailable" || model.isAvailable === false) {
     parts.push("不可用");
   }
   return parts.join(" ");

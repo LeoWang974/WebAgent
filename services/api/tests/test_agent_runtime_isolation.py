@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.config import settings
 from app.models import FileAsset
 from app.services.adapter_limiter import adapter_lock_scope
+from app.services.agent_run_executor import _append_uploaded_file_context
 from app.services.agent_run_workspace import stage_conversation_files
 from app.services.model_runtime_config import ModelRuntimeConfig
 from app.services.runtime_environment import (
@@ -33,6 +34,17 @@ from app.services.runtime_environment import (
 
 def test_safe_runtime_segment_strips_path_unsafe_characters():
     assert safe_runtime_segment("user/with\\slashes and spaces") == "user-with-slashes and spaces"
+
+
+def test_uploaded_file_context_lists_relative_workspace_paths(tmp_path: Path):
+    staged = [tmp_path / "context" / "sales.csv", tmp_path / "context" / "brief.md"]
+
+    prompt = _append_uploaded_file_context("Summarize these files", staged)
+
+    assert "Summarize these files" in prompt
+    assert "context/sales.csv" in prompt
+    assert "context/brief.md" in prompt
+    assert str(tmp_path) not in prompt
     assert safe_runtime_segment("../") == "user"
 
 

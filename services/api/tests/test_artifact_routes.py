@@ -1,11 +1,15 @@
 # File purpose: Verifies artifact list visibility and durable per-Run filtering contracts.
 # Main declarations: route tests cover ready-state filtering, developer diagnostics, admin access,
-# and RunArtifact ownership overrides.
+# RunArtifact ownership overrides, and filesystem path safety.
+
+from pathlib import Path
 
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.api.routes.artifacts import artifact_file_path
+from app.core.config import settings
 from app.models import AgentRun, Artifact, Conversation, RunArtifact
 
 
@@ -151,3 +155,24 @@ async def test_admin_can_list_ready_artifacts_from_private_conversation(
 
     assert response.status_code == 200
     assert [item["id"] for item in response.json()] == [artifact_id]
+
+
+def test_artifact_file_path_rejects_external_metadata_path(tmp_path: Path):
+    previous_root = settings.artifact_storage_root
+    settings.artifact_storage_root = str(tmp_path / "storage")
+    try:
+        external = tmp_path / "external" / "secret.md"
+        external.parent.mkdir(parents=True)
+        external.write_text("secret", encoding="utf-8")
+        artifact = Artifact(
+            id="artifact-1",
+            conversation_id="conversation-1",
+            type="markdown_report",
+            title="secret",
+            status="ready",
+            artifact_metadata={"path": str(external)},
+        )
+
+        assert artifact_file_path(artifact) is None
+    finally:
+        settings.artifact_storage_root = previous_root

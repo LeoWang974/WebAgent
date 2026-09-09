@@ -56,6 +56,8 @@ class Settings(BaseSettings):
     agent_run_overall_timeout_seconds: int = 4 * 60 * 60
     agent_run_event_poll_interval_seconds: float = 1.0
     upload_max_size_bytes: int = 25 * 1024 * 1024
+    artifact_preview_max_bytes: int = 8 * 1024 * 1024
+    artifact_discovery_max_files: int = 1000
     agent_run_queue_enabled: bool = True
     agent_run_queue_name: str = "agent-runs"
     agent_run_workspace_root: str = "runtime/agent-runs"

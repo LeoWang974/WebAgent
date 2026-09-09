@@ -91,12 +91,16 @@ class HermesAdapter:
             "max_tokens": 1,
             "temperature": 0,
         }
-        verify: bool | str = (
-            settings.sensenova_ca_bundle
-            or environ.get("SSL_CERT_FILE")
-            or environ.get("REQUESTS_CA_BUNDLE")
-            or True
-        )
+        # A SenseNova CA bundle is provider-specific. Applying it to every
+        # custom endpoint can make otherwise valid model connections fail.
+        verify: bool | str = True
+        if provider == "sensenova":
+            verify = (
+                settings.sensenova_ca_bundle
+                or environ.get("SSL_CERT_FILE")
+                or environ.get("REQUESTS_CA_BUNDLE")
+                or True
+            )
         try:
             async with httpx.AsyncClient(
                 timeout=settings.sensenova_timeout_seconds,
@@ -104,9 +108,11 @@ class HermesAdapter:
             ) as client:
                 response = await client.post(endpoint, headers=headers, json=payload)
         except httpx.HTTPError as error:
+            transient = isinstance(error, (httpx.TimeoutException, httpx.NetworkError))
             return {
                 "ok": False,
-                "status": "unavailable",
+                "status": "degraded" if transient else "unavailable",
+                "transient": transient,
                 "message": f"Model API request failed: {error.__class__.__name__}.",
             }
         if response.is_success:

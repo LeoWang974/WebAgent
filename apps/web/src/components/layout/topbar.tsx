@@ -29,7 +29,8 @@ export function Topbar() {
   const runtimeStatusCheckedAt = useChatStore((state) => state.runtimeStatusCheckedAt);
   const runtimeStatusRefreshing = useChatStore((state) => state.runtimeStatusRefreshing);
   const selectedModel = models.find((model) => model.id === selectedModelId);
-  const runtimeConnected = selectedModel?.isAvailable !== false;
+  const runtimeConnected =
+    selectedModel?.isAvailable === true || selectedModel?.runtimeStatus?.ok === true;
 
   function focusSessionSearch() {
     const shouldOpenDrawer = window.matchMedia("(max-width: 767px)").matches;

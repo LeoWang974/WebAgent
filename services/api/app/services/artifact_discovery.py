@@ -1044,10 +1044,14 @@ def discover_related_artifact_paths(
 
     related_paths: list[str] = []
     seen_paths: set[str] = set()
+    scanned_files = 0
     for directory in directories:
         if not directory.exists() or not directory.is_dir():
             continue
         for path in directory.rglob("*"):
+            scanned_files += 1
+            if scanned_files > settings.artifact_discovery_max_files:
+                break
             if _is_repo_runtime_temp_path(path):
                 continue
             if path.name.lower() in IGNORED_FILENAMES:
@@ -1067,6 +1071,8 @@ def discover_related_artifact_paths(
                 continue
             seen_paths.add(key)
             related_paths.append(str(path))
+        if scanned_files > settings.artifact_discovery_max_files:
+            break
 
     return related_paths
 
@@ -1080,12 +1086,16 @@ def discover_artifacts_since(
 ) -> list[schemas.Artifact]:
     since = _as_local_naive(since)
     discovered: list[schemas.Artifact] = []
+    scanned_files = 0
 
     for root in _candidate_roots():
         if not root.exists():
             continue
 
         for path in root.rglob("*"):
+            scanned_files += 1
+            if scanned_files > settings.artifact_discovery_max_files:
+                break
             if _is_repo_runtime_temp_path(path):
                 continue
             if path.suffix.lower() not in SUPPORTED_SUFFIXES:
@@ -1113,6 +1123,8 @@ def discover_artifacts_since(
             if artifact is None:
                 continue
             discovered.append(artifact)
+        if scanned_files > settings.artifact_discovery_max_files:
+            break
     discovered = dedupe_discovered_artifacts(discovered)
     discovered.sort(
         key=lambda artifact: str((artifact.metadata or {}).get("updatedAt", "")),

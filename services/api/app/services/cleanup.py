@@ -17,7 +17,8 @@ from pathlib import Path
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import AgentRun, AgentRunEvent, Artifact, Conversation
+from app.models import AgentRun, AgentRunEvent, Artifact, Conversation, FileAsset
+from app.services.file_storage import upload_storage_root
 from app.services.runtime_environment import runtime_root as configured_user_runtime_dir
 
 
@@ -27,6 +28,7 @@ class CleanupResult:
     orphan_artifacts_deleted: int = 0
     orphan_artifacts_unlinked: int = 0
     runtime_files_deleted: int = 0
+    global_files_deleted: int = 0
 
 
 def _repo_runtime_dir(repo_root: Path | None = None) -> Path:
@@ -155,6 +157,41 @@ async def cleanup_orphan_artifacts(db: AsyncSession) -> tuple[int, int]:
     return deleted, unlinked
 
 
+async def cleanup_expired_global_files(
+    db: AsyncSession,
+    *,
+    max_age_days: int = 30,
+) -> int:
+    """Remove user-global uploads that are no longer tied to a conversation."""
+    cutoff = datetime.now(UTC) - timedelta(days=max_age_days)
+    result = await db.execute(
+        select(FileAsset).where(
+            FileAsset.conversation_id.is_(None),
+            FileAsset.created_at < cutoff,
+        )
+    )
+    assets = list(result.scalars().all())
+    if not assets:
+        return 0
+
+    storage_root = upload_storage_root().resolve()
+    for asset in assets:
+        path = Path(asset.storage_key)
+        try:
+            path.resolve().relative_to(storage_root)
+        except (OSError, ValueError):
+            path = None
+        if path is not None:
+            try:
+                if path.is_file():
+                    await asyncio.to_thread(path.unlink)
+            except OSError:
+                continue
+        await db.delete(asset)
+    await db.commit()
+    return len(assets)
+
+
 async def cleanup_long_disconnected_runs(
     db: AsyncSession,
     *,
@@ -191,6 +228,7 @@ async def run_data_cleanup(
         repo_root=repo_root,
     )
     orphan_deleted, orphan_unlinked = await cleanup_orphan_artifacts(db)
+    global_files_deleted = await cleanup_expired_global_files(db)
     disconnected_deleted = await cleanup_long_disconnected_runs(
         db,
         max_age_days=disconnected_run_max_age_days,
@@ -200,4 +238,5 @@ async def run_data_cleanup(
         orphan_artifacts_deleted=orphan_deleted,
         orphan_artifacts_unlinked=orphan_unlinked,
         runtime_files_deleted=runtime_deleted,
+        global_files_deleted=global_files_deleted,
     )

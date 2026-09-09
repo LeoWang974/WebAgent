@@ -29,6 +29,16 @@ class RaisingHermesAdapter:
         raise RuntimeError("gateway timed out")
 
 
+class DegradedHermesAdapter:
+    async def health_check(self):
+        return {
+            "ok": False,
+            "status": "degraded",
+            "transient": True,
+            "message": "Model API request failed: ReadTimeout.",
+        }
+
+
 def make_model():
     return ModelConfig(
         base_url="https://token.sensenova.cn/v1",
@@ -91,3 +101,17 @@ async def test_runtime_model_reports_hermes_health_exception(monkeypatch):
     assert result["ok"] is False
     assert result["status"] == "unavailable"
     assert result["message"] == "gateway timed out"
+
+
+@pytest.mark.asyncio
+async def test_runtime_model_preserves_transient_health_state(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.agent_runs.create_hermes_adapter",
+        lambda *args, **kwargs: DegradedHermesAdapter(),
+    )
+
+    result = await check_runtime_model(SimpleNamespace(), SimpleNamespace(), make_model())
+
+    assert result["ok"] is False
+    assert result["status"] == "degraded"
+    assert result["transient"] is True

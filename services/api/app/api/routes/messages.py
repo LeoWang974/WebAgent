@@ -1,7 +1,7 @@
 # File purpose: Defines FastAPI endpoints for the messages API surface.
 # Main declarations: list_messages lists messages.
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from sqlalchemy import or_, select
 
 from app import schemas
@@ -16,6 +16,7 @@ router = APIRouter()
 async def list_messages(
     db: DbSession,
     current_user: CurrentUser,
+    limit: int = Query(default=500, ge=1, le=2000),
 ) -> list[schemas.Message]:
     result = await db.execute(
         select(Message)
@@ -29,6 +30,7 @@ async def list_messages(
                 & (ConversationShare.user_id == current_user.id),
             )
         )
-        .order_by(Message.created_at.asc())
+        .order_by(Message.created_at.desc(), Message.id.desc())
+        .limit(limit)
     )
-    return [to_message(item) for item in result.scalars().unique().all()]
+    return [to_message(item) for item in reversed(result.scalars().unique().all())]

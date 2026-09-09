@@ -119,6 +119,7 @@ export interface WebAgentApiAdapter {
   createConversationFolder(name: string): Promise<ConversationFolder>;
   createSession(input: CreateSessionInput): Promise<Session>;
   createUser(input: AdminUserCreateInput): Promise<User>;
+  deleteFile(fileId: string): Promise<void>;
   deleteArtifact(artifactId: string): Promise<void>;
   deleteSession(sessionId: string): Promise<void>;
   deleteConversationFolder(folderId: string): Promise<void>;

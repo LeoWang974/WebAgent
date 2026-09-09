@@ -14,6 +14,7 @@ from app.core.config import settings
 from app.integrations.hermes.process_registry import terminate_registered_run_process
 from app.services.agent_run_dispatcher import enqueue_agent_run_message
 from app.services.agent_runs import (
+    MAX_RUN_EVENTS_IN_SUMMARY,
     TERMINAL_RUN_STATUSES,
     AgentRunEventCursor,
     create_hermes_adapter,
@@ -54,7 +55,10 @@ async def create_agent_run(
         schemas.MessageCreate(content=input_data.content, model_id=input_data.model_id),
         current_user,
     )
-    return to_agent_run_schema(run, await list_run_events(db, run.id))
+    return to_agent_run_schema(
+        run,
+        await list_run_events(db, run.id, limit=MAX_RUN_EVENTS_IN_SUMMARY),
+    )
 
 
 @router.get("/{run_id}", response_model=schemas.AgentRun)
@@ -64,7 +68,7 @@ async def get_agent_run(
     current_user: CurrentUser,
 ) -> schemas.AgentRun:
     run = await get_db_agent_run(db, run_id, current_user)
-    events = await list_run_events(db, run_id)
+    events = await list_run_events(db, run_id, limit=MAX_RUN_EVENTS_IN_SUMMARY)
     return to_agent_run_schema(run, events)
 
 
@@ -77,7 +81,7 @@ async def cancel_agent_run(
     run = await get_db_agent_run(db, run_id, current_user)
     await get_conversation_or_404(db, run.conversation_id, current_user, require_write=True)
     if run.status in TERMINAL_RUN_STATUSES:
-        events = await list_run_events(db, run_id)
+        events = await list_run_events(db, run_id, limit=MAX_RUN_EVENTS_IN_SUMMARY)
         return to_agent_run_schema(run, events)
     adapter_cancelled = False
     adapter_error = None
@@ -121,7 +125,7 @@ async def cancel_agent_run(
     }
     await db.commit()
     await db.refresh(event)
-    events = await list_run_events(db, run_id)
+    events = await list_run_events(db, run_id, limit=MAX_RUN_EVENTS_IN_SUMMARY)
     if event not in events:
         events.append(event)
     return to_agent_run_schema(run, events)

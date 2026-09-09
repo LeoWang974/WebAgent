@@ -94,3 +94,26 @@ async def test_user_configured_optional_model_is_preserved(
         models = await list_user_models(db, user)
 
         assert "DeepSeek" in {model.name for model in models}
+
+
+@pytest.mark.asyncio
+async def test_model_catalog_comparison_is_case_insensitive(
+    db_sessionmaker: async_sessionmaker[AsyncSession],
+    seeded_users: dict[str, User],
+):
+    user = seeded_users["owner"]
+    async with db_sessionmaker() as db:
+        db.add(
+            ModelConfig(
+                user_id=user.id,
+                name="sensenova",
+                provider="sensenova",
+                is_default=True,
+                is_available=True,
+            )
+        )
+        await db.commit()
+
+        models = await list_user_models(db, user)
+
+        assert sum(model.name.lower() == "sensenova" for model in models) == 1

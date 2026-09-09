@@ -11,8 +11,52 @@ import { EmptyConversation } from "./empty-conversation";
 import { UserMessage } from "./user-message";
 import { useChatStore, useUiStore } from "@/stores";
 import { ArrowDown } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "@/lib/i18n";
+import { selectAgentStatusRun } from "./agent-status-model";
+import type { Artifact, Message } from "@/types";
+
+interface MessageRowProps {
+  message: Message;
+  deliveredAt: string;
+  waitDurationMs?: number;
+  artifacts: Artifact[];
+  onArtifactClick: (artifactId: string) => void;
+}
+
+const MessageRow = memo(function MessageRow({
+  message,
+  deliveredAt,
+  waitDurationMs,
+  artifacts,
+  onArtifactClick,
+}: MessageRowProps) {
+  return (
+    <div className="space-y-2">
+      {message.role === "user" ? (
+        <UserMessage content={message.content} createdAt={message.createdAt} />
+      ) : (
+        <AssistantMessage
+          content={message.content}
+          createdAt={deliveredAt}
+          isPending={message.isPending}
+          pendingLabel={message.pendingLabel}
+          waitDurationMs={waitDurationMs}
+          waitStartedAt={message.waitStartedAt}
+        />
+      )}
+      {artifacts.map((artifact) => (
+        <ArtifactCard
+          key={artifact.id}
+          onClick={() => onArtifactClick(artifact.id)}
+          status={artifact.status}
+          title={artifact.title}
+          type={artifact.type}
+        />
+      ))}
+    </div>
+  );
+});
 
 export function MessageList() {
   const { t } = useI18n();
@@ -26,14 +70,49 @@ export function MessageList() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const [nearBottom, setNearBottom] = useState(true);
-  const messages = Array.from(
-    new Map(
-      allMessages
-        .filter((message) => message.sessionId === currentSessionId)
-        .map((message) => [message.id, message]),
-    ).values(),
+  const messages = useMemo(
+    () =>
+      Array.from(
+        new Map(
+          allMessages
+            .filter((message) => message.sessionId === currentSessionId)
+            .map((message) => [message.id, message]),
+        ).values(),
+      ),
+    [allMessages, currentSessionId],
   );
-  const currentRun = agentRuns.find((run) => run.sessionId === currentSessionId);
+  const sessionRuns = useMemo(
+    () => agentRuns.filter((run) => run.sessionId === currentSessionId),
+    [agentRuns, currentSessionId],
+  );
+  const currentRun = selectAgentStatusRun(agentRuns, currentSessionId);
+  const deliveredAtByMessageId = useMemo(() => {
+    const deliveredAt = new Map<string, string>();
+    for (const run of sessionRuns) {
+      for (const step of run.steps) {
+        deliveredAt.set(step.id, step.timestamp);
+      }
+    }
+    return deliveredAt;
+  }, [sessionRuns]);
+  const artifactsByMessageId = useMemo(() => {
+    const byMessageId = new Map<string, Artifact[]>();
+    const artifactsById = new Map(artifacts.map((artifact) => [artifact.id, artifact]));
+    for (const message of messages) {
+      const messageArtifacts = (message.artifactIds ?? [])
+        .map((artifactId) => artifactsById.get(artifactId))
+        .filter((artifact): artifact is Artifact => Boolean(artifact));
+      byMessageId.set(message.id, messageArtifacts);
+    }
+    return byMessageId;
+  }, [artifacts, messages]);
+  const handleArtifactClick = useCallback(
+    (artifactId: string) => {
+      selectArtifact(artifactId);
+      openArtifactDrawer();
+    },
+    [openArtifactDrawer, selectArtifact],
+  );
   const lastMessageId = messages.at(-1)?.id;
 
   function scrollToBottom(behavior: ScrollBehavior = "smooth") {
@@ -71,7 +150,8 @@ export function MessageList() {
 
         const distanceToBottom =
           element.scrollHeight - element.scrollTop - element.clientHeight;
-        setNearBottom(distanceToBottom < 96);
+        const nextNearBottom = distanceToBottom < 96;
+        setNearBottom((previous) => (previous === nextNearBottom ? previous : nextNearBottom));
       }}
       ref={scrollRef}
     >
@@ -84,48 +164,22 @@ export function MessageList() {
           const waitStartedAt = message.waitStartedAt ?? previousMessage?.createdAt;
           const deliveredAt =
             message.role === "assistant"
-              ? agentRuns
-                  .filter((run) => run.sessionId === message.sessionId)
-                  .flatMap((run) => run.steps)
-                  .find((step) => step.id === message.id)?.timestamp ?? message.createdAt
+              ? deliveredAtByMessageId.get(message.id) ?? message.createdAt
               : message.createdAt;
           const waitDurationMs = waitStartedAt
             ? new Date(deliveredAt).getTime() - new Date(waitStartedAt).getTime()
             : undefined;
-          const messageArtifacts = artifacts.filter((artifact) =>
-            message.artifactIds?.includes(artifact.id),
-          );
+          const messageArtifacts = artifactsByMessageId.get(message.id) ?? [];
 
           return (
-            <div className="space-y-2" key={message.id}>
-              {message.role === "user" ? (
-                <UserMessage
-                  content={message.content}
-                  createdAt={message.createdAt}
-                />
-              ) : (
-                <AssistantMessage
-                  content={message.content}
-                  createdAt={deliveredAt}
-                  isPending={message.isPending}
-                  pendingLabel={message.pendingLabel}
-                  waitDurationMs={waitDurationMs}
-                  waitStartedAt={message.waitStartedAt}
-                />
-              )}
-              {messageArtifacts.map((artifact) => (
-                <ArtifactCard
-                  key={artifact.id}
-                  onClick={() => {
-                    selectArtifact(artifact.id);
-                    openArtifactDrawer();
-                  }}
-                  status={artifact.status}
-                  title={artifact.title}
-                  type={artifact.type}
-                />
-              ))}
-            </div>
+            <MessageRow
+              artifacts={messageArtifacts}
+              deliveredAt={deliveredAt}
+              key={message.id}
+              message={message}
+              onArtifactClick={handleArtifactClick}
+              waitDurationMs={waitDurationMs}
+            />
           );
         })}
         <div ref={bottomRef} />

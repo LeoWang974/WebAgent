@@ -164,6 +164,8 @@ async def check_runtime_model(
         }
 
     ok = bool(health.get("ok")) if isinstance(health, dict) else False
+    transient = bool(health.get("transient")) if isinstance(health, dict) else False
+    health_status = health.get("status") if isinstance(health, dict) else None
     health_message = (
         health.get("message")
         if isinstance(health, dict) and isinstance(health.get("message"), str)
@@ -172,9 +174,16 @@ async def check_runtime_model(
     return {
         "adapterKey": "hermes",
         "ok": ok,
-        "status": "connected" if ok else "unavailable",
+        "status": (
+            "connected"
+            if ok
+            else "degraded"
+            if transient or health_status == "degraded"
+            else "unavailable"
+        ),
         "message": health_message
         or ("Runtime health check passed." if ok else "Runtime health check failed."),
+        "transient": transient,
         "health": health,
     }
 
@@ -261,10 +270,14 @@ async def ensure_default_models(db: AsyncSession, user: User) -> None:
         legacy_sensenova.provider = "sensenova"
         changed = True
 
-    existing_by_name = {model.name: model for model in existing_models}
+    # Built-in labels are case-insensitive; normalize before comparing so a
+    # legacy "sensenova" row does not create a second SenseNova default.
+    existing_by_name = {
+        (model.name or "").strip().lower(): model for model in existing_models
+    }
 
     for item in DEFAULT_MODELS:
-        if item["name"] not in existing_by_name:
+        if str(item["name"]).strip().lower() not in existing_by_name:
             model = ModelConfig(user_id=user.id, **item)
             db.add(model)
             existing_models.append(model)

@@ -11,7 +11,7 @@ import { useI18n } from "@/lib/i18n";
 
 interface FileUploadButtonProps {
   disabled?: boolean;
-  onUpload: (file: File) => Promise<void>;
+  onUpload: (file: File) => Promise<unknown>;
 }
 
 export function FileUploadButton({ disabled = false, onUpload }: FileUploadButtonProps) {
@@ -41,7 +41,7 @@ export function FileUploadButton({ disabled = false, onUpload }: FileUploadButto
   return (
     <>
       <input
-        accept=".csv,.json,.pdf,.ppt,.pptx,.xls,.xlsx,.gif,.jpeg,.jpg,.png,.webp,.htm,.html,.md,.markdown,.txt"
+        accept=".csv,.json,.log,.pdf,.ppt,.pptx,.xls,.xlsx,.gif,.jpeg,.jpg,.png,.webp,.htm,.html,.md,.markdown,.txt"
         className="hidden"
         onChange={handleChange}
         ref={inputRef}
@@ -49,6 +49,7 @@ export function FileUploadButton({ disabled = false, onUpload }: FileUploadButto
       />
       <button
         aria-busy={uploading}
+        aria-label={error ? `${t("upload")}: ${error}` : t("upload")}
         className="flex h-8 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
         disabled={disabled || uploading}
         onClick={() => inputRef.current?.click()}

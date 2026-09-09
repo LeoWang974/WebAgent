@@ -4,7 +4,7 @@
 # to_agent_run_schema converts agent run schema; to_agent_run_event_schema converts agent run
 # event schema; list_run_events lists run events; list_new_run_events lists new run events;
 # is_stale_run checks stale run; mark_stale_agent_runs handles mark stale agent runs;
-# _latest_run_event handles latest run event; create_db_agent_run creates db agent run;
+# create_db_agent_run creates db agent run;
 # record_db_agent_run_event handles record db agent run event; touch_db_agent_run handles touch db
 # agent run; finish_db_agent_run handles finish db agent run; get_db_agent_run retrieves db agent
 # run; list_agent_runs_for_user lists agent runs for user.
@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import schemas
@@ -29,6 +29,7 @@ from app.services.runtime_environment import build_user_runtime_context
 ACTIVE_RUN_STATUSES = {"queued", "running", "tool_calling", "rendering"}
 TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled", "disconnected"}
 STALE_RUN_GRACE_SECONDS = 30 * 60
+MAX_RUN_EVENTS_IN_SUMMARY = 200
 
 
 @dataclass
@@ -159,11 +160,21 @@ def to_agent_run_event_schema(event: DBAgentRunEvent, run: DBAgentRun) -> schema
     )
 
 
-async def list_run_events(db: AsyncSession, run_id: str) -> list[DBAgentRunEvent]:
+async def list_run_events(
+    db: AsyncSession,
+    run_id: str,
+    *,
+    limit: int | None = None,
+) -> list[DBAgentRunEvent]:
+    query = select(DBAgentRunEvent).where(DBAgentRunEvent.run_id == run_id)
+    if limit is not None:
+        query = query.order_by(
+            DBAgentRunEvent.created_at.desc(), DBAgentRunEvent.id.desc()
+        ).limit(limit)
+        result = await db.execute(query)
+        return list(reversed(result.scalars().all()))
     result = await db.execute(
-        select(DBAgentRunEvent)
-        .where(DBAgentRunEvent.run_id == run_id)
-        .order_by(DBAgentRunEvent.created_at.asc())
+        query.order_by(DBAgentRunEvent.created_at.asc(), DBAgentRunEvent.id.asc())
     )
     return list(result.scalars().all())
 
@@ -189,6 +200,7 @@ async def list_new_run_events(
         )
     result = await db.execute(
         query.order_by(DBAgentRunEvent.created_at.asc(), DBAgentRunEvent.id.asc())
+        .limit(MAX_RUN_EVENTS_IN_SUMMARY)
     )
     return cursor.consume(list(result.scalars().all()))
 
@@ -233,8 +245,30 @@ async def mark_stale_agent_runs(
     if not stale_runs:
         return
 
+    stale_run_ids = [run.id for run in stale_runs]
+    latest_event_rank = (
+        select(
+            DBAgentRunEvent.id.label("event_id"),
+            func.row_number()
+            .over(
+                partition_by=DBAgentRunEvent.run_id,
+                order_by=(DBAgentRunEvent.created_at.desc(), DBAgentRunEvent.id.desc()),
+            )
+            .label("event_rank"),
+        )
+        .where(DBAgentRunEvent.run_id.in_(stale_run_ids))
+        .subquery()
+    )
+    latest_events_result = await db.execute(
+        select(DBAgentRunEvent).join(
+            latest_event_rank,
+            DBAgentRunEvent.id == latest_event_rank.c.event_id,
+        ).where(latest_event_rank.c.event_rank == 1)
+    )
+    latest_events = {event.run_id: event for event in latest_events_result.scalars().all()}
+
     for run in stale_runs:
-        latest_event = await _latest_run_event(db, run.id)
+        latest_event = latest_events.get(run.id)
         latest_payload = latest_event.payload if latest_event is not None else {}
         latest_step = latest_payload.get("step") if isinstance(latest_payload, dict) else {}
         latest_label = (
@@ -299,16 +333,6 @@ async def mark_stale_agent_runs(
             )
         )
     await db.commit()
-
-
-async def _latest_run_event(db: AsyncSession, run_id: str) -> DBAgentRunEvent | None:
-    result = await db.execute(
-        select(DBAgentRunEvent)
-        .where(DBAgentRunEvent.run_id == run_id)
-        .order_by(DBAgentRunEvent.created_at.desc())
-        .limit(1)
-    )
-    return result.scalar_one_or_none()
 
 
 async def create_db_agent_run(
@@ -505,10 +529,24 @@ async def list_agent_runs_for_user(
     if not runs:
         return []
 
+    event_rank = (
+        select(
+            DBAgentRunEvent.id.label("event_id"),
+            func.row_number()
+            .over(
+                partition_by=DBAgentRunEvent.run_id,
+                order_by=(DBAgentRunEvent.created_at.desc(), DBAgentRunEvent.id.desc()),
+            )
+            .label("event_rank"),
+        )
+        .where(DBAgentRunEvent.run_id.in_([run.id for run in runs]))
+        .subquery()
+    )
     events_result = await db.execute(
         select(DBAgentRunEvent)
-        .where(DBAgentRunEvent.run_id.in_([run.id for run in runs]))
-        .order_by(DBAgentRunEvent.created_at.asc())
+        .join(event_rank, DBAgentRunEvent.id == event_rank.c.event_id)
+        .where(event_rank.c.event_rank <= MAX_RUN_EVENTS_IN_SUMMARY)
+        .order_by(DBAgentRunEvent.created_at.asc(), DBAgentRunEvent.id.asc())
     )
     events_by_run: dict[str, list[DBAgentRunEvent]] = {}
     for event in events_result.scalars().all():
