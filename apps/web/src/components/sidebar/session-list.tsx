@@ -115,6 +115,7 @@ export function SessionList() {
   const loading = useChatStore((state) => state.loading);
   const currentSessionId = useChatStore((state) => state.currentSessionId);
   const currentUserId = useUserStore((state) => state.user?.id);
+  const currentUserRole = useUserStore((state) => state.user?.role);
   const deleteSession = useChatStore((state) => state.deleteSession);
   const switchingSessionId = useChatStore((state) => state.switchingSessionId);
   const selectSession = useChatStore((state) => state.selectSession);
@@ -175,10 +176,13 @@ export function SessionList() {
   }
 
   function renderSession(session: Session) {
+    const isOwner = !session.ownerId || session.ownerId === currentUserId;
+    const isAdmin = currentUserRole === "admin";
     return (
       <SessionItem
         active={session.id === currentSessionId}
-        canManage={!session.ownerId || session.ownerId === currentUserId}
+        canManage={isOwner || isAdmin}
+        canMoveToFolder={isOwner}
         folderId={session.folderId}
         folders={folders}
         href={`/app/chat/${session.id}`}

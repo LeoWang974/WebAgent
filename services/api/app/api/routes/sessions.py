@@ -38,7 +38,7 @@ from app.services.file_storage import remove_conversation_storage
 from app.services.persistence import (
     get_conversation_or_404,
     get_user_by_email,
-    require_owner,
+    require_owner_or_admin,
     to_artifact,
     to_file_asset,
     to_message,
@@ -148,8 +148,18 @@ async def update_session(
     db: DbSession,
     current_user: CurrentUser,
 ) -> schemas.Session:
-    conversation = await get_conversation_or_404(db, session_id, current_user, require_write=True)
-    require_owner(conversation, current_user)
+    conversation = await get_conversation_or_404(db, session_id, current_user)
+    require_owner_or_admin(conversation, current_user)
+    is_owner = conversation.user_id == current_user.id
+    if not is_owner and (
+        input_data.visibility is not None
+        or input_data.share_with_email
+        or input_data.unshare_user_id
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Only the conversation owner can change access settings",
+        )
 
     if input_data.pinned is not None:
         conversation.pinned = input_data.pinned
@@ -205,7 +215,8 @@ async def delete_session(
     current_user: CurrentUser,
 ) -> None:
     conversation = await get_conversation_or_404(db, session_id, current_user)
-    require_owner(conversation, current_user)
+    require_owner_or_admin(conversation, current_user)
+    owner_id = conversation.user_id
     active_run_result = await db.execute(
         select(AgentRun.id)
         .where(
@@ -231,7 +242,7 @@ async def delete_session(
     await db.execute(delete(AgentRun).where(AgentRun.conversation_id == session_id))
     await db.delete(conversation)
     await db.commit()
-    await asyncio.to_thread(remove_conversation_storage, current_user.id, session_id)
+    await asyncio.to_thread(remove_conversation_storage, owner_id, session_id)
     return None
 
 

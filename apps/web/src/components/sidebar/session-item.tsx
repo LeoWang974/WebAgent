@@ -17,6 +17,7 @@ import type { ConversationFolder } from "@/types/session";
 interface SessionItemProps {
   active?: boolean;
   canManage?: boolean;
+  canMoveToFolder?: boolean;
   folderId?: string;
   folders?: ConversationFolder[];
   href?: string;
@@ -35,6 +36,7 @@ interface SessionItemProps {
 export function SessionItem({
   active = false,
   canManage = true,
+  canMoveToFolder = canManage,
   folderId,
   folders = [],
   href,
@@ -155,7 +157,7 @@ export function SessionItem({
           >
             <Pencil className="size-3.5" />
           </button>
-          {folders.length > 0 ? (
+          {canMoveToFolder && folders.length > 0 ? (
             <select
               aria-label="移动到目录"
               className={`h-6 max-w-8 rounded-md border bg-white text-[11px] text-muted-foreground opacity-0 outline-none group-hover:max-w-[92px] group-hover:opacity-100 ${

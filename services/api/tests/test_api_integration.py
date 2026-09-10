@@ -468,7 +468,7 @@ async def test_session_permissions_and_share_access(
 
 
 @pytest.mark.asyncio
-async def test_admin_can_view_all_private_sessions(
+async def test_admin_can_view_and_manage_all_private_sessions(
     api_client: AsyncClient,
     auth_headers: dict[str, dict[str, str]],
 ):
@@ -500,11 +500,34 @@ async def test_admin_can_view_all_private_sessions(
     )
     assert admin_messages_response.status_code == 200
 
+    admin_update_response = await api_client.patch(
+        f"/api/sessions/{session_id}",
+        json={"title": "Admin renamed", "pinned": True},
+        headers=auth_headers["admin"],
+    )
+    assert admin_update_response.status_code == 200
+    assert admin_update_response.json()["title"] == "Admin renamed"
+    assert admin_update_response.json()["pinned"] is True
+
+    admin_access_update_response = await api_client.patch(
+        f"/api/sessions/{session_id}",
+        json={"visibility": "public"},
+        headers=auth_headers["admin"],
+    )
+    assert admin_access_update_response.status_code == 403
+
     admin_delete_response = await api_client.delete(
         f"/api/sessions/{session_id}",
         headers=auth_headers["admin"],
     )
-    assert admin_delete_response.status_code == 403
+    assert admin_delete_response.status_code == 204
+
+    admin_list_after_delete = await api_client.get(
+        "/api/sessions",
+        headers=auth_headers["admin"],
+    )
+    assert admin_list_after_delete.status_code == 200
+    assert all(session["id"] != session_id for session in admin_list_after_delete.json())
 
 
 @pytest.mark.asyncio

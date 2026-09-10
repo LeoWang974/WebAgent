@@ -52,6 +52,7 @@ export function ChatHeader() {
   const accessLabel = visibility === "public" ? "公开" : visibility === "shared" ? "共享" : "私有";
   const isSharing = sharingSessionId === currentSessionId;
   const isOwner = Boolean(currentSession && currentSession.ownerId === currentUser?.id);
+  const canRename = isOwner || currentUser?.role === "admin";
   const shareCount = currentSession?.sharedWith?.length ?? 0;
   const shareUrl =
     currentSession && typeof window !== "undefined"
@@ -152,7 +153,7 @@ export function ChatHeader() {
               <h1 className="truncate text-sm font-semibold">
                 {currentSession?.title ?? t("defaultConversation")}
               </h1>
-              {currentSession && isOwner ? (
+              {currentSession && canRename ? (
                 <button
                   aria-label="重命名会话"
                   className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-[#f2f2ef] hover:text-foreground"

@@ -339,3 +339,9 @@ async def get_conversation_or_404(
 def require_owner(conversation: Conversation, current_user: User) -> None:
     if conversation.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Owner access required")
+
+
+def require_owner_or_admin(conversation: Conversation, current_user: User) -> None:
+    """Allow administrators to manage session metadata and lifecycle."""
+    if conversation.user_id != current_user.id and current_user.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Owner access required")
