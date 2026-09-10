@@ -103,4 +103,9 @@ export const fastApiSettingsAdapter: SettingsApiAdapter = {
       method: "POST",
     });
   },
+  updateSkills() {
+    return apiClient<Skill[]>("/api/settings/skills/update", {
+      method: "POST",
+    });
+  },
 };

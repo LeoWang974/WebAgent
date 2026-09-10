@@ -52,4 +52,5 @@ export interface SettingsApiAdapter {
     skillKey: SkillKey,
     direction: "rollback" | "update",
   ): Promise<Skill[]>;
+  updateSkills(): Promise<Skill[]>;
 }

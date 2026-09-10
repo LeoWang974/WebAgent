@@ -93,3 +93,18 @@ async def test_update_sensenova_skills_syncs_local_repo_to_runtime_targets(tmp_p
     assert (hermes_dir / "sn-deep-research" / "SKILL.md").read_text(
         encoding="utf-8"
     ) == "research skill"
+
+    stale_file = hermes_dir / "legacy-skill" / "old.txt"
+    stale_file.parent.mkdir()
+    stale_file.write_text("stale", encoding="utf-8")
+
+    await update_sensenova_skills(
+        repo_url=str(repo),
+        cache_dir=str(cache_dir),
+        source_subdir=".",
+        branch=None,
+        hermes_skills_dir=str(hermes_dir),
+        wsl_distribution="Ubuntu",
+    )
+
+    assert not stale_file.exists()

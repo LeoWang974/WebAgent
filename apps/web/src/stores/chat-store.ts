@@ -106,6 +106,7 @@ export interface ChatState {
   runtimeStatusCheckedAt?: string;
   runtimeStatusRefreshing: boolean;
   testingModelId?: string;
+  updatingSkills: boolean;
   updatingSkillKey?: SkillKey;
   addModel: (input: Omit<ModelConfig, "id" | "isDefault" | "isAvailable">) => Promise<void>;
   applyAgentRunEvent: (event: AgentRunEvent) => void;
@@ -140,6 +141,7 @@ export interface ChatState {
   toggleSkillEnabled: (skillKey: SkillKey) => Promise<void>;
   unshareSession: (sessionId: string, userId: string) => Promise<void>;
   updateModel: (modelId: string, input: Partial<ModelConfig>) => Promise<void>;
+  updateSkills: () => Promise<void>;
   updateSkillVersion: (skillKey: SkillKey, direction: "update" | "rollback") => Promise<void>;
 }
 
@@ -164,6 +166,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   skills: [],
   switchingSessionId: undefined,
   testingModelId: undefined,
+  updatingSkills: false,
   updatingSkillKey: undefined,
   applyAgentRunEvent: (event) => {
     set((state) => applyAgentRunEventState(state, event));
@@ -370,6 +373,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         selectedModelId,
         sessions,
         skills,
+        updatingSkills: false,
       });
       if (currentSessionId) {
         await loadSessionWorkspace(get, set, currentSessionId);
@@ -432,6 +436,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       skills: [],
       switchingSessionId: undefined,
       testingModelId: undefined,
+      updatingSkills: false,
       updatingSkillKey: undefined,
     });
   },
@@ -824,6 +829,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }));
     } catch (error) {
       set({ error: error instanceof Error ? error.message : "Failed to update model." });
+    }
+  },
+  updateSkills: async () => {
+    set({ error: undefined, updatingSkills: true });
+    try {
+      const skills = await settingsApi.updateSkills();
+      set({ skills, updatingSkills: false });
+    } catch (error) {
+      set({
+        error: error instanceof Error ? error.message : "Failed to update skills.",
+        updatingSkills: false,
+      });
+      throw error;
     }
   },
   updateSkillVersion: async (skillKey, direction) => {

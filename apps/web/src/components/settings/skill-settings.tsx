@@ -5,17 +5,29 @@
 
 "use client";
 
-import { Loader2, RotateCcw, Star } from "lucide-react";
+import { Check, Loader2, RefreshCw } from "lucide-react";
+import { useState } from "react";
 import { useChatStore } from "@/stores";
 import { useI18n } from "@/lib/i18n";
 
 export function SkillSettings() {
   const { t } = useI18n();
-  const setDefaultSkill = useChatStore((state) => state.setDefaultSkill);
   const skills = useChatStore((state) => state.skills);
-  const toggleSkillEnabled = useChatStore((state) => state.toggleSkillEnabled);
-  const updateSkillVersion = useChatStore((state) => state.updateSkillVersion);
-  const updatingSkillKey = useChatStore((state) => state.updatingSkillKey);
+  const updateSkills = useChatStore((state) => state.updateSkills);
+  const updatingSkills = useChatStore((state) => state.updatingSkills);
+  const [updateMessage, setUpdateMessage] = useState<string | undefined>();
+
+  const enabledCount = skills.filter((skill) => skill.enabled).length;
+
+  const handleUpdate = async () => {
+    setUpdateMessage(undefined);
+    try {
+      await updateSkills();
+      setUpdateMessage(t("skillsUpdated"));
+    } catch {
+      setUpdateMessage(t("skillsUpdateFailed"));
+    }
+  };
 
   return (
     <section className="space-y-5">
@@ -26,84 +38,44 @@ export function SkillSettings() {
         </p>
       </div>
 
-      <div className="space-y-2">
-        {skills.map((skill) => {
-          const updating = updatingSkillKey === skill.key;
-
-          return (
-            <div className="rounded-lg border bg-[#fbfbfa] p-3" key={skill.key}>
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="truncate text-sm font-semibold">
-                      {skill.name}
-                    </span>
-                    {skill.isDefault ? (
-                      <span className="rounded-full border bg-white px-2 py-0.5 text-[11px] text-muted-foreground">
-                        {t("defaultSkill")}
-                      </span>
-                    ) : null}
-                    <span
-                      className={`rounded-full border bg-white px-2 py-0.5 text-[11px] ${
-                        skill.enabled ? "text-emerald-700" : "text-muted-foreground"
-                      }`}
-                    >
-                      {skill.enabled ? t("enabled") : t("disabled")}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                    {skill.description}
-                  </p>
-                  <div className="mt-2 text-xs text-muted-foreground">
-                    v{skill.version}
-                    {skill.lastUpdatedAt
-                      ? ` / ${new Date(skill.lastUpdatedAt).toLocaleDateString()}`
-                      : ""}
-                  </div>
-                </div>
-
-                <div className="flex shrink-0 flex-wrap justify-end gap-1">
-                  <button
-                    className="rounded-md border bg-white px-2 py-1 text-xs hover:bg-muted disabled:opacity-40"
-                    disabled={!skill.enabled || skill.isDefault}
-                    onClick={() => void setDefaultSkill(skill.key)}
-                    type="button"
-                  >
-                    <Star className="mr-1 inline size-3" />
-                    {t("setDefault")}
-                  </button>
-                  <button
-                    className="rounded-md border bg-white px-2 py-1 text-xs hover:bg-muted"
-                    onClick={() => void toggleSkillEnabled(skill.key)}
-                    type="button"
-                  >
-                    {skill.enabled ? t("disable") : t("enable")}
-                  </button>
-                  <button
-                    className="rounded-md border bg-white px-2 py-1 text-xs hover:bg-muted disabled:opacity-40"
-                    disabled={updating}
-                    onClick={() => void updateSkillVersion(skill.key, "update")}
-                    type="button"
-                  >
-                    {updating ? (
-                      <Loader2 className="mr-1 inline size-3 animate-spin" />
-                    ) : null}
-                    {t("newVersion")}
-                  </button>
-                  <button
-                    className="rounded-md border bg-white px-2 py-1 text-xs hover:bg-muted disabled:opacity-40"
-                    disabled={updating}
-                    onClick={() => void updateSkillVersion(skill.key, "rollback")}
-                    type="button"
-                  >
-                    <RotateCcw className="mr-1 inline size-3" />
-                    {t("rollback")}
-                  </button>
-                </div>
-              </div>
+      <div className="rounded-lg border bg-[#fbfbfa] p-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="truncate text-sm font-semibold">SenseNova Skills</span>
+              <span className="rounded-full border bg-white px-2 py-0.5 text-[11px] text-emerald-700">
+                {enabledCount}/{skills.length} {t("enabled")}
+              </span>
             </div>
-          );
-        })}
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              {t("skillsBundleDescription")}
+            </p>
+            <div className="mt-2 text-xs text-muted-foreground">
+              {t("installedSkills")}: {skills.length}
+            </div>
+            {updateMessage ? (
+              <p className="mt-2 flex items-center gap-1 text-xs text-emerald-700">
+                <Check className="size-3" />
+                {updateMessage}
+              </p>
+            ) : null}
+          </div>
+
+          <button
+            aria-label={t("updateSkills")}
+            className="shrink-0 rounded-md border bg-white px-2 py-1 text-xs hover:bg-muted disabled:opacity-40"
+            disabled={updatingSkills}
+            onClick={() => void handleUpdate()}
+            type="button"
+          >
+            {updatingSkills ? (
+              <Loader2 className="mr-1 inline size-3 animate-spin" />
+            ) : (
+              <RefreshCw className="mr-1 inline size-3" />
+            )}
+            {updatingSkills ? t("updatingSkills") : t("updateSkills")}
+          </button>
+        </div>
       </div>
     </section>
   );

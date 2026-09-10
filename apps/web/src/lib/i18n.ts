@@ -205,7 +205,14 @@ export const translations = {
     skillAdmin: "Skill \u7ba1\u7406",
     skillManagement: "Skill \u7ba1\u7406",
     skillSettingsDescription:
-      "\u7ba1\u7406 skill \u542f\u7528\u72b6\u6001\u3001\u7248\u672c\u548c\u9ed8\u8ba4\u5de5\u4f5c\u6d41\u3002",
+      "\u7edf\u4e00\u7ba1\u7406 SenseNova Skills \u5305\uff0c\u5e76\u4ece GitHub \u66f4\u65b0\u5df2\u5b89\u88c5\u5185\u5bb9\u3002",
+    skillsBundleDescription:
+      "\u5305\u542b\u5f53\u524d\u5df2\u5b89\u88c5\u7684 SenseNova skills\uff0c\u66f4\u65b0\u65f6\u4f1a\u8986\u76d6\u65e7\u5185\u5bb9\u3002",
+    installedSkills: "\u5df2\u5b89\u88c5\u6570",
+    updateSkills: "\u66f4\u65b0",
+    updatingSkills: "\u66f4\u65b0\u4e2d",
+    skillsUpdated: "Skills \u5df2\u66f4\u65b0",
+    skillsUpdateFailed: "Skills \u66f4\u65b0\u5931\u8d25",
     skills: "\u6280\u80fd",
     dataAndContext: "\u6570\u636e\u4e0e\u4e0a\u4e0b\u6587",
     dataSettingsDescription:
@@ -439,7 +446,14 @@ export const translations = {
     skillAdmin: "Skill admin",
     skillManagement: "Skill management",
     skillSettingsDescription:
-      "Manage skill availability, versions, and default workflows.",
+      "Manage the SenseNova Skills bundle and update installed content from GitHub.",
+    skillsBundleDescription:
+      "Contains the installed SenseNova skills. Updating replaces the previous content.",
+    installedSkills: "Installed skills",
+    updateSkills: "Update",
+    updatingSkills: "Updating",
+    skillsUpdated: "Skills updated",
+    skillsUpdateFailed: "Skills update failed",
     skills: "Skills",
     dataAndContext: "Data and context",
     dataSettingsDescription:

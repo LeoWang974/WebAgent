@@ -9,6 +9,7 @@
 # default skill; toggle_skill_enabled handles toggle skill enabled; update_skill_version updates
 # skill version.
 
+import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -40,9 +41,11 @@ from app.services.settings_service import (
     to_model_schema,
     to_skill_schema,
 )
+from app.services.skills_update_scheduler import run_configured_skills_update
 
 router = APIRouter()
 MODEL_PROVIDER_ADAPTER = TypeAdapter(ModelProvider)
+logger = logging.getLogger(__name__)
 
 def get_input_value(input_data: dict[str, Any], camel_key: str, snake_key: str, default=None):
     if camel_key in input_data:
@@ -338,6 +341,25 @@ async def set_default_skill(
     for skill in skills:
         skill.is_default = skill.key == skill_key
     await db.commit()
+    skills = await list_skill_configs(db)
+    return [to_skill_schema(item) for item in skills]
+
+
+@router.post("/skills/update", response_model=list[schemas.Skill])
+async def update_skills(
+    db: DbSession,
+    _current_user: CurrentUser,
+) -> list[schemas.Skill]:
+    """Refresh the single SenseNova skills bundle from its configured Git repo."""
+    try:
+        await run_configured_skills_update()
+    except Exception as error:
+        logger.exception("SenseNova skills update failed")
+        raise HTTPException(
+            status_code=502,
+            detail="SenseNova skills update failed",
+        ) from error
+
     skills = await list_skill_configs(db)
     return [to_skill_schema(item) for item in skills]
 
