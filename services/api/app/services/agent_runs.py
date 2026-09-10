@@ -11,6 +11,7 @@
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+import asyncio
 
 from fastapi import HTTPException
 from sqlalchemy import and_, func, or_, select
@@ -19,10 +20,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import schemas
 from app.core.config import settings
 from app.integrations.hermes import HermesAdapter
+from app.integrations.hermes.process_registry import terminate_registered_run_process
 from app.models import AgentRun as DBAgentRun
 from app.models import AgentRunEvent as DBAgentRunEvent
 from app.models import Conversation, ConversationShare, User
 from app.services.model_runtime_config import ModelRuntimeConfig
+from app.services.model_runtime_config import model_runtime_config_builder
 from app.services.persistence import get_conversation_or_404
 from app.services.runtime_environment import build_user_runtime_context
 
@@ -477,6 +480,97 @@ async def finish_db_agent_run(
         },
         _refresh_run=False,
     )
+
+
+async def cancel_db_agent_run(
+    db: AsyncSession,
+    run: DBAgentRun,
+    *,
+    cancel_user: User | None = None,
+) -> DBAgentRunEvent:
+    if run.status in TERMINAL_RUN_STATUSES:
+        events = await list_run_events(db, run.id, limit=MAX_RUN_EVENTS_IN_SUMMARY)
+        if events:
+            return events[-1]
+        event = await record_db_agent_run_event(
+            db,
+            run,
+            event_type=run.status,
+            label=f"Run already terminal: {run.status}",
+            status=run.status,
+            progress=run.progress,
+            step_status="completed" if run.status == "completed" else "failed",
+            payload={"requestedStatus": "cancelled", "transitionIgnored": True},
+        )
+        await db.refresh(run)
+        return event
+
+    conversation = await db.get(Conversation, run.conversation_id)
+    if conversation is None:
+        await finish_db_agent_run(db, run, status="cancelled", label="Conversation missing")
+        events = await list_run_events(db, run.id, limit=1)
+        if events:
+            return events[0]
+        return await record_db_agent_run_event(
+            db,
+            run,
+            event_type="cancelled",
+            label="Conversation missing",
+            status="cancelled",
+            payload={"error": "Conversation missing"},
+            _refresh_run=False,
+        )
+
+    adapter_cancelled = False
+    adapter_error = None
+    try:
+        adapter_cancelled = await terminate_registered_run_process(run.id)
+    except Exception as error:
+        adapter_error = str(error)
+
+    user = cancel_user
+    if user is None:
+        user = await db.get(User, conversation.user_id)
+    if user is not None:
+        model_runtime_config = model_runtime_config_builder.build_for_run(run)
+        adapter = None
+        try:
+            adapter = create_hermes_adapter(
+                user,
+                conversation_id=conversation.id,
+                run_id=run.id,
+                model_runtime_config=model_runtime_config,
+            )
+        except Exception as error:
+            adapter_error = str(error) if adapter_error is None else adapter_error
+        if adapter is not None:
+            try:
+                await adapter.cancel_run(run.id)
+                adapter_cancelled = True
+            except Exception as error:
+                adapter_error = str(error)
+
+    try:
+        await asyncio.sleep(1)
+        adapter_cancelled = await terminate_registered_run_process(run.id) or adapter_cancelled
+    except Exception as error:
+        adapter_error = str(error) if adapter_error is None else adapter_error
+
+    event = await finish_db_agent_run(
+        db,
+        run,
+        status="cancelled",
+        label="Agent run cancelled",
+    )
+    event.payload = {
+        **(event.payload or {}),
+        "adapterKey": run.adapter_key,
+        "adapterCancelled": adapter_cancelled,
+        "adapterError": adapter_error,
+    }
+    await db.refresh(event)
+    await db.refresh(run)
+    return event
 
 
 async def get_db_agent_run(

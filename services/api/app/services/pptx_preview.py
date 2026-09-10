@@ -53,17 +53,44 @@ def _cached_slide_paths(cache_dir: Path) -> list[Path]:
 
 def _soffice_candidates() -> list[Path]:
     configured = settings.libreoffice_path.strip() if settings.libreoffice_path else ""
-    candidates = [Path(configured)] if configured else []
+    candidates: list[Path] = []
+    seen: set[str] = set()
+
+    def _add(candidate: Path | str) -> None:
+        path = Path(candidate).expanduser()
+        path = path.resolve()
+        key = str(path).casefold()
+        if key in seen:
+            return
+        seen.add(key)
+        candidates.append(path)
+
+    if configured:
+        configured_path = Path(configured).expanduser()
+        _add(configured_path)
+        if configured_path.is_dir():
+            _add(configured_path / "soffice")
+            _add(configured_path / "soffice.bin")
+            _add(configured_path / "soffice.com")
+        else:
+            configured_dir = configured_path.parent
+            if configured_dir != configured_path:
+                _add(configured_dir / "soffice")
+                _add(configured_dir / "soffice.bin")
+                _add(configured_dir / "soffice.com")
+
     for command in ("soffice", "libreoffice"):
         resolved = shutil.which(command)
         if resolved:
-            candidates.append(Path(resolved))
+            _add(Path(resolved))
     if os.name == "nt":
         for environment_name in ("PROGRAMFILES", "PROGRAMFILES(X86)"):
             program_files = os.environ.get(environment_name)
             if program_files:
-                candidates.append(Path(program_files) / "LibreOffice" / "program" / "soffice.com")
-                candidates.append(Path(program_files) / "LibreOffice" / "program" / "soffice.exe")
+                base = Path(program_files) / "LibreOffice" / "program"
+                _add(base / "soffice.com")
+                _add(base / "soffice.exe")
+                _add(base / "soffice.bin")
     return candidates
 
 
@@ -75,8 +102,8 @@ def find_soffice() -> Path | None:
 
 
 def _convert_pptx_to_pdf(pptx_path: Path, work_dir: Path) -> Path:
-    soffice = find_soffice()
-    if soffice is None:
+    candidates = _soffice_candidates()
+    if not candidates:
         raise PptxPreviewError(
             "LibreOffice is not installed. Install LibreOffice Impress or set LIBREOFFICE_PATH."
         )
@@ -88,43 +115,56 @@ def _convert_pptx_to_pdf(pptx_path: Path, work_dir: Path) -> Path:
     profile_dir.mkdir()
     shutil.copy2(pptx_path, input_path)
     profile_url = profile_dir.resolve().as_uri()
+    attempts: list[str] = []
+    last_exception: Exception | None = None
 
-    command = [
-        str(soffice),
-        f"-env:UserInstallation={profile_url}",
-        "--headless",
-        "--nologo",
-        "--nodefault",
-        "--nofirststartwizard",
-        "--convert-to",
-        "pdf",
-        "--outdir",
-        str(output_dir),
-        str(input_path),
-    ]
-    environment = os.environ.copy()
-    environment.setdefault("SAL_USE_VCLPLUGIN", "svp")
-    try:
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            check=False,
-            env=environment,
-            text=True,
-            timeout=settings.pptx_preview_timeout_seconds,
-        )
-    except subprocess.TimeoutExpired as error:
-        raise PptxPreviewError(
-            f"LibreOffice did not finish within {settings.pptx_preview_timeout_seconds} seconds."
-        ) from error
-    except OSError as error:
-        raise PptxPreviewError(f"LibreOffice could not be started: {error}") from error
+    for soffice in candidates:
+        if not soffice.is_file():
+            continue
+        command = [
+            str(soffice),
+            f"-env:UserInstallation={profile_url}",
+            "--headless",
+            "--nologo",
+            "--nodefault",
+            "--nofirststartwizard",
+            "--convert-to",
+            "pdf",
+            "--outdir",
+            str(output_dir),
+            str(input_path),
+        ]
+        environment = os.environ.copy()
+        environment.setdefault("SAL_USE_VCLPLUGIN", "svp")
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                check=False,
+                env=environment,
+                text=True,
+                timeout=settings.pptx_preview_timeout_seconds,
+            )
+        except subprocess.TimeoutExpired as error:
+            attempts.append(f"{soffice}: timeout after {settings.pptx_preview_timeout_seconds}s")
+            last_exception = error
+            continue
+        except OSError as error:
+            attempts.append(f"{soffice}: cannot start ({error})")
+            last_exception = error
+            continue
 
-    pdf_path = output_dir / "presentation.pdf"
-    if result.returncode != 0 or not pdf_path.is_file():
-        diagnostic = (result.stderr or result.stdout or "no converter output").strip()
-        raise PptxPreviewError(f"LibreOffice conversion failed: {diagnostic[-500:]}")
-    return pdf_path
+        pdf_path = output_dir / "presentation.pdf"
+        if result.returncode == 0 and pdf_path.is_file():
+            return pdf_path
+
+        detail = (result.stderr or result.stdout or "no converter output").strip()
+        attempts.append(f"{soffice}: rc={result.returncode}; {detail[-400:]}")
+
+    details = "; ".join(attempts) if attempts else "no valid soffice binary available"
+    if last_exception is not None and "timeout" in details:
+        raise PptxPreviewError(f"LibreOffice conversion failed: {details}") from last_exception
+    raise PptxPreviewError(f"LibreOffice conversion failed: {details}")
 
 
 def _render_pdf_to_pngs(pdf_path: Path, output_dir: Path) -> list[Path]:

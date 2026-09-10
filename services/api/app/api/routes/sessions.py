@@ -27,6 +27,7 @@ from app.models import (
     Message,
 )
 from app.services.agent_runs import ACTIVE_RUN_STATUSES
+from app.services.agent_runs import cancel_db_agent_run
 from app.services.conversation_folders import (
     create_user_folder,
     delete_user_folder,
@@ -217,19 +218,24 @@ async def delete_session(
     conversation = await get_conversation_or_404(db, session_id, current_user)
     require_owner_or_admin(conversation, current_user)
     owner_id = conversation.user_id
-    active_run_result = await db.execute(
-        select(AgentRun.id)
+    runs_result = await db.execute(
+        select(AgentRun)
         .where(
             AgentRun.conversation_id == session_id,
             AgentRun.status.in_(ACTIVE_RUN_STATUSES),
         )
-        .limit(1)
     )
-    if active_run_result.scalar_one_or_none() is not None:
-        raise HTTPException(
-            status_code=409,
-            detail="Stop the active Agent Run before deleting this conversation.",
-        )
+    active_runs = list(runs_result.scalars().all())
+    for run in active_runs:
+        try:
+            await cancel_db_agent_run(db, run)
+        except Exception:
+            logger.exception(
+                "Failed to auto-cancel active Agent Run before deleting session: "
+                "session_id=%s run_id=%s",
+                session_id,
+                run.id,
+            )
     run_ids_result = await db.execute(
         select(AgentRun.id).where(AgentRun.conversation_id == session_id)
     )
